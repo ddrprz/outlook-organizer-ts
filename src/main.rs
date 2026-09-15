@@ -1,4 +1,5 @@
 mod app;
+mod backend;
 mod ui;
 
 use std::{io, time::Duration};
@@ -12,8 +13,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     Frame, Terminal,
 };
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use app::{AppState, RoutingGranularity, TransferMode, WizardStep};
+use backend::{messages::BackendMessage, runner::BackendRunner};
 use ui::{
     footer::render_footer,
     header::render_header,
@@ -33,23 +36,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut state = AppState::new();
+    let (tx, mut rx): (mpsc::UnboundedSender<BackendMessage>, UnboundedReceiver<BackendMessage>) = mpsc::unbounded_channel();
+    let mut worker_child: Option<tokio::process::Child> = None;
 
     // Event Loop Reactivo de Ultra Bajo Overhead (Sin busy-loop, CPU < 1%)
     while !state.should_quit {
-        terminal.draw(|f| draw_ui(f, &state))?;
-
-        // Simulación de avance en segundo plano si está en ejecución
-        if state.step == WizardStep::Execution && !state.progress.graceful_cancelling {
-            if state.progress.current_pst_items < state.progress.current_pst_total {
-                state.progress.current_pst_items += 5;
-                state.progress.global_items_processed += 5;
-                state.progress.imported_count += 5;
-                state.progress.speed_mps = 24.5;
-                state.progress.eta_seconds = (state.progress.global_items_total - state.progress.global_items_processed) / 25;
-            } else {
-                state.step = WizardStep::Completion;
+        // Consumir mensajes asíncronos de telemetría de PowerShell
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                BackendMessage::Progress {
+                    pst_name,
+                    item_current,
+                    item_total,
+                    speed_mps,
+                    eta_seconds,
+                    ..
+                } => {
+                    state.progress.current_pst_name = pst_name;
+                    state.progress.current_pst_items = item_current;
+                    state.progress.current_pst_total = item_total;
+                    state.progress.global_items_processed = item_current;
+                    state.progress.global_items_total = item_total;
+                    state.progress.speed_mps = speed_mps;
+                    state.progress.eta_seconds = eta_seconds;
+                }
+                BackendMessage::Log { message, .. } => {
+                    state.log_event(message);
+                }
+                BackendMessage::Throttling { active, .. } => {
+                    state.progress.throttling_active = active;
+                }
+                BackendMessage::Finished {
+                    status,
+                    imported,
+                    duplicates,
+                    errors,
+                } => {
+                    state.progress.imported_count = imported;
+                    state.progress.duplicates_skipped = duplicates;
+                    state.progress.error_count = errors;
+                    state.log_event(format!("[FIN] Operación finalizada con estado: {}", status));
+                    state.step = WizardStep::Completion;
+                }
             }
         }
+
+        terminal.draw(|f| draw_ui(f, &state))?;
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
@@ -147,7 +179,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ => handle_navigation_keys(&mut state, key.code),
                     },
                     WizardStep::Summary => match key.code {
-                        KeyCode::Enter => state.next_step(),
+                        KeyCode::Enter => {
+                            state.next_step(); // Pasa a WizardStep::Execution
+                            state.log_event("[SISTEMA] Iniciando subproceso PowerShell MAPI...".to_string());
+                            match BackendRunner::spawn_worker(tx.clone()) {
+                                Ok(child) => {
+                                    worker_child = Some(child);
+                                }
+                                Err(e) => {
+                                    state.log_event(format!("[ERROR] No se pudo iniciar PowerShell: {}", e));
+                                }
+                            }
+                        }
                         KeyCode::Esc | KeyCode::Backspace => state.prev_step(),
                         KeyCode::Char('q') | KeyCode::Char('Q') => state.should_quit = true,
                         _ => {}
@@ -155,7 +198,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     WizardStep::Execution => match key.code {
                         KeyCode::Esc | KeyCode::Char('q') => {
                             state.progress.graceful_cancelling = true;
-                            state.log_event("[SISTEMA] Solicitud de parada segura recibida. Desmontando archivo PST...".to_string());
+                            state.log_event("[SISTEMA] Solicitud de parada segura recibida. Notificando a PowerShell...".to_string());
+                            if let Some(ref mut child) = worker_child {
+                                if let Some(ref mut stdin) = child.stdin {
+                                    use tokio::io::AsyncWriteExt;
+                                    let _ = stdin.write_all(b"abort\n").await;
+                                }
+                            }
                         }
                         _ => {}
                     },
