@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "analyzing-outlook-pst-for-email-forensics": {
+      "source": "mukul975/anthropic-cybersecurity-skills",
+      "sourceType": "github",
+      "skillPath": "skills/analyzing-outlook-pst-for-email-forensics/SKILL.md",
+      "computedHash": "ee01048390386deb8f3d79e33d237b9428c1ab4af39ca94e59cd7a1b4f094a22"
+    },
+    "domain-cli": {
+      "source": "actionbook/rust-skills",
+      "sourceType": "github",
+      "skillPath": "skills/domain-cli/SKILL.md",
+      "computedHash": "557d21b48b4db0065febb7d3db526da8d5f4fe4495da9575c26cb9279f3769cd"
+    },
+    "outlook-email-export": {
+      "source": "raandree/copilotatelier",
+      "sourceType": "github",
+      "skillPath": "skills/outlook-email-export/SKILL.md",
+      "computedHash": "9a2005ff321b36c97ad985266821399681e5c2db2e5241b2cee4c3b5b93986b3"
+    },
+    "ratatui-tui": {
+      "source": "blacktop/dotfiles",
+      "sourceType": "github",
+      "skillPath": "ai/skills/ratatui-tui/SKILL.md",
+      "computedHash": "f5d8ce70215428eafd9bf767e2dbb5eebe9867da02a6ccb55c0051fd18d98770"
+    },
+    "rust-async-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/systems-programming/skills/rust-async-patterns/SKILL.md",
+      "computedHash": "9203b9abc8238c578887994730421879778720184b027859fecda3f76d31ab05"
+    },
+    "tui-design": {
+      "source": "hyperb1iss/hyperskills",
+      "sourceType": "github",
+      "skillPath": "skills/tui-design/SKILL.md",
+      "computedHash": "2e3d87d55f744a46891c90f916e17560d792b9f0527cffcecb4e308ad99c456e"
+    }
+  }
+}
