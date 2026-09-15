@@ -1,5 +1,6 @@
 mod app;
 mod backend;
+mod report;
 mod ui;
 
 use std::{io, time::Duration};
@@ -17,6 +18,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use app::{AppState, RoutingGranularity, TransferMode, WizardStep};
 use backend::{messages::BackendMessage, runner::BackendRunner};
+use report::{html::generate_html_report, json::generate_audit_json};
 use ui::{
     footer::render_footer,
     header::render_header,
@@ -76,6 +78,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.progress.duplicates_skipped = duplicates;
                     state.progress.error_count = errors;
                     state.log_event(format!("[FIN] Operación finalizada con estado: {}", status));
+
+                    // Auditoría JSON automática (solo si es .exe de producción)
+                    if let Ok(Some(path)) = generate_audit_json(&state, &status) {
+                        state.log_event(format!("[AUDITORÍA] JSON guardado en: {}", path.display()));
+                    }
+
                     state.step = WizardStep::Completion;
                 }
             }
@@ -213,7 +221,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.should_quit = true;
                         }
                         KeyCode::Char('h') | KeyCode::Char('H') => {
-                            state.log_event("[REPORTE] Generando informe visual HTML en .\\logs...".to_string());
+                            match generate_html_report(&state, None) {
+                                Ok(path) => {
+                                    state.log_event(format!("[INFORME HTML] Generado exitosamente en: {}", path.display()));
+                                }
+                                Err(e) => {
+                                    state.log_event(format!("[ERROR] Fallo al generar HTML: {}", e));
+                                }
+                            }
                         }
                         _ => {}
                     },
