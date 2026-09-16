@@ -99,10 +99,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Span::styled("Navegar fila   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[Espacio] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled("Marcar/Desmarcar   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[E] ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Explorar Carpetas/Disco   ", Style::default().fg(Theme::BRAND_PRIMARY)),
         Span::styled("[A] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Marcar todos   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Todos   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[N] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Desmarcar todos", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Ninguno", Style::default().fg(Theme::TEXT_MUTED)),
     ]);
     f.render_widget(Paragraph::new(help_line).alignment(Alignment::Center), chunks[2]);
 }

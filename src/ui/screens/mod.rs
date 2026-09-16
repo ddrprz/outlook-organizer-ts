@@ -1,6 +1,7 @@
 pub mod completion;
 pub mod deduplication;
 pub mod execution;
+pub mod explorer;
 pub mod filters;
 pub mod folders_mode;
 pub mod mailbox;

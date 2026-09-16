@@ -3,7 +3,11 @@ mod backend;
 mod report;
 mod ui;
 
-use std::{io, time::Duration};
+use std::{
+    io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -16,14 +20,14 @@ use ratatui::{
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
-use app::{AppState, RoutingGranularity, TransferMode, WizardStep};
+use app::{AppState, ExplorerItemType, RoutingGranularity, TransferMode, WizardStep};
 use backend::{messages::BackendMessage, runner::BackendRunner};
 use report::{html::generate_html_report, json::generate_audit_json};
 use ui::{
     footer::render_footer,
     header::render_header,
     screens::{
-        completion, deduplication, execution, filters, folders_mode, mailbox, pst_source,
+        completion, deduplication, execution, explorer, filters, folders_mode, mailbox, pst_source,
         routing, summary, welcome,
     },
 };
@@ -160,11 +164,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 KeyCode::Char('1') => {
                                     state.welcome_menu_idx = 0;
-                                    state.next_step();
+                                    start_import_or_explore(&mut state);
                                 }
                                 KeyCode::Char('2') => {
                                     state.welcome_menu_idx = 1;
-                                    state.step = WizardStep::PstSource;
+                                    open_file_explorer(&mut state);
                                 }
                                 KeyCode::Char('3') | KeyCode::Char('p') | KeyCode::Char('P') => {
                                     state.welcome_menu_idx = 2;
@@ -174,8 +178,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     state.should_quit = true;
                                 }
                                 KeyCode::Enter => match state.welcome_menu_idx {
-                                    0 => state.next_step(),
-                                    1 => state.step = WizardStep::PstSource,
+                                    0 => start_import_or_explore(&mut state),
+                                    1 => open_file_explorer(&mut state),
                                     2 => state.is_editing_profile = true,
                                     3 => state.should_quit = true,
                                     _ => {}
@@ -186,6 +190,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 _ => {}
                             }
                         }
+                    },
+                    WizardStep::FileExplorer => match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if state.explorer.selected_idx > 0 {
+                                state.explorer.selected_idx -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if state.explorer.selected_idx + 1 < state.explorer.entries.len() {
+                                state.explorer.selected_idx += 1;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            state.explorer.navigate_into_selected();
+                        }
+                        KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+                            state.explorer.navigate_up();
+                        }
+                        KeyCode::Char(' ') => {
+                            if let Some(entry) = state.explorer.entries.get_mut(state.explorer.selected_idx) {
+                                if entry.item_type == ExplorerItemType::PstFile {
+                                    entry.selected = !entry.selected;
+                                }
+                            }
+                        }
+                        KeyCode::Char('c') | KeyCode::Char('C') => {
+                            let psts = state.explorer.collect_selected_psts();
+                            if !psts.is_empty() {
+                                state.discovered_psts = psts;
+                                state.pst_scan_path = state.explorer.current_path.to_string_lossy().to_string();
+                                state.selected_pst_table_idx = 0;
+                                state.step = WizardStep::PstSource;
+                            } else if !state.explorer.is_drives_view && state.explorer.current_path.exists() {
+                                state.discovered_psts = Vec::new();
+                                state.pst_scan_path = state.explorer.current_path.to_string_lossy().to_string();
+                                state.selected_pst_table_idx = 0;
+                                state.step = WizardStep::PstSource;
+                            }
+                        }
+                        KeyCode::Char('d') | KeyCode::Char('D') => {
+                            state.explorer.is_drives_view = true;
+                            state.explorer.current_path = PathBuf::new();
+                            state.explorer.refresh();
+                        }
+                        KeyCode::Esc => {
+                            state.step = WizardStep::Welcome;
+                        }
+                        _ => {}
                     },
                     WizardStep::PstSource => match key.code {
                         KeyCode::Up | KeyCode::Char('k') => {
@@ -202,6 +254,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(item) = state.discovered_psts.get_mut(state.selected_pst_table_idx) {
                                 item.selected = !item.selected;
                             }
+                        }
+                        KeyCode::Char('e') | KeyCode::Char('E') => {
+                            open_file_explorer(&mut state);
                         }
                         KeyCode::Char('a') | KeyCode::Char('A') => {
                             for item in &mut state.discovered_psts {
@@ -320,6 +375,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn start_import_or_explore(state: &mut AppState) {
+    let default_path = Path::new(r"C:\Correo");
+    if default_path.exists() {
+        state.discovered_psts = crate::app::scan_folder_for_psts(default_path);
+        state.pst_scan_path = r"C:\Correo".to_string();
+        state.selected_pst_table_idx = 0;
+        state.step = WizardStep::PstSource;
+    } else {
+        state.explorer.warning_notice = Some(
+            "La ruta predeterminada 'C:\\Correo' no existe. Selecciona una carpeta o PST en el explorador.".to_string()
+        );
+        state.explorer.is_drives_view = true;
+        state.explorer.current_path = PathBuf::new();
+        state.explorer.refresh();
+        state.step = WizardStep::FileExplorer;
+    }
+}
+
+fn open_file_explorer(state: &mut AppState) {
+    state.explorer.warning_notice = None;
+    if !state.explorer.current_path.exists() {
+        state.explorer.is_drives_view = true;
+        state.explorer.current_path = PathBuf::new();
+    }
+    state.explorer.refresh();
+    state.step = WizardStep::FileExplorer;
+}
+
 fn handle_navigation_keys(state: &mut AppState, code: KeyCode) {
     match code {
         KeyCode::Enter => state.next_step(),
@@ -347,6 +430,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
     // 2. Body según el paso activo
     match state.step {
         WizardStep::Welcome => welcome::render(f, chunks[1], state),
+        WizardStep::FileExplorer => explorer::render(f, chunks[1], state),
         WizardStep::PstSource => pst_source::render(f, chunks[1], state),
         WizardStep::Mailbox => mailbox::render(f, chunks[1], state),
         WizardStep::FoldersMode => folders_mode::render(f, chunks[1], state),
@@ -361,7 +445,8 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
     // 3. Footer con Marca de Agua Timeless Support
     let shortcuts = match state.step {
         WizardStep::Welcome => vec![("↑/↓", "Navegar"), ("Enter", "Seleccionar"), ("1-4", "Acceso"), ("P", "Perfil"), ("Q", "Salir")],
-        WizardStep::PstSource => vec![("↑/↓", "Navegar"), ("Espacio", "Marcar"), ("A/N", "Todos/Ninguno"), ("Enter", "Siguiente")],
+        WizardStep::FileExplorer => vec![("↑/↓", "Navegar"), ("Enter", "Abrir"), ("Backspace", "Subir"), ("Espacio", "Marcar"), ("C", "Confirmar"), ("Esc", "Volver")],
+        WizardStep::PstSource => vec![("↑/↓", "Navegar"), ("Espacio", "Marcar"), ("E", "Explorar"), ("A/N", "Todos/Ninguno"), ("Enter", "Siguiente")],
         WizardStep::Mailbox => vec![("S", "Personal/Compartido"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::FoldersMode => vec![("1-4", "Carpetas"), ("M", "Copiar/Mover"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::Routing => vec![("R", "Enrutamiento On/Off"), ("G", "Granularidad"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
