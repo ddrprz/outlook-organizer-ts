@@ -111,46 +111,81 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Interacciones por pantalla
                 match state.step {
-                    WizardStep::Welcome => match key.code {
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            if state.welcome_menu_idx > 0 {
-                                state.welcome_menu_idx -= 1;
+                    WizardStep::Welcome => {
+                        if state.is_editing_profile {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    state.is_editing_profile = false;
+                                }
+                                KeyCode::Enter => {
+                                    state.is_editing_profile = false;
+                                }
+                                KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
+                                    state.use_default_profile = !state.use_default_profile;
+                                }
+                                KeyCode::Backspace => {
+                                    if !state.use_default_profile {
+                                        state.custom_profile_name.pop();
+                                    }
+                                }
+                                KeyCode::Char(c) => {
+                                    if state.use_default_profile {
+                                        if c == '1' {
+                                            state.use_default_profile = true;
+                                        } else if c == '2' {
+                                            state.use_default_profile = false;
+                                        } else {
+                                            state.use_default_profile = false;
+                                            state.custom_profile_name.push(c);
+                                        }
+                                    } else {
+                                        if state.custom_profile_name.len() < 45 {
+                                            state.custom_profile_name.push(c);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            match key.code {
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if state.welcome_menu_idx > 0 {
+                                        state.welcome_menu_idx -= 1;
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if state.welcome_menu_idx + 1 < 4 {
+                                        state.welcome_menu_idx += 1;
+                                    }
+                                }
+                                KeyCode::Char('1') => {
+                                    state.welcome_menu_idx = 0;
+                                    state.next_step();
+                                }
+                                KeyCode::Char('2') => {
+                                    state.welcome_menu_idx = 1;
+                                    state.step = WizardStep::PstSource;
+                                }
+                                KeyCode::Char('3') | KeyCode::Char('p') | KeyCode::Char('P') => {
+                                    state.welcome_menu_idx = 2;
+                                    state.is_editing_profile = true;
+                                }
+                                KeyCode::Char('4') => {
+                                    state.should_quit = true;
+                                }
+                                KeyCode::Enter => match state.welcome_menu_idx {
+                                    0 => state.next_step(),
+                                    1 => state.step = WizardStep::PstSource,
+                                    2 => state.is_editing_profile = true,
+                                    3 => state.should_quit = true,
+                                    _ => {}
+                                },
+                                KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                    state.should_quit = true;
+                                }
+                                _ => {}
                             }
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if state.welcome_menu_idx + 1 < 4 {
-                                state.welcome_menu_idx += 1;
-                            }
-                        }
-                        KeyCode::Char('1') => {
-                            state.welcome_menu_idx = 0;
-                            state.next_step();
-                        }
-                        KeyCode::Char('2') => {
-                            state.welcome_menu_idx = 1;
-                            state.step = WizardStep::PstSource;
-                        }
-                        KeyCode::Char('3') => {
-                            state.welcome_menu_idx = 2;
-                            state.use_default_profile = !state.use_default_profile;
-                        }
-                        KeyCode::Char('4') => {
-                            state.should_quit = true;
-                        }
-                        KeyCode::Char('p') | KeyCode::Char('P') => {
-                            state.use_default_profile = !state.use_default_profile;
-                        }
-                        KeyCode::Enter => match state.welcome_menu_idx {
-                            0 => state.next_step(),
-                            1 => state.step = WizardStep::PstSource,
-                            2 => state.use_default_profile = !state.use_default_profile,
-                            3 => state.should_quit = true,
-                            _ => {}
-                        },
-                        KeyCode::Char('q') | KeyCode::Char('Q') => {
-                            state.should_quit = true;
-                        }
-                        _ => {}
                     },
                     WizardStep::PstSource => match key.code {
                         KeyCode::Up | KeyCode::Char('k') => {
