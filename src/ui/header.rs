@@ -29,14 +29,25 @@ pub fn render_header(f: &mut Frame, area: Rect, step_title: &str, current_step: 
         Span::styled("  v1.0.0", Style::default().fg(Theme::TEXT_MUTED)),
     ]);
 
-    let right_text = Line::from(vec![
-        Span::styled(
-            format!("[Paso {} de {}: {}] ", current_step, total_steps, step_title),
-            Style::default()
-                .fg(Theme::ACCENT_SECONDARY)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
+    let right_text = if current_step == 0 {
+        Line::from(vec![
+            Span::styled(
+                format!("[ {} ] ", step_title),
+                Style::default()
+                    .fg(Theme::BRAND_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(
+                format!("[Paso {} de {}: {}] ", current_step, total_steps, step_title),
+                Style::default()
+                    .fg(Theme::ACCENT_SECONDARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])
+    };
 
     let header_p = Paragraph::new(left_text);
     f.render_widget(header_p, inner);

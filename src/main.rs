@@ -5,7 +5,7 @@ mod ui;
 
 use std::{io, time::Duration};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -93,6 +93,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                // FILTRAR EVENTOS: Ignorar Release para prevenir saltos dobles en Windows
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+
                 // Captura universal de Ctrl+C para parada segura o salida
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     if state.step == WizardStep::Execution {
@@ -302,7 +307,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         .split(size);
 
     // 1. Header
-    render_header(f, chunks[0], state.step.title(), state.step.index(), 8);
+    render_header(f, chunks[0], state.step.title(), state.step.index(), 7);
 
     // 2. Body según el paso activo
     match state.step {

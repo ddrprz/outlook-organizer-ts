@@ -17,7 +17,7 @@ pub enum WizardStep {
 impl WizardStep {
     pub fn title(&self) -> &'static str {
         match self {
-            WizardStep::Welcome => "Bienvenida y Perfil MAPI",
+            WizardStep::Welcome => "Menú Principal",
             WizardStep::PstSource => "Origen y Escaneo de PSTs",
             WizardStep::Mailbox => "Selección de Buzón Destino",
             WizardStep::FoldersMode => "Carpetas y Modo de Transferencia",
@@ -32,16 +32,16 @@ impl WizardStep {
 
     pub fn index(&self) -> usize {
         match self {
-            WizardStep::Welcome => 1,
-            WizardStep::PstSource => 2,
-            WizardStep::Mailbox => 3,
-            WizardStep::FoldersMode => 4,
-            WizardStep::Routing => 5,
-            WizardStep::Deduplication => 6,
-            WizardStep::Filters => 7,
-            WizardStep::Summary => 8,
-            WizardStep::Execution => 8,
-            WizardStep::Completion => 8,
+            WizardStep::Welcome => 0,
+            WizardStep::PstSource => 1,
+            WizardStep::Mailbox => 2,
+            WizardStep::FoldersMode => 3,
+            WizardStep::Routing => 4,
+            WizardStep::Deduplication => 5,
+            WizardStep::Filters => 6,
+            WizardStep::Summary => 7,
+            WizardStep::Execution => 7,
+            WizardStep::Completion => 7,
         }
     }
 }

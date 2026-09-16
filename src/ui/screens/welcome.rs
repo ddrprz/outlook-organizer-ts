@@ -34,26 +34,31 @@ pub const MENU_ITEMS: [(&str, &str, &str); 4] = [
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let is_tall = area.height >= 26;
 
-    let chunks = if is_tall {
-        Layout::default()
+    let (banner_area, badges_area, menu_area) = if is_tall {
+        let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(11), // Banner ASCII Slant completo (Outlook + Organizer)
-                Constraint::Length(2),  // Badges y Tagline
+                Constraint::Length(1),  // Espaciador superior
+                Constraint::Length(11), // Banner ASCII Slant completo
+                Constraint::Length(2),  // Espaciador generoso entre ASCII y Badges
+                Constraint::Length(1),  // Badges y Tagline
+                Constraint::Length(1),  // Espaciador entre Badges y Menú
                 Constraint::Min(8),     // Menú interactivo + Tarjeta descriptiva
-                Constraint::Length(1),  // Barra de atajos
             ])
-            .split(area)
+            .split(area);
+        (chunks[1], chunks[3], chunks[5])
     } else {
-        Layout::default()
+        let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),  // Banner compacto
-                Constraint::Length(2),  // Badges y Tagline
+                Constraint::Length(1),  // Espacio
+                Constraint::Length(1),  // Badges y Tagline
+                Constraint::Length(1),  // Espacio
                 Constraint::Min(7),     // Menú interactivo
-                Constraint::Length(1),  // Barra de atajos
             ])
-            .split(area)
+            .split(area);
+        (chunks[0], chunks[2], chunks[4])
     };
 
     // 1. BANNER ASCII
@@ -71,7 +76,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Line::from(Span::styled("\\____/_/   \\__, /\\__,_/_/ /_/_/ /___/\\___/_/     ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
             Line::from(Span::styled("          /____/                                 ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
         ];
-        f.render_widget(Paragraph::new(banner_lines).alignment(Alignment::Center), chunks[0]);
+        f.render_widget(Paragraph::new(banner_lines).alignment(Alignment::Center), banner_area);
     } else {
         let compact_banner = vec![
             Line::from(vec![
@@ -80,10 +85,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Span::styled(" — Herramienta de Migración Empresarial", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ];
-        f.render_widget(Paragraph::new(compact_banner).alignment(Alignment::Center), chunks[0]);
+        f.render_widget(Paragraph::new(compact_banner).alignment(Alignment::Center), banner_area);
     }
 
-    // 2. TAGLINE Y BADGES DE ESTADO
+    // 2. TAGLINE Y BADGES DE ESTADO (Con espaciado balanceado)
     let badges_line = Line::from(vec![
         Span::styled("[ ● MAPI Conectado ]", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
         Span::styled("  ", Style::default()),
@@ -96,16 +101,30 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Style::default().fg(Theme::TEXT_MUTED),
         ),
     ]);
-    f.render_widget(Paragraph::new(badges_line).alignment(Alignment::Center), chunks[1]);
+    f.render_widget(Paragraph::new(badges_line).alignment(Alignment::Center), badges_area);
 
-    // 3. MENÚ PRINCIPAL Y TARJETA CONTEXTUAL
+    // 3. MENÚ PRINCIPAL Y TARJETA CONTEXTUAL (Centrado horizontal con márgenes limpios)
+    let body_area = if area.width > 100 {
+        let h_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(4),
+                Constraint::Percentage(92),
+                Constraint::Percentage(4),
+            ])
+            .split(menu_area);
+        h_chunks[1]
+    } else {
+        menu_area
+    };
+
     let body_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(55), // Menú interactivo
-            Constraint::Percentage(45), // Tarjeta descriptiva
+            Constraint::Percentage(50), // Menú interactivo
+            Constraint::Percentage(50), // Tarjeta descriptiva
         ])
-        .split(chunks[2]);
+        .split(body_area);
 
     // Renderizado del Menú
     let menu_block = Block::default()
@@ -128,7 +147,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Span::styled(" ▶ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(format!("{:<4} ", num_str), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(
-                    format!(" {:<22} ", title),
+                    format!(" {:<20} ", title),
                     Style::default()
                         .bg(Theme::ACCENT_PRIMARY)
                         .fg(Theme::BG_DARK)
@@ -140,7 +159,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Span::styled("   ", Style::default()),
                 Span::styled(format!("{:<4} ", num_str), Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(
-                    format!(" {:<22} ", title),
+                    format!(" {:<20} ", title),
                     Style::default().fg(Theme::TEXT_MAIN),
                 ),
             ]));
@@ -175,25 +194,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("💡 Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
             Span::styled("Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" para ejecutar o el número directo ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" para ejecutar o ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[1-4]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(".", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" para selección directa.", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
     f.render_widget(Paragraph::new(detail_lines), detail_inner);
-
-    // 4. BARRA INFERIOR DE ATAJOS
-    let shortcuts_line = Line::from(vec![
-        Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Mover cursor   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[Enter] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Confirmar   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[1-4] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Acceso Directo   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[P] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Alternar Perfil   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[Q] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Salir", Style::default().fg(Theme::TEXT_MUTED)),
-    ]);
-    f.render_widget(Paragraph::new(shortcuts_line).alignment(Alignment::Center), chunks[3]);
 }
