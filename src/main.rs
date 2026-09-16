@@ -107,10 +107,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Interacciones por pantalla
                 match state.step {
                     WizardStep::Welcome => match key.code {
-                        KeyCode::Char('p') | KeyCode::Char('P') | KeyCode::Char(' ') => {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if state.welcome_menu_idx > 0 {
+                                state.welcome_menu_idx -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if state.welcome_menu_idx + 1 < 4 {
+                                state.welcome_menu_idx += 1;
+                            }
+                        }
+                        KeyCode::Char('1') => {
+                            state.welcome_menu_idx = 0;
+                            state.next_step();
+                        }
+                        KeyCode::Char('2') => {
+                            state.welcome_menu_idx = 1;
+                            state.step = WizardStep::PstSource;
+                        }
+                        KeyCode::Char('3') => {
+                            state.welcome_menu_idx = 2;
                             state.use_default_profile = !state.use_default_profile;
                         }
-                        _ => handle_navigation_keys(&mut state, key.code),
+                        KeyCode::Char('4') => {
+                            state.should_quit = true;
+                        }
+                        KeyCode::Char('p') | KeyCode::Char('P') => {
+                            state.use_default_profile = !state.use_default_profile;
+                        }
+                        KeyCode::Enter => match state.welcome_menu_idx {
+                            0 => state.next_step(),
+                            1 => state.step = WizardStep::PstSource,
+                            2 => state.use_default_profile = !state.use_default_profile,
+                            3 => state.should_quit = true,
+                            _ => {}
+                        },
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            state.should_quit = true;
+                        }
+                        _ => {}
                     },
                     WizardStep::PstSource => match key.code {
                         KeyCode::Up | KeyCode::Char('k') => {
@@ -285,7 +320,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
 
     // 3. Footer con Marca de Agua Timeless Support
     let shortcuts = match state.step {
-        WizardStep::Welcome => vec![("Espacio/P", "Perfil"), ("Enter", "Siguiente"), ("Esc", "Atrás"), ("q", "Salir")],
+        WizardStep::Welcome => vec![("↑/↓", "Navegar"), ("Enter", "Seleccionar"), ("1-4", "Acceso"), ("P", "Perfil"), ("Q", "Salir")],
         WizardStep::PstSource => vec![("↑/↓", "Navegar"), ("Espacio", "Marcar"), ("A/N", "Todos/Ninguno"), ("Enter", "Siguiente")],
         WizardStep::Mailbox => vec![("S", "Personal/Compartido"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::FoldersMode => vec![("1-4", "Carpetas"), ("M", "Copiar/Mover"), ("Enter", "Siguiente"), ("Esc", "Atrás")],

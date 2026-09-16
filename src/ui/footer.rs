@@ -49,7 +49,7 @@ pub fn render_footer(f: &mut Frame, area: Rect, shortcuts: &[(&str, &str)]) {
     // 2. Renderizar Marca de Agua corporativa en 2 líneas
     let watermark_lines = vec![
         Line::from(vec![
-            Span::styled("⏳ ", Style::default().fg(Theme::BRAND_PRIMARY)),
+            Span::styled("◈ ", Style::default().fg(Theme::BRAND_PRIMARY)),
             Span::styled(
                 "TIMELESS",
                 Style::default()
