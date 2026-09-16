@@ -164,11 +164,11 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
   <div class="container">
     <div class="header">
       <div>
-        <h1>✉ Informe de Migración de PSTs</h1>
+        <h1>◈ Informe de Migración de PSTs</h1>
         <p style="color: var(--text-muted); font-size: 0.9rem;">Fecha: {} &bull; Hora: {}</p>
       </div>
       <div class="brand">
-        ⏳ TIMELESS
+        ◈ TIMELESS
         <small>SUPPORT</small>
       </div>
     </div>

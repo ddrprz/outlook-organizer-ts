@@ -73,7 +73,9 @@ pub struct ProgressState {
     pub current_pst_total: u64,
     pub global_items_processed: u64,
     pub global_items_total: u64,
+    #[allow(dead_code)]
     pub current_pst_idx: usize,
+    #[allow(dead_code)]
     pub total_psts: usize,
     pub speed_mps: f64,
     pub eta_seconds: u64,
@@ -109,6 +111,7 @@ impl Default for ProgressState {
 pub struct AppState {
     pub step: WizardStep,
     pub should_quit: bool,
+    pub welcome_menu_idx: usize,
     
     // Configuración Paso 1: Perfil
     pub use_default_profile: bool,
@@ -133,6 +136,7 @@ pub struct AppState {
     // Configuración Paso 5: Enrutamiento
     pub routing_enabled: bool,
     pub routing_granularity: RoutingGranularity,
+    #[allow(dead_code)]
     pub specific_year: Option<u32>,
 
     // Configuración Paso 6: Deduplicación
@@ -166,6 +170,7 @@ impl AppState {
         Self {
             step: WizardStep::Welcome,
             should_quit: false,
+            welcome_menu_idx: 0,
             use_default_profile: true,
             custom_profile_name: String::new(),
             pst_scan_path: r"C:\Correo".to_string(),

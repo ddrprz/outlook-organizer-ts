@@ -19,7 +19,7 @@ pub fn render_header(f: &mut Frame, area: Rect, step_title: &str, current_step: 
     f.render_widget(header_block, area);
 
     let left_text = Line::from(vec![
-        Span::styled(" ✉ ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+        Span::styled(" ◈ ", Style::default().fg(Theme::ACCENT_PRIMARY)),
         Span::styled(
             "OUTLOOK ORGANIZER TS",
             Style::default()

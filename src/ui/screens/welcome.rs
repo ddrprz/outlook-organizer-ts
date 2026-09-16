@@ -8,92 +8,192 @@ use ratatui::{
 
 use crate::{app::AppState, ui::theme::Theme};
 
-pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(7), // Tarjeta de Bienvenida y Estado
-            Constraint::Length(10), // Configuración del Perfil
-            Constraint::Min(2),    // Ayuda contextual
-        ])
-        .split(area);
+pub const MENU_ITEMS: [(&str, &str, &str); 4] = [
+    (
+        "Importar PST",
+        "Iniciar el asistente completo de migración hacia buzones de Outlook / M365.",
+        "Asistente guiado paso a paso con deduplicación y enrutamiento.",
+    ),
+    (
+        "Escanear PSTs",
+        "Explorar y listar los archivos .pst detectados en C:\\Correo o rutas locales.",
+        "Detección de archivos, cálculo de tamaño y verificación de bloqueos.",
+    ),
+    (
+        "Perfil MAPI",
+        "Configurar el perfil de Outlook (predeterminado de Windows o personalizado).",
+        "Alternar entre perfil del sistema o ingresar nombre de perfil MAPI.",
+    ),
+    (
+        "Salir",
+        "Cerrar la aplicación de forma limpia y segura.",
+        "Restaura el modo de terminal y finaliza el proceso.",
+    ),
+];
 
-    // 1. Tarjeta de Bienvenida
-    let welcome_block = Block::default()
+pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
+    let is_tall = area.height >= 26;
+
+    let chunks = if is_tall {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(11), // Banner ASCII Slant completo (Outlook + Organizer)
+                Constraint::Length(2),  // Badges y Tagline
+                Constraint::Min(8),     // Menú interactivo + Tarjeta descriptiva
+                Constraint::Length(1),  // Barra de atajos
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),  // Banner compacto
+                Constraint::Length(2),  // Badges y Tagline
+                Constraint::Min(7),     // Menú interactivo
+                Constraint::Length(1),  // Barra de atajos
+            ])
+            .split(area)
+    };
+
+    // 1. BANNER ASCII
+    if is_tall {
+        let banner_lines = vec![
+            Line::from(Span::styled("    ____        __  __            __  ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("   / __ \\__  __/ /_/ /___  ____  / /__", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("  / / / / / / / __/ / __ \\/ __ \\/ //_/", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(" / /_/ / /_/ / /_/ / /_/ / /_/ / ,<   ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(" \\____/\\__,_/\\__/_/\\____/\\____/_/|_|  ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("   ____                        _              ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("  / __ \\_________ _____ _____ (_)___  ___  _____", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled(" / / / / ___/ __ `/ __ `/ __ `/ /_  / / _ \\/ ___/", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("/ /_/ / /  / /_/ / /_/ / / / / / / /_/  __/ /    ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("\\____/_/   \\__, /\\__,_/_/ /_/_/ /___/\\___/_/     ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("          /____/                                 ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))),
+        ];
+        f.render_widget(Paragraph::new(banner_lines).alignment(Alignment::Center), chunks[0]);
+    } else {
+        let compact_banner = vec![
+            Line::from(vec![
+                Span::styled("◈ OUTLOOK ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("ORGANIZER TS", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(" — Herramienta de Migración Empresarial", Style::default().fg(Theme::TEXT_MUTED)),
+            ]),
+        ];
+        f.render_widget(Paragraph::new(compact_banner).alignment(Alignment::Center), chunks[0]);
+    }
+
+    // 2. TAGLINE Y BADGES DE ESTADO
+    let badges_line = Line::from(vec![
+        Span::styled("[ ● MAPI Conectado ]", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+        Span::styled("  ", Style::default()),
+        Span::styled("[ ◈ Cero Riesgo de Corrupción ]", Style::default().fg(Theme::BRAND_PRIMARY)),
+        Span::styled("  ", Style::default()),
+        Span::styled("[ ⚡ Throttling M365 ]", Style::default().fg(Theme::WARNING)),
+        Span::styled("  ", Style::default()),
+        Span::styled(
+            if state.use_default_profile { "[ Perfil: Predeterminado ]" } else { "[ Perfil: Manual ]" },
+            Style::default().fg(Theme::TEXT_MUTED),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(badges_line).alignment(Alignment::Center), chunks[1]);
+
+    // 3. MENÚ PRINCIPAL Y TARJETA CONTEXTUAL
+    let body_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(55), // Menú interactivo
+            Constraint::Percentage(45), // Tarjeta descriptiva
+        ])
+        .split(chunks[2]);
+
+    // Renderizado del Menú
+    let menu_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" Conexión y Estado MAPI ");
+        .title(" Menú Principal ");
+    let menu_inner = menu_block.inner(body_chunks[0]);
+    f.render_widget(menu_block, body_chunks[0]);
 
-    let welcome_inner = welcome_block.inner(chunks[0]);
-    f.render_widget(welcome_block, chunks[0]);
+    let mut menu_lines = Vec::new();
+    menu_lines.push(Line::from(""));
 
-    let welcome_lines = vec![
-        Line::from(vec![
-            Span::styled("Bienvenido a ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("Outlook Organizer TS", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" — Herramienta de Migración y Organización de PSTs", Style::default().fg(Theme::TEXT_MUTED)),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Estado de Outlook: ", Style::default().fg(Theme::TEXT_MAIN)),
-            Span::styled("● Sesión MAPI Detectada / Disponible", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("Integridad PST:    ", Style::default().fg(Theme::TEXT_MAIN)),
-            Span::styled("Modo Seguro Activo (Cero riesgo de corrupción)", Style::default().fg(Theme::BRAND_PRIMARY)),
-        ]),
-    ];
-    f.render_widget(Paragraph::new(welcome_lines), welcome_inner);
+    for (idx, (title, _, _)) in MENU_ITEMS.iter().enumerate() {
+        let is_selected = idx == state.welcome_menu_idx;
+        let num_str = format!("[{}]", idx + 1);
 
-    // 2. Selección de Perfil
-    let profile_block = Block::default()
+        if is_selected {
+            menu_lines.push(Line::from(vec![
+                Span::styled(" ▶ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{:<4} ", num_str), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!(" {:<22} ", title),
+                    Style::default()
+                        .bg(Theme::ACCENT_PRIMARY)
+                        .fg(Theme::BG_DARK)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        } else {
+            menu_lines.push(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(format!("{:<4} ", num_str), Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(
+                    format!(" {:<22} ", title),
+                    Style::default().fg(Theme::TEXT_MAIN),
+                ),
+            ]));
+        }
+        menu_lines.push(Line::from(""));
+    }
+
+    f.render_widget(Paragraph::new(menu_lines), menu_inner);
+
+    // Renderizado de la Tarjeta Contextual
+    let detail_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" Configuración del Perfil de Outlook ");
+        .title(" Información de la Acción ");
+    let detail_inner = detail_block.inner(body_chunks[1]);
+    f.render_widget(detail_block, body_chunks[1]);
 
-    let profile_inner = profile_block.inner(chunks[1]);
-    f.render_widget(profile_block, chunks[1]);
-
-    let radio_default = if state.use_default_profile {
-        Span::styled("[●] Usar perfil predeterminado del sistema (Recomendado)", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
-    } else {
-        Span::styled("[○] Usar perfil predeterminado del sistema", Style::default().fg(Theme::TEXT_MUTED))
-    };
-
-    let radio_custom = if !state.use_default_profile {
-        Span::styled("[●] Especificar perfil MAPI manualmente:", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
-    } else {
-        Span::styled("[○] Especificar perfil MAPI manualmente", Style::default().fg(Theme::TEXT_MUTED))
-    };
-
-    let profile_input_display = if !state.use_default_profile {
-        if state.custom_profile_name.is_empty() {
-            Span::styled("    Nombre: [ Escribe el nombre del perfil... ]", Style::default().fg(Theme::WARNING))
-        } else {
-            Span::styled(format!("    Nombre: [ {} ]", state.custom_profile_name), Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD))
-        }
-    } else {
-        Span::styled("    Nombre: [ Perfil Predeterminado de Windows ]", Style::default().fg(Theme::TEXT_MUTED))
-    };
-
-    let profile_lines = vec![
-        Line::from("Seleccione el perfil de Outlook que contiene los buzones destino:"),
+    let current_menu = MENU_ITEMS[state.welcome_menu_idx.min(MENU_ITEMS.len() - 1)];
+    let detail_lines = vec![
         Line::from(""),
-        Line::from(radio_default),
+        Line::from(vec![
+            Span::styled("Acción: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(current_menu.0, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        ]),
         Line::from(""),
-        Line::from(radio_custom),
-        Line::from(profile_input_display),
+        Line::from(Span::styled(current_menu.1, Style::default().fg(Theme::TEXT_MAIN))),
+        Line::from(""),
+        Line::from(Span::styled(current_menu.2, Style::default().fg(Theme::TEXT_MUTED))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("💡 Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled("Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(" para ejecutar o el número directo ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[1-4]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(".", Style::default().fg(Theme::TEXT_MUTED)),
+        ]),
     ];
-    f.render_widget(Paragraph::new(profile_lines), profile_inner);
+    f.render_widget(Paragraph::new(detail_lines), detail_inner);
 
-    // 3. Indicaciones de interacción
-    let help_text = Line::from(vec![
-        Span::styled("💡 Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-        Span::styled("Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[Espacio] / [P]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled(" para alternar entre perfil predeterminado o manual.", Style::default().fg(Theme::TEXT_MUTED)),
+    // 4. BARRA INFERIOR DE ATAJOS
+    let shortcuts_line = Line::from(vec![
+        Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Mover cursor   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[Enter] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Confirmar   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[1-4] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Acceso Directo   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[P] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Alternar Perfil   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[Q] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Salir", Style::default().fg(Theme::TEXT_MUTED)),
     ]);
-    f.render_widget(Paragraph::new(help_text).alignment(Alignment::Left), chunks[2]);
+    f.render_widget(Paragraph::new(shortcuts_line).alignment(Alignment::Center), chunks[3]);
 }
