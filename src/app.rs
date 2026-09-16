@@ -116,6 +116,7 @@ pub struct AppState {
     // Configuración Paso 1: Perfil
     pub use_default_profile: bool,
     pub custom_profile_name: String,
+    pub is_editing_profile: bool,
 
     // Configuración Paso 2: Fuentes PST
     pub pst_scan_path: String,
@@ -173,6 +174,7 @@ impl AppState {
             welcome_menu_idx: 0,
             use_default_profile: true,
             custom_profile_name: String::new(),
+            is_editing_profile: false,
             pst_scan_path: r"C:\Correo".to_string(),
             discovered_psts: sample_psts,
             selected_pst_table_idx: 0,
