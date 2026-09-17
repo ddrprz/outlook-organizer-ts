@@ -60,6 +60,17 @@ pub struct PstItem {
     pub selected: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MailboxItem {
+    pub display_name: String,
+    pub store_type: String,
+    pub size_display: String,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub selected: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExplorerItemType {
     ParentDir,
@@ -254,8 +265,8 @@ pub fn read_directory(path: &Path) -> (Vec<ExplorerEntry>, bool) {
         }
     }
 
-    dir_entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    file_entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    dir_entries.sort_by_key(|a| a.name.to_lowercase());
+    file_entries.sort_by_key(|a| a.name.to_lowercase());
 
     entries.extend(dir_entries);
     entries.extend(file_entries);
@@ -267,28 +278,27 @@ pub fn scan_folder_for_psts(folder: &Path) -> Vec<PstItem> {
     let mut items = Vec::new();
     if let Ok(read_dir) = std::fs::read_dir(folder) {
         for entry in read_dir.flatten() {
-            if let Ok(ft) = entry.file_type() {
-                if ft.is_file() {
-                    let is_pst = entry.path().extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext.eq_ignore_ascii_case("pst"))
-                        .unwrap_or(false);
+            if let Ok(ft) = entry.file_type()
+                && ft.is_file() {
+                let is_pst = entry.path().extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("pst"))
+                    .unwrap_or(false);
 
-                    if is_pst {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        let size_mb = entry.metadata().ok().map(|m| m.len() as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
-                        items.push(PstItem {
-                            path: entry.path().to_string_lossy().to_string(),
-                            name,
-                            size_mb,
-                            selected: true,
-                        });
-                    }
+                if is_pst {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let size_mb = entry.metadata().ok().map(|m| m.len() as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
+                    items.push(PstItem {
+                        path: entry.path().to_string_lossy().to_string(),
+                        name,
+                        size_mb,
+                        selected: true,
+                    });
                 }
             }
         }
     }
-    items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    items.sort_by_key(|a| a.name.to_lowercase());
     items
 }
 
@@ -361,9 +371,11 @@ pub struct AppState {
     pub discovered_psts: Vec<PstItem>,
     pub selected_pst_table_idx: usize,
 
-    // Configuración Paso 3: Buzón
-    pub is_shared_mailbox: bool,
-    pub target_mailbox: String,
+    // Configuración Paso 3: Buzones Destino MAPI
+    pub discovered_mailboxes: Vec<MailboxItem>,
+    pub selected_mailbox_idx: usize,
+    pub is_loading_mailboxes: bool,
+    pub mailbox_warning_notice: Option<String>,
 
     // Configuración Paso 4: Carpetas y Modo
     pub include_inbox: bool,
@@ -393,6 +405,18 @@ pub struct AppState {
     pub activity_log: VecDeque<String>, // Buffer circular limitado (max 300)
 }
 
+pub fn default_fallback_mailboxes() -> Vec<MailboxItem> {
+    vec![
+        MailboxItem {
+            display_name: "buzon.personal@empresa.com".to_string(),
+            store_type: "ExchangeOnline".to_string(),
+            size_display: "0 Bytes".to_string(),
+            file_path: None,
+            selected: true,
+        },
+    ]
+}
+
 impl AppState {
     pub fn new() -> Self {
         let default_correo = PathBuf::from(r"C:\Correo");
@@ -413,8 +437,10 @@ impl AppState {
             pst_scan_path: r"C:\Correo".to_string(),
             discovered_psts: initial_psts,
             selected_pst_table_idx: 0,
-            is_shared_mailbox: false,
-            target_mailbox: "buzon.personal@empresa.com".to_string(),
+            discovered_mailboxes: default_fallback_mailboxes(),
+            selected_mailbox_idx: 0,
+            is_loading_mailboxes: false,
+            mailbox_warning_notice: None,
             include_inbox: true,
             include_sent: true,
             include_deleted: false,
@@ -429,6 +455,21 @@ impl AppState {
             explorer,
             progress: ProgressState::default(),
             activity_log: VecDeque::with_capacity(300),
+        }
+    }
+
+    pub fn selected_mailboxes(&self) -> Vec<&MailboxItem> {
+        self.discovered_mailboxes.iter().filter(|m| m.selected).collect()
+    }
+
+    pub fn selected_mailboxes_display(&self) -> String {
+        let selected = self.selected_mailboxes();
+        if selected.is_empty() {
+            "Ninguno seleccionado".to_string()
+        } else if selected.len() == 1 {
+            selected[0].display_name.clone()
+        } else {
+            format!("{} buzones seleccionados", selected.len())
         }
     }
 
@@ -538,5 +579,31 @@ mod tests {
         assert_eq!(state.step, WizardStep::PstSource);
         state.prev_step();
         assert_eq!(state.step, WizardStep::Welcome);
+    }
+
+    #[test]
+    fn test_mailbox_selection() {
+        let mut state = AppState::new();
+        assert_eq!(state.selected_mailboxes().len(), 1);
+        assert_eq!(state.selected_mailboxes_display(), "buzon.personal@empresa.com");
+
+        state.discovered_mailboxes.push(MailboxItem {
+            display_name: "compartido@empresa.com".to_string(),
+            store_type: "SharedMailbox".to_string(),
+            size_display: "500 MB".to_string(),
+            file_path: None,
+            selected: true,
+        });
+
+        assert_eq!(state.selected_mailboxes().len(), 2);
+        assert_eq!(state.selected_mailboxes_display(), "2 buzones seleccionados");
+
+        state.discovered_mailboxes[0].selected = false;
+        assert_eq!(state.selected_mailboxes().len(), 1);
+        assert_eq!(state.selected_mailboxes_display(), "compartido@empresa.com");
+
+        state.discovered_mailboxes[1].selected = false;
+        assert_eq!(state.selected_mailboxes().len(), 0);
+        assert_eq!(state.selected_mailboxes_display(), "Ninguno seleccionado");
     }
 }

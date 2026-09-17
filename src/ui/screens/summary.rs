@@ -51,6 +51,16 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         "Desactivado (Raíz directa)"
     };
 
+    let selected_mailboxes = state.selected_mailboxes();
+    let mailbox_summary_str = if selected_mailboxes.is_empty() {
+        "Ninguno seleccionado (⚠️ Se requiere al menos uno)".to_string()
+    } else if selected_mailboxes.len() == 1 {
+        format!("{} ({})", selected_mailboxes[0].display_name, selected_mailboxes[0].store_type)
+    } else {
+        let names = selected_mailboxes.iter().map(|m| m.display_name.as_str()).collect::<Vec<_>>().join(", ");
+        format!("{} buzones seleccionados: {}", selected_mailboxes.len(), names)
+    };
+
     let summary_lines = vec![
         Line::from(vec![
             Span::styled("• Perfil Outlook:    ", Style::default().fg(Theme::TEXT_MUTED)),
@@ -61,8 +71,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled(format!(" {} archivos ({:.1} MB / {:.2} GB total)", selected_psts_count, total_size_mb, total_size_mb / 1024.0), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("• Buzón Destino:     ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled(&state.target_mailbox, Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
+            Span::styled("• Buzón(es) Destino: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(mailbox_summary_str, Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
             Span::styled("• Modo Transferencia:", Style::default().fg(Theme::TEXT_MUTED)),

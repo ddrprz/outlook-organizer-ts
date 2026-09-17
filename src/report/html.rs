@@ -187,7 +187,7 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
         <div class="value danger">{}</div>
       </div>
       <div class="card">
-        <div class="title">Buzón Destino</div>
+        <div class="title">Buzón(es) Destino</div>
         <div class="value" style="font-size: 1.1rem; word-break: break-all; margin-top: 0.5rem;">{}</div>
       </div>
     </div>
@@ -219,7 +219,7 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
         state.progress.imported_count,
         state.progress.duplicates_skipped,
         state.progress.error_count,
-        state.target_mailbox,
+        state.selected_mailboxes_display(),
         selected_psts_rows,
         now.format("%Y")
     );
