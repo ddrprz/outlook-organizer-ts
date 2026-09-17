@@ -43,12 +43,22 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let routing_str = if state.routing_enabled {
+        let scope_str = if let Some(year) = state.specific_year {
+            if let Some(m) = state.specific_month {
+                format!("Año {} / Mes {:02}", year, m)
+            } else {
+                format!("Año específico: {}", year)
+            }
+        } else {
+            "Todos los periodos (Historial completo)".to_string()
+        };
+
         match state.routing_granularity {
-            RoutingGranularity::Years => "Activado (Años)",
-            RoutingGranularity::YearsAndMonths => "Activado (Años y Meses)",
+            RoutingGranularity::Years => format!("Por Años ({})", scope_str),
+            RoutingGranularity::YearsAndMonths => format!("Por Meses ({})", scope_str),
         }
     } else {
-        "Desactivado (Raíz directa)"
+        "Desactivado (Raíz directa)".to_string()
     };
 
     let selected_mailboxes = state.selected_mailboxes();

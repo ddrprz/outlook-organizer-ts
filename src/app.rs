@@ -314,6 +314,15 @@ pub enum RoutingGranularity {
     YearsAndMonths,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingModal {
+    None,
+    Criterion,     // Criterio de Enrutamiento (Años vs Meses)
+    Scope,         // Alcance de escaneo (Todos vs Específico)
+    SpecificYear,  // Año específico
+    SpecificMonth, // Mes específico
+}
+
 #[derive(Debug, Clone)]
 pub struct ProgressState {
     pub current_pst_name: String,
@@ -387,8 +396,15 @@ pub struct AppState {
     // Configuración Paso 5: Enrutamiento
     pub routing_enabled: bool,
     pub routing_granularity: RoutingGranularity,
-    #[allow(dead_code)]
     pub specific_year: Option<u32>,
+    pub specific_month: Option<u32>,
+    pub routing_all_years: bool,
+    pub routing_all_months: bool,
+    pub active_routing_modal: RoutingModal,
+    pub routing_modal_criterion_idx: usize,
+    pub routing_modal_scope_idx: usize,
+    pub routing_input_year: String,
+    pub routing_input_month: u32,
 
     // Configuración Paso 6: Deduplicación
     pub deduplication_enabled: bool,
@@ -447,8 +463,16 @@ impl AppState {
             include_custom_folders: true,
             transfer_mode: TransferMode::Copy,
             routing_enabled: true,
-            routing_granularity: RoutingGranularity::YearsAndMonths,
+            routing_granularity: RoutingGranularity::Years,
             specific_year: None,
+            specific_month: None,
+            routing_all_years: true,
+            routing_all_months: true,
+            active_routing_modal: RoutingModal::None,
+            routing_modal_criterion_idx: 0,
+            routing_modal_scope_idx: 0,
+            routing_input_year: "2024".to_string(),
+            routing_input_month: 1,
             deduplication_enabled: true,
             deep_scan_enabled: true,
             adaptive_throttling_enabled: true,
@@ -486,8 +510,18 @@ impl AppState {
             WizardStep::FileExplorer => WizardStep::PstSource,
             WizardStep::PstSource => WizardStep::Mailbox,
             WizardStep::Mailbox => WizardStep::FoldersMode,
-            WizardStep::FoldersMode => WizardStep::Routing,
-            WizardStep::Routing => WizardStep::Deduplication,
+            WizardStep::FoldersMode => {
+                self.active_routing_modal = RoutingModal::Criterion;
+                self.routing_modal_criterion_idx = match self.routing_granularity {
+                    RoutingGranularity::Years => 0,
+                    RoutingGranularity::YearsAndMonths => 1,
+                };
+                WizardStep::Routing
+            }
+            WizardStep::Routing => {
+                self.active_routing_modal = RoutingModal::None;
+                WizardStep::Deduplication
+            }
             WizardStep::Deduplication => WizardStep::Filters,
             WizardStep::Filters => WizardStep::Summary,
             WizardStep::Summary => WizardStep::Execution,
@@ -503,8 +537,14 @@ impl AppState {
             WizardStep::PstSource => WizardStep::Welcome,
             WizardStep::Mailbox => WizardStep::PstSource,
             WizardStep::FoldersMode => WizardStep::Mailbox,
-            WizardStep::Routing => WizardStep::FoldersMode,
-            WizardStep::Deduplication => WizardStep::Routing,
+            WizardStep::Routing => {
+                self.active_routing_modal = RoutingModal::None;
+                WizardStep::FoldersMode
+            }
+            WizardStep::Deduplication => {
+                self.active_routing_modal = RoutingModal::None;
+                WizardStep::Routing
+            }
             WizardStep::Filters => WizardStep::Deduplication,
             WizardStep::Summary => WizardStep::Filters,
             WizardStep::Execution => WizardStep::Summary,
@@ -605,5 +645,29 @@ mod tests {
         state.discovered_mailboxes[1].selected = false;
         assert_eq!(state.selected_mailboxes().len(), 0);
         assert_eq!(state.selected_mailboxes_display(), "Ninguno seleccionado");
+    }
+
+    #[test]
+    fn test_routing_modals() {
+        let mut state = AppState::new();
+        state.step = WizardStep::FoldersMode;
+        state.next_step();
+        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.active_routing_modal, RoutingModal::Criterion);
+
+        // Cambiar a Meses
+        state.routing_modal_criterion_idx = 1;
+        state.routing_granularity = RoutingGranularity::YearsAndMonths;
+        state.active_routing_modal = RoutingModal::Scope;
+        assert_eq!(state.active_routing_modal, RoutingModal::Scope);
+
+        // Seleccionar alcance específico
+        state.routing_modal_scope_idx = 1;
+        state.active_routing_modal = RoutingModal::SpecificYear;
+        state.routing_input_year = "2023".to_string();
+        state.specific_year = Some(2023);
+        state.active_routing_modal = RoutingModal::None;
+        assert_eq!(state.specific_year, Some(2023));
+        assert_eq!(state.active_routing_modal, RoutingModal::None);
     }
 }

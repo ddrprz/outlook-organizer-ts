@@ -20,7 +20,7 @@ use ratatui::{
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
-use app::{AppState, ExplorerItemType, RoutingGranularity, TransferMode, WizardStep};
+use app::{AppState, ExplorerItemType, RoutingGranularity, RoutingModal, TransferMode, WizardStep};
 use backend::{messages::BackendMessage, runner::BackendRunner};
 use report::{html::generate_html_report, json::generate_audit_json};
 use ui::{
@@ -347,17 +347,112 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         _ => handle_navigation_keys(&mut state, key.code),
                     },
-                    WizardStep::Routing => match key.code {
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            state.routing_enabled = !state.routing_enabled;
+                    WizardStep::Routing => {
+                        match state.active_routing_modal {
+                            RoutingModal::Criterion => match key.code {
+                                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                                    state.routing_modal_criterion_idx = if state.routing_modal_criterion_idx == 0 { 1 } else { 0 };
+                                }
+                                KeyCode::Enter => {
+                                    if state.routing_modal_criterion_idx == 0 {
+                                        state.routing_granularity = RoutingGranularity::Years;
+                                    } else {
+                                        state.routing_granularity = RoutingGranularity::YearsAndMonths;
+                                    }
+                                    state.routing_modal_scope_idx = 0;
+                                    state.active_routing_modal = RoutingModal::Scope;
+                                }
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                    state.active_routing_modal = RoutingModal::None;
+                                }
+                                _ => {}
+                            },
+                            RoutingModal::Scope => match key.code {
+                                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
+                                    state.routing_modal_scope_idx = if state.routing_modal_scope_idx == 0 { 1 } else { 0 };
+                                }
+                                KeyCode::Enter => {
+                                    if state.routing_modal_scope_idx == 0 {
+                                        state.specific_year = None;
+                                        state.specific_month = None;
+                                        state.routing_all_years = true;
+                                        state.routing_all_months = true;
+                                        state.active_routing_modal = RoutingModal::None;
+                                    } else if state.routing_granularity == RoutingGranularity::Years {
+                                        state.active_routing_modal = RoutingModal::SpecificYear;
+                                    } else {
+                                        state.active_routing_modal = RoutingModal::SpecificMonth;
+                                    }
+                                }
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                    state.active_routing_modal = RoutingModal::Criterion;
+                                }
+                                _ => {}
+                            },
+                            RoutingModal::SpecificYear => match key.code {
+                                KeyCode::Char(c) if c.is_ascii_digit() => {
+                                    if state.routing_input_year.len() < 4 {
+                                        state.routing_input_year.push(c);
+                                    }
+                                }
+                                KeyCode::Backspace => {
+                                    state.routing_input_year.pop();
+                                }
+                                KeyCode::Enter => {
+                                    if let Ok(y) = state.routing_input_year.parse::<u32>()
+                                        && (1990..=2050).contains(&y) {
+                                        state.specific_year = Some(y);
+                                        state.specific_month = None;
+                                        state.routing_all_years = false;
+                                        state.active_routing_modal = RoutingModal::None;
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    state.active_routing_modal = RoutingModal::Scope;
+                                }
+                                _ => {}
+                            },
+                            RoutingModal::SpecificMonth => match key.code {
+                                KeyCode::Left | KeyCode::Char('h') => {
+                                    if state.routing_input_month > 1 {
+                                        state.routing_input_month -= 1;
+                                    } else {
+                                        state.routing_input_month = 12;
+                                    }
+                                }
+                                KeyCode::Right | KeyCode::Char('l') => {
+                                    if state.routing_input_month < 12 {
+                                        state.routing_input_month += 1;
+                                    } else {
+                                        state.routing_input_month = 1;
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if let Ok(y) = state.routing_input_year.parse::<u32>() {
+                                        state.specific_year = Some(y);
+                                    } else {
+                                        state.specific_year = Some(2024);
+                                    }
+                                    state.specific_month = Some(state.routing_input_month);
+                                    state.routing_all_months = false;
+                                    state.active_routing_modal = RoutingModal::None;
+                                }
+                                KeyCode::Esc => {
+                                    state.active_routing_modal = RoutingModal::Scope;
+                                }
+                                _ => {}
+                            },
+                            RoutingModal::None => match key.code {
+                                KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('m') | KeyCode::Char('M') | KeyCode::Char(' ') => {
+                                    state.active_routing_modal = RoutingModal::Criterion;
+                                    state.routing_modal_criterion_idx = match state.routing_granularity {
+                                        RoutingGranularity::Years => 0,
+                                        RoutingGranularity::YearsAndMonths => 1,
+                                    };
+                                }
+                                _ => handle_navigation_keys(&mut state, key.code),
+                            },
                         }
-                        KeyCode::Char('g') | KeyCode::Char('G') => {
-                            state.routing_granularity = match state.routing_granularity {
-                                RoutingGranularity::Years => RoutingGranularity::YearsAndMonths,
-                                RoutingGranularity::YearsAndMonths => RoutingGranularity::Years,
-                            };
-                        }
-                        _ => handle_navigation_keys(&mut state, key.code),
                     },
                     WizardStep::Deduplication => match key.code {
                         KeyCode::Char('d') | KeyCode::Char('D') => {
@@ -505,7 +600,11 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::PstSource => vec![("↑/↓", "Navegar"), ("Espacio", "Marcar"), ("E", "Explorar"), ("A/N", "Todos/Ninguno"), ("Enter", "Siguiente")],
         WizardStep::Mailbox => vec![("↑/↓", "Navegar"), ("Espacio", "Marcar"), ("A/N", "Todos/Ninguno"), ("R", "Recargar"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::FoldersMode => vec![("1-4", "Carpetas"), ("M", "Copiar/Mover"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
-        WizardStep::Routing => vec![("R", "Enrutamiento On/Off"), ("G", "Granularidad"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
+        WizardStep::Routing => if state.active_routing_modal != RoutingModal::None {
+            vec![("↑/↓", "Mover"), ("Enter", "Confirmar"), ("Esc/Q", "Cancelar")]
+        } else {
+            vec![("C", "Cambiar Criterio"), ("Enter", "Siguiente"), ("Esc", "Atrás")]
+        },
         WizardStep::Deduplication => vec![("D", "Duplicados On/Off"), ("P", "Revisión Profunda"), ("Enter", "Siguiente")],
         WizardStep::Filters => vec![("T", "Throttling"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::Summary => vec![("Enter", "Iniciar Operación"), ("Esc", "Atrás"), ("q", "Salir")],
