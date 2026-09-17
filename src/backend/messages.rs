@@ -31,4 +31,8 @@ pub enum BackendMessage {
         duplicates: u64,
         errors: u64,
     },
+    #[serde(rename = "mailboxes_loaded")]
+    MailboxesLoaded {
+        items: Vec<crate::app::MailboxItem>,
+    },
 }

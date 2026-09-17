@@ -45,6 +45,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx): (mpsc::UnboundedSender<BackendMessage>, UnboundedReceiver<BackendMessage>) = mpsc::unbounded_channel();
     let mut worker_child: Option<tokio::process::Child> = None;
 
+    // Disparar detección inicial de buzones MAPI de Outlook en segundo plano
+    state.is_loading_mailboxes = true;
+    BackendRunner::trigger_mailbox_discovery(
+        if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
+        tx.clone(),
+    );
+
     // Event Loop Reactivo de Ultra Bajo Overhead (Sin busy-loop, CPU < 1%)
     while !state.should_quit {
         // Consumir mensajes asíncronos de telemetría de PowerShell
@@ -90,13 +97,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     state.step = WizardStep::Completion;
                 }
+                BackendMessage::MailboxesLoaded { items } => {
+                    state.is_loading_mailboxes = false;
+                    if !items.is_empty() {
+                        state.discovered_mailboxes = items;
+                        state.selected_mailbox_idx = 0;
+                    }
+                }
             }
         }
 
         terminal.draw(|f| draw_ui(f, &state))?;
 
-        if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
+        if event::poll(Duration::from_millis(50))?
+            && let Event::Key(key) = event::read()? {
                 // FILTRAR EVENTOS: Ignorar Release para prevenir saltos dobles en Windows
                 if key.kind != KeyEventKind::Press {
                     continue;
@@ -209,10 +223,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.explorer.navigate_up();
                         }
                         KeyCode::Char(' ') => {
-                            if let Some(entry) = state.explorer.entries.get_mut(state.explorer.selected_idx) {
-                                if entry.item_type == ExplorerItemType::PstFile {
-                                    entry.selected = !entry.selected;
-                                }
+                            if let Some(entry) = state.explorer.entries.get_mut(state.explorer.selected_idx)
+                                && entry.item_type == ExplorerItemType::PstFile {
+                                entry.selected = !entry.selected;
                             }
                         }
                         KeyCode::Char('c') | KeyCode::Char('C') => {
@@ -271,10 +284,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ => handle_navigation_keys(&mut state, key.code),
                     },
                     WizardStep::Mailbox => match key.code {
-                        KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char(' ') => {
-                            state.is_shared_mailbox = !state.is_shared_mailbox;
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if state.selected_mailbox_idx > 0 {
+                                state.selected_mailbox_idx -= 1;
+                            }
                         }
-                        _ => handle_navigation_keys(&mut state, key.code),
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if state.selected_mailbox_idx + 1 < state.discovered_mailboxes.len() {
+                                state.selected_mailbox_idx += 1;
+                            }
+                        }
+                        KeyCode::Char(' ') => {
+                            if let Some(item) = state.discovered_mailboxes.get_mut(state.selected_mailbox_idx) {
+                                item.selected = !item.selected;
+                            }
+                            state.mailbox_warning_notice = None;
+                        }
+                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                            for item in &mut state.discovered_mailboxes {
+                                item.selected = true;
+                            }
+                            state.mailbox_warning_notice = None;
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                            for item in &mut state.discovered_mailboxes {
+                                item.selected = false;
+                            }
+                        }
+                        KeyCode::Char('r') | KeyCode::Char('R') => {
+                            state.is_loading_mailboxes = true;
+                            state.mailbox_warning_notice = None;
+                            BackendRunner::trigger_mailbox_discovery(
+                                if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
+                                tx.clone(),
+                            );
+                        }
+                        KeyCode::Enter => {
+                            if state.selected_mailboxes().is_empty() {
+                                state.mailbox_warning_notice = Some("Debe seleccionar al menos un buzón de destino para continuar.".to_string());
+                            } else {
+                                state.mailbox_warning_notice = None;
+                                state.next_step();
+                            }
+                        }
+                        KeyCode::Esc | KeyCode::Backspace => {
+                            state.mailbox_warning_notice = None;
+                            state.prev_step();
+                        }
+                        KeyCode::Char('q') | KeyCode::Char('Q') => state.should_quit = true,
+                        _ => {}
                     },
                     WizardStep::FoldersMode => match key.code {
                         KeyCode::Char('1') => state.include_inbox = !state.include_inbox,
@@ -337,11 +395,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Esc | KeyCode::Char('q') => {
                             state.progress.graceful_cancelling = true;
                             state.log_event("[SISTEMA] Solicitud de parada segura recibida. Notificando a PowerShell...".to_string());
-                            if let Some(ref mut child) = worker_child {
-                                if let Some(ref mut stdin) = child.stdin {
-                                    use tokio::io::AsyncWriteExt;
-                                    let _ = stdin.write_all(b"abort\n").await;
-                                }
+                            if let Some(ref mut child) = worker_child
+                                && let Some(ref mut stdin) = child.stdin {
+                                use tokio::io::AsyncWriteExt;
+                                let _ = stdin.write_all(b"abort\n").await;
                             }
                         }
                         _ => {}
@@ -365,7 +422,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-    }
 
     // Restauración limpia de la terminal
     disable_raw_mode()?;
@@ -447,7 +503,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::Welcome => vec![("↑/↓", "Navegar"), ("Enter", "Seleccionar"), ("1-4", "Acceso"), ("P", "Perfil"), ("Q", "Salir")],
         WizardStep::FileExplorer => vec![("↑/↓", "Navegar"), ("Enter", "Abrir"), ("Backspace", "Subir"), ("Espacio", "Marcar"), ("C", "Confirmar"), ("Esc", "Volver")],
         WizardStep::PstSource => vec![("↑/↓", "Navegar"), ("Espacio", "Marcar"), ("E", "Explorar"), ("A/N", "Todos/Ninguno"), ("Enter", "Siguiente")],
-        WizardStep::Mailbox => vec![("S", "Personal/Compartido"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
+        WizardStep::Mailbox => vec![("↑/↓", "Navegar"), ("Espacio", "Marcar"), ("A/N", "Todos/Ninguno"), ("R", "Recargar"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::FoldersMode => vec![("1-4", "Carpetas"), ("M", "Copiar/Mover"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::Routing => vec![("R", "Enrutamiento On/Off"), ("G", "Granularidad"), ("Enter", "Siguiente"), ("Esc", "Atrás")],
         WizardStep::Deduplication => vec![("D", "Duplicados On/Off"), ("P", "Revisión Profunda"), ("Enter", "Siguiente")],
