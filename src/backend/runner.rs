@@ -75,42 +75,58 @@ impl BackendRunner {
         let stdout = child.stdout.take().expect("Failed to capture stdout");
         let tx_out = tx.clone();
 
-        // Tarea asíncrona para telemetría stdout
+        // Tarea asíncrona para telemetría stdout con lectura resiliente ante codificaciones (UTF-8 lossy)
         tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
+            let mut reader = BufReader::new(stdout);
+            let mut buf = Vec::new();
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.trim().is_empty() {
-                    continue;
-                }
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => break, // Fin del flujo (EOF)
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf).trim().to_string();
+                        if line.is_empty() {
+                            continue;
+                        }
 
-                if let Ok(msg) = serde_json::from_str::<BackendMessage>(&line) {
-                    let _ = tx_out.send(msg);
-                } else {
-                    let _ = tx_out.send(BackendMessage::Log {
-                        timestamp: "LIVE".to_string(),
-                        level: "INFO".to_string(),
-                        message: line,
-                    });
+                        if let Ok(msg) = serde_json::from_str::<BackendMessage>(&line) {
+                            let _ = tx_out.send(msg);
+                        } else {
+                            let _ = tx_out.send(BackendMessage::Log {
+                                timestamp: "LIVE".to_string(),
+                                level: "INFO".to_string(),
+                                message: line,
+                            });
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
         });
 
-        // Tarea asíncrona para drenar stderr y evitar bloqueos de pipe
+        // Tarea asíncrona para drenar stderr y registrar advertencias sin bloquear
         let stderr = child.stderr.take().expect("Failed to capture stderr");
         let tx_err = tx.clone();
         tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
+            let mut reader = BufReader::new(stderr);
+            let mut buf = Vec::new();
 
-            while let Ok(Some(line)) = lines.next_line().await {
-                if !line.trim().is_empty() {
-                    let _ = tx_err.send(BackendMessage::Log {
-                        timestamp: "WARN".to_string(),
-                        level: "WARN".to_string(),
-                        message: format!("[PowerShell] {}", line),
-                    });
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf).trim().to_string();
+                        if !line.is_empty() {
+                            let _ = tx_err.send(BackendMessage::Log {
+                                timestamp: "WARN".to_string(),
+                                level: "WARN".to_string(),
+                                message: format!("[PowerShell] {}", line),
+                            });
+                        }
+                    }
+                    Err(_) => break,
                 }
             }
         });

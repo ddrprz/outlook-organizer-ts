@@ -31,7 +31,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         pst_percent,
         progress.current_pst_items,
         progress.current_pst_total,
-        if progress.current_pst_name.is_empty() { "Archivo_2023.pst" } else { &progress.current_pst_name }
+        if progress.current_pst_name.is_empty() { "Preparando importación..." } else { &progress.current_pst_name }
     );
     let pst_gauge = Gauge::default()
         .block(
@@ -136,10 +136,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let log_lines: Vec<Line> = if state.activity_log.is_empty() {
         vec![
-            Line::from(Span::styled("[16:45:10] Inicializando sesión MAPI...", Style::default().fg(Theme::TEXT_MUTED))),
-            Line::from(Span::styled("[16:45:11] Montando Archivo_2023.pst en modo sólo lectura...", Style::default().fg(Theme::BRAND_PRIMARY))),
-            Line::from(Span::styled("[16:45:12] Procesando correos en Bandeja de entrada...", Style::default().fg(Theme::TEXT_MAIN))),
-            Line::from(Span::styled("[16:45:13] OK: Correo 'Reunión de Equipo' transferido a Inbox/2023.", Style::default().fg(Theme::SUCCESS))),
+            Line::from(Span::styled("[SISTEMA] Conectando con sesión MAPI de Outlook...", Style::default().fg(Theme::TEXT_MUTED))),
         ]
     } else {
         state.activity_log.iter().map(|s| Line::from(s.as_str())).collect()

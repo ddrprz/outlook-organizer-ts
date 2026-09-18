@@ -1,14 +1,18 @@
 <#
 .SYNOPSIS
-    Worker de automatización Outlook COM / MAPI con telemetría en tiempo real
-    y protocolo de parada segura para Outlook Organizer TS.
+    Motor de migración e importación Outlook COM / MAPI de alto rendimiento con
+    telemetría en tiempo real, deduplicación, enrutamiento temporal y protocolo
+    de parada segura (Graceful Shutdown) para Outlook Organizer TS.
 #>
 param (
     [string]$ConfigFile = "",
     [string]$AbortFile = ""
 )
 
-$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+$OutputEncoding           = [System.Text.Encoding]::UTF8
+$ErrorActionPreference    = "Stop"
 
 function Send-Telemetry([hashtable]$Payload) {
     $json = $Payload | ConvertTo-Json -Compress
@@ -26,6 +30,112 @@ function Log-Message([string]$msg, [string]$level = "INFO") {
     }
 }
 
+function Get-OrCreateFolder($parentFolder, [string]$subfolderName) {
+    try {
+        return $parentFolder.Folders.Item($subfolderName)
+    } catch {
+        return $parentFolder.Folders.Add($subfolderName)
+    }
+}
+
+function Get-FolderType([string]$folderName) {
+    $norm = $folderName.Trim().ToLower()
+    if ($norm -eq "bandeja de entrada" -or $norm -eq "inbox") {
+        return "inbox"
+    }
+    if ($norm -eq "elementos enviados" -or $norm -eq "sent items" -or $norm -eq "sent") {
+        return "sent"
+    }
+    if ($norm -eq "elementos eliminados" -or $norm -eq "deleted items" -or $norm -eq "trash") {
+        return "deleted"
+    }
+    return "custom"
+}
+
+function Get-DestBaseFolder($destStore, [string]$folderType, [string]$customName) {
+    $root = $destStore.GetRootFolder()
+    switch ($folderType) {
+        "inbox" {
+            try { return $destStore.GetDefaultFolder(6) } catch {}
+            foreach ($f in $root.Folders) {
+                if ($f.Name -match "^(Bandeja de entrada|Inbox)$") { return $f }
+            }
+            return Get-OrCreateFolder $root "Bandeja de entrada"
+        }
+        "sent" {
+            try { return $destStore.GetDefaultFolder(5) } catch {}
+            foreach ($f in $root.Folders) {
+                if ($f.Name -match "^(Elementos enviados|Sent Items)$") { return $f }
+            }
+            return Get-OrCreateFolder $root "Elementos enviados"
+        }
+        "deleted" {
+            try { return $destStore.GetDefaultFolder(3) } catch {}
+            foreach ($f in $root.Folders) {
+                if ($f.Name -match "^(Elementos eliminados|Deleted Items)$") { return $f }
+            }
+            return Get-OrCreateFolder $root "Elementos eliminados"
+        }
+        default {
+            return Get-OrCreateFolder $root $customName
+        }
+    }
+}
+
+function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.HashSet[string]]$seenSet, [bool]$deepScan) {
+    try {
+        $items = $targetFolder.Items
+        $count = $items.Count
+        for ($k = 1; $k -le $count; $k++) {
+            $existing = $null
+            try {
+                $existing = $items.Item($k)
+                $mid = $null
+                try {
+                    $mid = $existing.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                } catch {}
+                if ($mid -and $mid.Trim() -ne "") {
+                    [void]$seenSet.Add($mid.Trim())
+                }
+                $subj = $existing.Subject
+                $sender = $existing.SenderEmailAddress
+                $t = $null
+                try { $t = $existing.ReceivedTime } catch {}
+                if ($null -ne $t) {
+                    $cKey = "$subj|$sender|$($t.ToString('yyyyMMddHHmmss'))"
+                    [void]$seenSet.Add($cKey)
+                }
+            } catch {}
+            finally {
+                if ($null -ne $existing) {
+                    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+                }
+            }
+        }
+
+        if ($deepScan) {
+            foreach ($sub in $targetFolder.Folders) {
+                Index-TargetFolderItems $sub $seenSet $deepScan
+            }
+        }
+    } catch {}
+}
+
+$monthNames = @{
+    1  = "01-Enero"
+    2  = "02-Febrero"
+    3  = "03-Marzo"
+    4  = "04-Abril"
+    5  = "05-Mayo"
+    6  = "06-Junio"
+    7  = "07-Julio"
+    8  = "08-Agosto"
+    9  = "09-Septiembre"
+    10 = "10-Octubre"
+    11 = "11-Noviembre"
+    12 = "12-Diciembre"
+}
+
 Log-Message "Iniciando worker de PowerShell con enlace MAPI..."
 
 # 1. Cargar archivo de configuración estructurado
@@ -34,17 +144,27 @@ if ($ConfigFile -and (Test-Path $ConfigFile)) {
     try {
         $raw = Get-Content -Path $ConfigFile -Raw -Encoding UTF8
         $config = $raw | ConvertFrom-Json
-        Log-Message "Configuración de migración cargada desde archivo temporal."
+        Log-Message "Configuración cargada correctamente."
     } catch {
-        Log-Message "Advertencia al leer archivo de configuración: $_" "WARN"
+        Log-Message "Advertencia al leer configuración: $_" "WARN"
     }
 }
 
 $outlook = $null
 $namespace = $null
+$storesToUnmount = @()
+$totalImported = 0
+$totalDuplicates = 0
+$totalErrors = 0
+$isAborted = $false
+$globalProcessedItems = 0
+$globalTotalItems = 0
+$startTime = [DateTime]::UtcNow
+$lastTelemetryTime = [DateTime]::MinValue
+$targetSets = @{}
 
 try {
-    # 2. Enlace con Outlook COM en modo STA
+    # 2. Conectar a Outlook COM en modo STA
     try {
         $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
         Log-Message "Enlace establecido con instancia activa de Outlook."
@@ -55,15 +175,13 @@ try {
 
     $namespace = $outlook.GetNamespace("MAPI")
 
-    # 3. Inicialización MAPI inteligente (evita bloqueos o llamadas redundantes a Logon)
+    # 3. Inicialización MAPI (reutilizar sesión o logon)
     $profileToUse = if ($config -and $config.profile_name) { $config.profile_name } else { "" }
-
     if ($profileToUse -and $profileToUse.Trim() -ne "") {
-        Log-Message "Conectando sesión MAPI al perfil especificado: $profileToUse"
+        Log-Message "Conectando sesión MAPI al perfil: $profileToUse"
         $namespace.Logon($profileToUse.Trim(), "", $false, $false)
-        Log-Message "Sesión MAPI lista con perfil $profileToUse."
+        Log-Message "Sesión MAPI lista con perfil: $profileToUse."
     } else {
-        # Si Outlook ya está abierto y tiene perfil activo, reutilizarlo directamente
         $activeProfile = $null
         try { $activeProfile = $namespace.CurrentProfileName } catch {}
 
@@ -80,59 +198,328 @@ try {
         }
     }
 
-    # 4. Determinar lista de PSTs a procesar
+    # 4. Localizar buzón de destino
+    $destStore = $null
+    $targetName = if ($config -and $config.target_mailboxes -and $config.target_mailboxes.Count -gt 0) {
+        $config.target_mailboxes[0]
+    } else {
+        ""
+    }
+
+    if ($targetName -and $targetName.Trim() -ne "") {
+        foreach ($s in $namespace.Stores) {
+            if ($s.DisplayName -like "*$targetName*" -or ($s.ExchangeStoreType -ne $null -and $s.DisplayName -eq $targetName)) {
+                $destStore = $s
+                break
+            }
+        }
+    }
+
+    if ($null -eq $destStore) {
+        $destStore = $namespace.DefaultStore
+        Log-Message "Buzón destino: usando almacén predeterminado '$($destStore.DisplayName)'."
+    } else {
+        Log-Message "Buzón destino encontrado: '$($destStore.DisplayName)'."
+    }
+
+    # 5. Determinar lista de archivos PST a procesar
     $pstList = @()
     if ($config -and $config.psts -and $config.psts.Count -gt 0) {
         $pstList = $config.psts
-    } else {
-        $pstList = @("Archivo_PST_Seleccionado.pst")
+    }
+
+    if ($pstList.Count -eq 0) {
+        Log-Message "No se especificaron archivos PST para procesar." "WARN"
     }
 
     $totalPsts = $pstList.Count
-    $totalImported = 0
-    $totalDuplicates = 0
-    $totalErrors = 0
-    $isAborted = $false
 
+    # 6. Iterar sobre cada archivo PST
     for ($pIdx = 0; $pIdx -lt $totalPsts; $pIdx++) {
         $pstPath = $pstList[$pIdx]
         $pstName = [System.IO.Path]::GetFileName($pstPath)
         if (-not $pstName) { $pstName = $pstPath }
 
-        Log-Message "Procesando archivo [$($pIdx + 1)/$totalPsts]: $pstName"
+        if (-not (Test-Path $pstPath)) {
+            Log-Message "Archivo PST no encontrado en disco: $pstPath" "ERROR"
+            $totalErrors++
+            continue
+        }
 
-        $itemsInPst = 50
+        Log-Message "Montando archivo PST [$($pIdx + 1)/$totalPsts]: $pstName"
 
-        for ($i = 1; $i -le $itemsInPst; $i++) {
-            # Verificar señal de cancelación por archivo flag (100% no bloqueante)
-            if ($AbortFile -and (Test-Path $AbortFile)) {
-                Log-Message "Señal de parada segura recibida. Desmontando PST ordenadamente..." "WARN"
-                $isAborted = $true
+        # Verificar si ya está montado
+        $pstStore = $null
+        foreach ($s in $namespace.Stores) {
+            if ($s.FilePath -and ($s.FilePath.Trim().ToLower() -eq $pstPath.Trim().ToLower())) {
+                $pstStore = $s
                 break
             }
+        }
 
-            Start-Sleep -Milliseconds 35
-            $totalImported++
+        $wasMountedByUs = $false
+        if ($pstStore) {
+            Log-Message "PST ya cargado en sesión MAPI: $($pstStore.DisplayName)."
+        } else {
+            try {
+                $namespace.AddStoreEx($pstPath, 1) # 1 = olStoreDefault (Unicode)
+                Start-Sleep -Milliseconds 150
+                foreach ($s in $namespace.Stores) {
+                    if ($s.FilePath -and ($s.FilePath.Trim().ToLower() -eq $pstPath.Trim().ToLower())) {
+                        $pstStore = $s
+                        break
+                    }
+                }
+                if ($pstStore) {
+                    $wasMountedByUs = $true
+                    $storesToUnmount += $pstStore
+                    Log-Message "PST montado exitosamente en MAPI."
+                }
+            } catch {
+                Log-Message "Error al montar PST '$pstName': $_" "ERROR"
+                $totalErrors++
+                continue
+            }
+        }
 
-            if ($i % 5 -eq 0 -or $i -eq $itemsInPst) {
-                $speed = 28.5
-                $remSecs = [math]::Max(1, [math]::Round(($itemsInPst - $i) / $speed))
-                Send-Telemetry @{
-                    type         = "progress"
-                    pst_index    = $pIdx + 1
-                    pst_total    = $totalPsts
-                    pst_name     = $pstName
-                    item_current = $i
-                    item_total   = $itemsInPst
-                    speed_mps    = $speed
-                    eta_seconds  = $remSecs
+        if ($null -eq $pstStore) {
+            Log-Message "No se pudo acceder al almacén MAPI de: $pstName" "ERROR"
+            $totalErrors++
+            continue
+        }
+
+        # 7. Identificar carpetas de origen en el PST
+        $pstRoot = $null
+        try {
+            $pstRoot = $pstStore.GetRootFolder()
+        } catch {
+            Log-Message "No se pudo obtener carpeta raíz de: $pstName" "ERROR"
+            $totalErrors++
+            continue
+        }
+
+        $candidateFolders = @()
+        foreach ($f in $pstRoot.Folders) {
+            $fType = Get-FolderType $f.Name
+            $include = $false
+            switch ($fType) {
+                "inbox"   { $include = if ($config) { [bool]$config.include_inbox } else { $true } }
+                "sent"    { $include = if ($config) { [bool]$config.include_sent } else { $true } }
+                "deleted" { $include = if ($config) { [bool]$config.include_deleted } else { $false } }
+                "custom"  { $include = if ($config) { [bool]$config.include_custom_folders } else { $true } }
+            }
+            if ($include) {
+                $candidateFolders += @{ Folder = $f; Type = $fType; Name = $f.Name }
+            }
+        }
+
+        # Pre-conteo de elementos para barra de progreso precisa
+        $totalPstItems = 0
+        foreach ($cf in $candidateFolders) {
+            try { $totalPstItems += $cf.Folder.Items.Count } catch {}
+        }
+
+        Log-Message "PST '$pstName': $totalPstItems correos encontrados en carpetas seleccionadas."
+
+        Send-Telemetry @{
+            type         = "progress"
+            pst_index    = $pIdx + 1
+            pst_total    = $totalPsts
+            pst_name     = $pstName
+            item_current = 0
+            item_total   = $totalPstItems
+            speed_mps    = 0.0
+            eta_seconds  = 0
+        }
+
+        $pstProcessedCount = 0
+
+        # 8. Procesar cada carpeta seleccionada
+        foreach ($cf in $candidateFolders) {
+            if ($isAborted) { break }
+
+            $srcFolder = $cf.Folder
+            $folderItems = $null
+            $itemCount = 0
+            try {
+                $folderItems = $srcFolder.Items
+                $itemCount = $folderItems.Count
+            } catch {
+                Log-Message "No se pudieron leer elementos de carpeta '$($cf.Name)': $_" "WARN"
+                continue
+            }
+
+            Log-Message "Procesando carpeta '$($cf.Name)' ($itemCount correos)..."
+
+            # Iterar elementos en orden inverso (seguro para Copy y Move)
+            for ($idx = $itemCount; $idx -ge 1; $idx--) {
+                # Comprobar protocolo de parada segura
+                if ($AbortFile -and (Test-Path $AbortFile)) {
+                    Log-Message "Señal de parada segura recibida. Deteniendo proceso ordenadamente..." "WARN"
+                    $isAborted = $true
+                    break
+                }
+
+                $item = $null
+                try {
+                    $item = $folderItems.Item($idx)
+                } catch {
+                    $totalErrors++
+                    $pstProcessedCount++
+                    continue
+                }
+
+                if ($null -eq $item) {
+                    $pstProcessedCount++
+                    continue
+                }
+
+                try {
+                    # Extraer fecha del correo
+                    $rcvd = $null
+                    try { $rcvd = $item.ReceivedTime } catch {}
+                    if ($null -eq $rcvd -or $rcvd.Year -lt 1980) {
+                        try { $rcvd = $item.SentOn } catch {}
+                    }
+                    if ($null -eq $rcvd) {
+                        $rcvd = Get-Date
+                    }
+
+                    # Filtro por año específico si está configurado
+                    if ($config -and $config.specific_year -and $rcvd.Year -ne [int]$config.specific_year) {
+                        $pstProcessedCount++
+                        continue
+                    }
+
+                    # Filtro por mes específico si está configurado
+                    if ($config -and $config.specific_month -and $rcvd.Month -ne [int]$config.specific_month) {
+                        $pstProcessedCount++
+                        continue
+                    }
+
+                    # Determinar carpeta de destino base
+                    $baseDest = Get-DestBaseFolder $destStore $cf.Type $cf.Name
+                    $finalDest = $baseDest
+
+                    # Enrutamiento jerárquico por fecha
+                    if ($config -and $config.routing_enabled) {
+                        $yearName = "$($rcvd.Year)"
+                        $yearFolder = Get-OrCreateFolder $baseDest $yearName
+                        if ($config.routing_granularity -eq "YearsAndMonths") {
+                            $mName = if ($monthNames.ContainsKey($rcvd.Month)) { $monthNames[$rcvd.Month] } else { "{0:D2}" -f $rcvd.Month }
+                            $finalDest = Get-OrCreateFolder $yearFolder $mName
+                        } else {
+                            $finalDest = $yearFolder
+                        }
+                    }
+
+                    # Deduplicación inteligente
+                    $destId = $finalDest.EntryID
+                    if (-not $targetSets.ContainsKey($destId)) {
+                        $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
+                        if ($config -and $config.deduplication_enabled) {
+                            Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
+                        }
+                    }
+                    $folderSet = $targetSets[$destId]
+
+                    $mid = $null
+                    try {
+                        $mid = $item.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                    } catch {}
+                    $subj = $item.Subject
+                    $sender = $item.SenderEmailAddress
+                    $cKey = "$subj|$sender|$($rcvd.ToString('yyyyMMddHHmmss'))"
+
+                    $isDuplicate = $false
+                    if ($config -and $config.deduplication_enabled) {
+                        if (($mid -and $folderSet.Contains($mid.Trim())) -or $folderSet.Contains($cKey)) {
+                            $isDuplicate = $true
+                        }
+                    }
+
+                    if ($isDuplicate) {
+                        $totalDuplicates++
+                        $pstProcessedCount++
+                        continue
+                    }
+
+                    # Transferencia: Copiar (predeterminado) o Mover
+                    if ($config -and $config.transfer_mode -eq "Move") {
+                        $item.Move($finalDest) | Out-Null
+                        $totalImported++
+                        $pstProcessedCount++
+                    } else {
+                        $copy = $item.Copy()
+                        $copy.Move($finalDest) | Out-Null
+                        if ($null -ne $copy) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                        }
+                        $totalImported++
+                        $pstProcessedCount++
+                    }
+
+                    # Registrar clave para deduplicar futuros correos de la misma sesión
+                    if ($mid -and $mid.Trim() -ne "") {
+                        [void]$folderSet.Add($mid.Trim())
+                    }
+                    [void]$folderSet.Add($cKey)
+
+                    # Telemetría en vivo (cada 5 items o cada 250ms)
+                    $now = [DateTime]::UtcNow
+                    if ($pstProcessedCount % 5 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 250 -or $pstProcessedCount -eq $totalPstItems) {
+                        $elapsedSec = ($now - $startTime).TotalSeconds
+                        $speed = if ($elapsedSec -gt 0) { [math]::Round($totalImported / $elapsedSec, 1) } else { 0.0 }
+                        $remaining = [math]::Max(0, $totalPstItems - $pstProcessedCount)
+                        $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
+
+                        Send-Telemetry @{
+                            type         = "progress"
+                            pst_index    = $pIdx + 1
+                            pst_total    = $totalPsts
+                            pst_name     = $pstName
+                            item_current = $pstProcessedCount
+                            item_total   = $totalPstItems
+                            speed_mps    = $speed
+                            eta_seconds  = $eta
+                        }
+                        $lastTelemetryTime = $now
+                    }
+
+                    # Throttling adaptativo
+                    if ($config -and $config.adaptive_throttling) {
+                        Start-Sleep -Milliseconds 12
+                    }
+
+                    if ($pstProcessedCount % 50 -eq 0) {
+                        [System.GC]::Collect()
+                    }
+                }
+                catch {
+                    $totalErrors++
+                    $pstProcessedCount++
+                }
+                finally {
+                    if ($null -ne $item) {
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                    }
                 }
             }
         }
 
-        if ($isAborted) {
-            break
+        # Desmontar PST si fue montado en esta ejecución
+        if ($wasMountedByUs -and -not $isAborted) {
+            try {
+                $rootF = $pstStore.GetRootFolder()
+                $namespace.RemoveStore($rootF)
+                $storesToUnmount = $storesToUnmount | Where-Object { $_ -ne $pstStore }
+                Log-Message "PST '$pstName' desmontado limpiamente."
+            } catch {
+                Log-Message "Aviso al desmontar PST: $_" "WARN"
+            }
         }
+
+        if ($isAborted) { break }
     }
 
     $finalStatus = if ($isAborted) { "aborted" } else { "completed" }
@@ -140,34 +527,40 @@ try {
         type       = "finished"
         status     = $finalStatus
         imported   = $totalImported
-        duplicates = 2
+        duplicates = $totalDuplicates
         errors     = $totalErrors
     }
-    Log-Message "Operación finalizada exitosamente con estado: $finalStatus."
+    Log-Message "Operación finalizada con estado: $finalStatus. Total importados: $totalImported, Duplicados: $totalDuplicates, Errores: $totalErrors."
 }
 catch {
-    Log-Message "Error en automatización COM: $_" "ERROR"
+    Log-Message "Error fatal en automatización COM: $_" "ERROR"
     Send-Telemetry @{
         type       = "finished"
         status     = "failed"
         imported   = $totalImported
-        duplicates = 0
-        errors     = 1
+        duplicates = $totalDuplicates
+        errors     = ($totalErrors + 1)
     }
 }
 finally {
-    # PROTOCOLO DE PARADA SEGURA Y LIBERACIÓN ESTRICTA
     Log-Message "Ejecutando limpieza y liberación de punteros COM/MAPI..."
 
+    # Garantizar desmontaje de almacenes montados
+    if ($storesToUnmount -and $storesToUnmount.Count -gt 0) {
+        foreach ($st in $storesToUnmount) {
+            try {
+                $rootF = $st.GetRootFolder()
+                Log-Message "Desmontando PST residual: $($rootF.Name)..."
+                $namespace.RemoveStore($rootF)
+            } catch {}
+        }
+    }
+
     if ($null -ne $namespace) {
-        try {
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null
-        } catch {}
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null } catch {}
     }
     if ($null -ne $outlook) {
-        try {
-            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null
-        } catch {}
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null } catch {}
     }
 
     [System.GC]::Collect()
@@ -177,5 +570,5 @@ finally {
         try { Remove-Item -Path $AbortFile -Force -ErrorAction SilentlyContinue } catch {}
     }
 
-    Log-Message "Punteros COM liberados. PST desmontado de forma segura."
+    Log-Message "Punteros COM liberados y recursos finalizados con seguridad."
 }
