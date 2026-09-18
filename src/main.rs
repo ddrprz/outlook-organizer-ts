@@ -512,12 +512,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     WizardStep::Summary => match key.code {
                         KeyCode::Enter => {
+                            let selected_pst_paths: Vec<String> = state
+                                .discovered_psts
+                                .iter()
+                                .filter(|p| p.selected)
+                                .map(|p| p.path.clone())
+                                .collect();
+
+                            let total_psts = selected_pst_paths.len();
+                            let first_pst_name = selected_pst_paths
+                                .first()
+                                .and_then(|p| std::path::Path::new(p).file_name())
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("PST")
+                                .to_string();
+
+                            state.progress.total_psts = total_psts;
+                            state.progress.current_pst_idx = if total_psts > 0 { 1 } else { 0 };
+                            state.progress.current_pst_name = first_pst_name;
+                            state.progress.current_pst_items = 0;
+                            state.progress.current_pst_total = 0;
+                            state.progress.global_items_processed = 0;
+                            state.progress.global_items_total = 0;
+                            state.progress.imported_count = 0;
+                            state.progress.duplicates_skipped = 0;
+                            state.progress.error_count = 0;
+                            state.progress.graceful_cancelling = false;
+
                             state.next_step(); // Pasa a WizardStep::Execution
                             state.log_event("[SISTEMA] Iniciando subproceso PowerShell MAPI...".to_string());
 
                             let config = backend::runner::WorkerConfig {
                                 profile_name: if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
-                                psts: state.discovered_psts.iter().filter(|p| p.selected).map(|p| p.path.clone()).collect(),
+                                psts: selected_pst_paths,
                                 target_mailboxes: state.selected_mailboxes().iter().map(|m| m.display_name.clone()).collect(),
                                 transfer_mode: match state.transfer_mode {
                                     TransferMode::Copy => "Copy".to_string(),
