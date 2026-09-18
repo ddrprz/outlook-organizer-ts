@@ -227,20 +227,20 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             "↑/↓ mover | Enter confirmar | Q cancelar".to_string(),
         ),
         RoutingModal::YearScope => (
-            "--- Alcance de Anios ---".to_string(),
-            "Selecciona el alcance de anios para el procesamiento del PST:".to_string(),
+            "--- Alcance de Años ---".to_string(),
+            "Selecciona el alcance de años para el procesamiento del PST:".to_string(),
             "↑/↓ mover | Enter confirmar | Esc volver".to_string(),
         ),
         RoutingModal::SpecificYear => (
-            "--- Anio Especifico ---".to_string(),
-            "Ingrese el anio a procesar para el filtrado del PST:".to_string(),
+            "--- Año Específico ---".to_string(),
+            "Ingrese el año a procesar para el filtrado del PST:".to_string(),
             "0-9 escribir | Backspace borrar | Enter confirmar | Esc volver".to_string(),
         ),
         RoutingModal::MonthScope => {
             let sub = if let Some(y) = state.specific_year {
-                format!("Selecciona el alcance de meses para el anio {}:", y)
+                format!("Selecciona el alcance de meses para el año {}:", y)
             } else {
-                "Selecciona el alcance de meses para todos los anios:".to_string()
+                "Selecciona el alcance de meses para todos los años:".to_string()
             };
             (
                 "--- Alcance de Meses ---".to_string(),
@@ -250,12 +250,12 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
         }
         RoutingModal::SpecificMonth => {
             let sub = if let Some(y) = state.specific_year {
-                format!("Seleccione el mes a procesar para el anio {}:", y)
+                format!("Seleccione el mes a procesar para el año {}:", y)
             } else {
                 "Seleccione el mes a procesar:".to_string()
             };
             (
-                "--- Mes Especifico ---".to_string(),
+                "--- Mes Específico ---".to_string(),
                 sub,
                 "←/→ cambiar mes | Enter confirmar | Esc volver".to_string(),
             )
@@ -292,8 +292,8 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
     // 2. Opciones según el modal activo
     match state.active_routing_modal {
         RoutingModal::Criterion => {
-            let opt_years = "  Agrupado por Anos  (1 nivel: [Buzon] / <Anio>)";
-            let opt_months = "  Agrupado por Anos y Meses  (Jerarquico: [Buzon] / <Anio> / <Mes>)";
+            let opt_years = "  Agrupado por Años  (1 nivel: [Buzón] / <Año>)";
+            let opt_months = "  Agrupado por Años y Meses  (Jerárquico: [Buzón] / <Año> / <Mes>)";
 
             let line_years = if state.routing_modal_criterion_idx == 0 {
                 Line::from(Span::styled(
@@ -321,8 +321,8 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             f.render_widget(opts_p, chunks[2]);
         }
         RoutingModal::YearScope => {
-            let opt_all = "  Todos los anios (Recomendado - por defecto)";
-            let opt_spec = "  Un anio especifico";
+            let opt_all = "  Todos los años (Recomendado - por defecto)";
+            let opt_spec = "  Un año específico";
 
             let line_all = if state.routing_modal_year_scope_idx == 0 {
                 Line::from(Span::styled(
@@ -367,13 +367,13 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
         RoutingModal::MonthScope => {
             let (opt_all, opt_spec) = if let Some(y) = state.specific_year {
                 (
-                    format!("  Todos los meses del anio {} (Por defecto)", y),
-                    format!("  Un mes especifico del anio {}", y),
+                    format!("  Todos los meses del año {} (Por defecto)", y),
+                    format!("  Un mes específico del año {}", y),
                 )
             } else {
                 (
-                    "  Todos los meses de todos los anios (Por defecto)".to_string(),
-                    "  Un mes especifico (en todos los anios)".to_string(),
+                    "  Todos los meses de todos los años (Por defecto)".to_string(),
+                    "  Un mes específico (en todos los años)".to_string(),
                 )
             };
 
