@@ -318,9 +318,10 @@ pub enum RoutingGranularity {
 pub enum RoutingModal {
     None,
     Criterion,     // Criterio de Enrutamiento (Años vs Meses)
-    Scope,         // Alcance de escaneo (Todos vs Específico)
-    SpecificYear,  // Año específico
-    SpecificMonth, // Mes específico
+    YearScope,     // Alcance de años (Todos los años vs Año específico)
+    SpecificYear,  // Año específico (Input numérico)
+    MonthScope,    // Alcance de meses (Todos los meses [contextual] vs Mes específico)
+    SpecificMonth, // Mes específico (Selector horizontal)
 }
 
 #[derive(Debug, Clone)]
@@ -402,7 +403,8 @@ pub struct AppState {
     pub routing_all_months: bool,
     pub active_routing_modal: RoutingModal,
     pub routing_modal_criterion_idx: usize,
-    pub routing_modal_scope_idx: usize,
+    pub routing_modal_year_scope_idx: usize,
+    pub routing_modal_month_scope_idx: usize,
     pub routing_input_year: String,
     pub routing_input_month: u32,
 
@@ -470,7 +472,8 @@ impl AppState {
             routing_all_months: true,
             active_routing_modal: RoutingModal::None,
             routing_modal_criterion_idx: 0,
-            routing_modal_scope_idx: 0,
+            routing_modal_year_scope_idx: 0,
+            routing_modal_month_scope_idx: 0,
             routing_input_year: "2024".to_string(),
             routing_input_month: 1,
             deduplication_enabled: true,
@@ -516,6 +519,8 @@ impl AppState {
                     RoutingGranularity::Years => 0,
                     RoutingGranularity::YearsAndMonths => 1,
                 };
+                self.routing_modal_year_scope_idx = 0;
+                self.routing_modal_month_scope_idx = 0;
                 WizardStep::Routing
             }
             WizardStep::Routing => {
@@ -648,26 +653,80 @@ mod tests {
     }
 
     #[test]
-    fn test_routing_modals() {
+    fn test_routing_default_all_years_all_months() {
         let mut state = AppState::new();
         state.step = WizardStep::FoldersMode;
         state.next_step();
         assert_eq!(state.step, WizardStep::Routing);
         assert_eq!(state.active_routing_modal, RoutingModal::Criterion);
 
-        // Cambiar a Meses
+        // Seleccionar granularidad de Meses (Años y Meses)
         state.routing_modal_criterion_idx = 1;
         state.routing_granularity = RoutingGranularity::YearsAndMonths;
-        state.active_routing_modal = RoutingModal::Scope;
-        assert_eq!(state.active_routing_modal, RoutingModal::Scope);
+        state.active_routing_modal = RoutingModal::YearScope;
 
-        // Seleccionar alcance específico
-        state.routing_modal_scope_idx = 1;
+        // Año por defecto: Todos los años (índice 0)
+        state.routing_modal_year_scope_idx = 0;
+        state.specific_year = None;
+        state.routing_all_years = true;
+        state.active_routing_modal = RoutingModal::MonthScope;
+
+        // Mes por defecto: Todos los meses (índice 0) -> Todos los meses de todos los años
+        state.routing_modal_month_scope_idx = 0;
+        state.specific_month = None;
+        state.routing_all_months = true;
+        state.active_routing_modal = RoutingModal::None;
+
+        assert_eq!(state.specific_year, None, "Debe ser None para abarcar todos los años por defecto");
+        assert_eq!(state.specific_month, None, "Debe ser None para abarcar todos los meses por defecto");
+        assert!(state.routing_all_years);
+        assert!(state.routing_all_months);
+    }
+
+    #[test]
+    fn test_routing_specific_year_all_months() {
+        let mut state = AppState::new();
+        state.routing_granularity = RoutingGranularity::YearsAndMonths;
+
+        // Elegir Año específico
+        state.active_routing_modal = RoutingModal::YearScope;
+        state.routing_modal_year_scope_idx = 1;
         state.active_routing_modal = RoutingModal::SpecificYear;
         state.routing_input_year = "2023".to_string();
         state.specific_year = Some(2023);
+        state.routing_all_years = false;
+
+        // Pasa a MonthScope: seleccionar Todos los meses (índice 0)
+        state.active_routing_modal = RoutingModal::MonthScope;
+        state.routing_modal_month_scope_idx = 0;
+        state.specific_month = None; // Todos los meses del año 2023
+        state.routing_all_months = true;
         state.active_routing_modal = RoutingModal::None;
+
         assert_eq!(state.specific_year, Some(2023));
-        assert_eq!(state.active_routing_modal, RoutingModal::None);
+        assert_eq!(state.specific_month, None, "Mes debe ser None indicando todos los meses del 2023");
+        assert!(!state.routing_all_years);
+        assert!(state.routing_all_months);
+    }
+
+    #[test]
+    fn test_routing_specific_year_and_specific_month() {
+        let mut state = AppState::new();
+        state.routing_granularity = RoutingGranularity::YearsAndMonths;
+        state.specific_year = Some(2023);
+        state.routing_all_years = false;
+
+        // Mes específico (ej. Mayo = 5)
+        state.active_routing_modal = RoutingModal::MonthScope;
+        state.routing_modal_month_scope_idx = 1;
+        state.active_routing_modal = RoutingModal::SpecificMonth;
+        state.routing_input_month = 5;
+        state.specific_month = Some(5);
+        state.routing_all_months = false;
+        state.active_routing_modal = RoutingModal::None;
+
+        assert_eq!(state.specific_year, Some(2023));
+        assert_eq!(state.specific_month, Some(5));
+        assert!(!state.routing_all_months);
     }
 }
