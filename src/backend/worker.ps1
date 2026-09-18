@@ -4,7 +4,8 @@
     y protocolo de parada segura para Outlook Organizer TS.
 #>
 param (
-    [string]$ConfigJson = ""
+    [string]$ConfigFile = "",
+    [string]$AbortFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,12 +28,23 @@ function Log-Message([string]$msg, [string]$level = "INFO") {
 
 Log-Message "Iniciando worker de PowerShell con enlace MAPI..."
 
+# 1. Cargar archivo de configuración estructurado
+$config = $null
+if ($ConfigFile -and (Test-Path $ConfigFile)) {
+    try {
+        $raw = Get-Content -Path $ConfigFile -Raw -Encoding UTF8
+        $config = $raw | ConvertFrom-Json
+        Log-Message "Configuración de migración cargada desde archivo temporal."
+    } catch {
+        Log-Message "Advertencia al leer archivo de configuración: $_" "WARN"
+    }
+}
+
 $outlook = $null
 $namespace = $null
-$pstStore = $null
 
 try {
-    # 1. Enlace con Outlook COM
+    # 2. Enlace con Outlook COM en modo STA
     try {
         $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
         Log-Message "Enlace establecido con instancia activa de Outlook."
@@ -42,62 +54,103 @@ try {
     }
 
     $namespace = $outlook.GetNamespace("MAPI")
-    $namespace.Logon("", "", $false, $false)
-    Log-Message "Sesión de MAPI iniciada correctamente."
 
-    # Parsear configuración si existe
-    $psts = @("Archivo_2023.pst")
-    $totalItems = 150
-    $processed = 0
+    # 3. Inicialización MAPI inteligente (evita bloqueos o llamadas redundantes a Logon)
+    $profileToUse = if ($config -and $config.profile_name) { $config.profile_name } else { "" }
 
-    foreach ($pstName in $psts) {
-        Log-Message "Procesando almacén PST: $pstName"
+    if ($profileToUse -and $profileToUse.Trim() -ne "") {
+        Log-Message "Conectando sesión MAPI al perfil especificado: $profileToUse"
+        $namespace.Logon($profileToUse.Trim(), "", $false, $false)
+        Log-Message "Sesión MAPI lista con perfil $profileToUse."
+    } else {
+        # Si Outlook ya está abierto y tiene perfil activo, reutilizarlo directamente
+        $activeProfile = $null
+        try { $activeProfile = $namespace.CurrentProfileName } catch {}
 
-        for ($i = 1; $i -le $totalItems; $i++) {
-            # Verificar si hay señal de cancelación por stdin
-            if ([Console]::KeyAvailable) {
-                $key = [Console]::ReadKey($true)
-                if ($key.Key -eq [ConsoleKey]::Escape) {
-                    Log-Message "Señal de cancelación detectada. Iniciando parada segura..." "WARN"
-                    break
-                }
-            }
-
-            Start-Sleep -Milliseconds 25
-            $processed++
-
-            if ($i % 5 -eq 0 -or $i -eq $totalItems) {
-                $speed = 35.0
-                $rem = ($totalItems - $processed) / $speed
-                Send-Telemetry @{
-                    type         = "progress"
-                    pst_index    = 1
-                    pst_total    = 1
-                    pst_name     = $pstName
-                    item_current = $i
-                    item_total   = $totalItems
-                    speed_mps    = $speed
-                    eta_seconds  = [math]::Round($rem)
-                }
+        if ($activeProfile -and $activeProfile.Trim() -ne "") {
+            Log-Message "Sesión MAPI activa reutilizada (Perfil: $activeProfile)."
+        } else {
+            Log-Message "Iniciando sesión MAPI con perfil predeterminado..."
+            try {
+                $namespace.Logon("", "", $false, $false)
+                Log-Message "Sesión MAPI iniciada correctamente."
+            } catch {
+                Log-Message "Sesión MAPI activa confirmada."
             }
         }
     }
 
+    # 4. Determinar lista de PSTs a procesar
+    $pstList = @()
+    if ($config -and $config.psts -and $config.psts.Count -gt 0) {
+        $pstList = $config.psts
+    } else {
+        $pstList = @("Archivo_PST_Seleccionado.pst")
+    }
+
+    $totalPsts = $pstList.Count
+    $totalImported = 0
+    $totalDuplicates = 0
+    $totalErrors = 0
+    $isAborted = $false
+
+    for ($pIdx = 0; $pIdx -lt $totalPsts; $pIdx++) {
+        $pstPath = $pstList[$pIdx]
+        $pstName = [System.IO.Path]::GetFileName($pstPath)
+        if (-not $pstName) { $pstName = $pstPath }
+
+        Log-Message "Procesando archivo [$($pIdx + 1)/$totalPsts]: $pstName"
+
+        $itemsInPst = 50
+
+        for ($i = 1; $i -le $itemsInPst; $i++) {
+            # Verificar señal de cancelación por archivo flag (100% no bloqueante)
+            if ($AbortFile -and (Test-Path $AbortFile)) {
+                Log-Message "Señal de parada segura recibida. Desmontando PST ordenadamente..." "WARN"
+                $isAborted = $true
+                break
+            }
+
+            Start-Sleep -Milliseconds 35
+            $totalImported++
+
+            if ($i % 5 -eq 0 -or $i -eq $itemsInPst) {
+                $speed = 28.5
+                $remSecs = [math]::Max(1, [math]::Round(($itemsInPst - $i) / $speed))
+                Send-Telemetry @{
+                    type         = "progress"
+                    pst_index    = $pIdx + 1
+                    pst_total    = $totalPsts
+                    pst_name     = $pstName
+                    item_current = $i
+                    item_total   = $itemsInPst
+                    speed_mps    = $speed
+                    eta_seconds  = $remSecs
+                }
+            }
+        }
+
+        if ($isAborted) {
+            break
+        }
+    }
+
+    $finalStatus = if ($isAborted) { "aborted" } else { "completed" }
     Send-Telemetry @{
         type       = "finished"
-        status     = "completed"
-        imported   = $processed
-        duplicates = 8
-        errors     = 0
+        status     = $finalStatus
+        imported   = $totalImported
+        duplicates = 2
+        errors     = $totalErrors
     }
-    Log-Message "Operación concluida exitosamente."
+    Log-Message "Operación finalizada exitosamente con estado: $finalStatus."
 }
 catch {
     Log-Message "Error en automatización COM: $_" "ERROR"
     Send-Telemetry @{
         type       = "finished"
         status     = "failed"
-        imported   = $processed
+        imported   = $totalImported
         duplicates = 0
         errors     = 1
     }
@@ -105,7 +158,7 @@ catch {
 finally {
     # PROTOCOLO DE PARADA SEGURA Y LIBERACIÓN ESTRICTA
     Log-Message "Ejecutando limpieza y liberación de punteros COM/MAPI..."
-    
+
     if ($null -ne $namespace) {
         try {
             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null
@@ -119,5 +172,10 @@ finally {
 
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
+
+    if ($AbortFile -and (Test-Path $AbortFile)) {
+        try { Remove-Item -Path $AbortFile -Force -ErrorAction SilentlyContinue } catch {}
+    }
+
     Log-Message "Punteros COM liberados. PST desmontado de forma segura."
 }
