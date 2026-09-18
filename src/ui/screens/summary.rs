@@ -47,8 +47,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             if let Some(m) = state.specific_month {
                 format!("Año {} / Mes {:02}", year, m)
             } else {
-                format!("Año específico: {}", year)
+                format!("Año {} (Todos los meses)", year)
             }
+        } else if let Some(m) = state.specific_month {
+            format!("Todos los años / Mes {:02}", m)
         } else {
             "Todos los periodos (Historial completo)".to_string()
         };
