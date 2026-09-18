@@ -44,6 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = AppState::new();
     let (tx, mut rx): (mpsc::UnboundedSender<BackendMessage>, UnboundedReceiver<BackendMessage>) = mpsc::unbounded_channel();
     let mut worker_child: Option<tokio::process::Child> = None;
+    let mut worker_abort_file: Option<PathBuf> = None;
 
     // Disparar detección inicial de buzones MAPI de Outlook en segundo plano
     state.is_loading_mailboxes = true;
@@ -121,6 +122,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if state.step == WizardStep::Execution {
                         state.progress.graceful_cancelling = true;
                         state.log_event("[SISTEMA] Ctrl+C capturado. Desmontando PST de forma segura con RemoveStore...".to_string());
+                        if let Some(ref path) = worker_abort_file {
+                            let _ = std::fs::File::create(path);
+                        }
+                        if let Some(ref mut child) = worker_child
+                            && let Some(ref mut stdin) = child.stdin {
+                            use tokio::io::AsyncWriteExt;
+                            let _ = stdin.write_all(b"abort\n").await;
+                        }
                     } else {
                         state.should_quit = true;
                     }
@@ -505,9 +514,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Enter => {
                             state.next_step(); // Pasa a WizardStep::Execution
                             state.log_event("[SISTEMA] Iniciando subproceso PowerShell MAPI...".to_string());
-                            match BackendRunner::spawn_worker(tx.clone()) {
-                                Ok(child) => {
+
+                            let config = backend::runner::WorkerConfig {
+                                profile_name: if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
+                                psts: state.discovered_psts.iter().filter(|p| p.selected).map(|p| p.path.clone()).collect(),
+                                target_mailboxes: state.selected_mailboxes().iter().map(|m| m.display_name.clone()).collect(),
+                                transfer_mode: match state.transfer_mode {
+                                    TransferMode::Copy => "Copy".to_string(),
+                                    TransferMode::Move => "Move".to_string(),
+                                },
+                                include_inbox: state.include_inbox,
+                                include_sent: state.include_sent,
+                                include_deleted: state.include_deleted,
+                                include_custom_folders: state.include_custom_folders,
+                                routing_enabled: state.routing_enabled,
+                                routing_granularity: match state.routing_granularity {
+                                    RoutingGranularity::Years => "Years".to_string(),
+                                    RoutingGranularity::YearsAndMonths => "YearsAndMonths".to_string(),
+                                },
+                                specific_year: state.specific_year,
+                                specific_month: state.specific_month,
+                                deduplication_enabled: state.deduplication_enabled,
+                                deep_scan_enabled: state.deep_scan_enabled,
+                                adaptive_throttling: state.adaptive_throttling_enabled,
+                            };
+
+                            match BackendRunner::spawn_worker(&config, tx.clone()) {
+                                Ok((child, abort_path)) => {
                                     worker_child = Some(child);
+                                    worker_abort_file = Some(abort_path);
                                 }
                                 Err(e) => {
                                     state.log_event(format!("[ERROR] No se pudo iniciar PowerShell: {}", e));
@@ -522,6 +557,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Esc | KeyCode::Char('q') => {
                             state.progress.graceful_cancelling = true;
                             state.log_event("[SISTEMA] Solicitud de parada segura recibida. Notificando a PowerShell...".to_string());
+                            if let Some(ref path) = worker_abort_file {
+                                let _ = std::fs::File::create(path);
+                            }
                             if let Some(ref mut child) = worker_child
                                 && let Some(ref mut stdin) = child.stdin {
                                 use tokio::io::AsyncWriteExt;
