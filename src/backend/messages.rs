@@ -35,4 +35,10 @@ pub enum BackendMessage {
     MailboxesLoaded {
         items: Vec<crate::app::MailboxItem>,
     },
+    #[serde(rename = "pst_detail_loaded")]
+    PstDetailLoaded {
+        pst_path: String,
+        pst_name: String,
+        detail: Result<crate::app::PstDetail, String>,
+    },
 }

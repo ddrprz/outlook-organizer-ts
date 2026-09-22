@@ -182,4 +182,70 @@ impl BackendRunner {
             let _ = tx.send(BackendMessage::MailboxesLoaded { items });
         });
     }
+
+    /// Dispara la inspección MAPI detallada de un PST en segundo plano
+    pub fn trigger_pst_inspection(
+        pst_path: String,
+        pst_name: String,
+        profile: Option<String>,
+        tx: UnboundedSender<BackendMessage>,
+    ) {
+        tokio::spawn(async move {
+            let res = Self::inspect_pst(&pst_path, profile.as_deref()).await;
+            let _ = tx.send(BackendMessage::PstDetailLoaded {
+                pst_path,
+                pst_name,
+                detail: res,
+            });
+        });
+    }
+
+    pub async fn inspect_pst(
+        pst_path: &str,
+        profile: Option<&str>,
+    ) -> Result<crate::app::PstDetail, String> {
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("outlook_organizer_inspector.ps1");
+        let script_content = include_str!("pst_inspector.ps1");
+        let _ = fs::write(&script_path, script_content);
+
+        let mut cmd = Command::new("powershell");
+        cmd.arg("-Sta")
+            .arg("-NoProfile")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-File")
+            .arg(&script_path)
+            .arg("-PstPath")
+            .arg(pst_path);
+
+        if let Some(prof) = profile
+            && !prof.trim().is_empty() {
+            cmd.arg("-ProfileName").arg(prof);
+        }
+
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        match cmd.output().await {
+            Ok(output) if output.status.success() => {
+                let stdout_str = String::from_utf8_lossy(&output.stdout);
+                #[derive(serde::Deserialize)]
+                struct InspectorError {
+                    error: Option<String>,
+                }
+                if let Ok(err_obj) = serde_json::from_str::<InspectorError>(stdout_str.trim())
+                    && let Some(err_msg) = err_obj.error {
+                    return Err(err_msg);
+                }
+
+                serde_json::from_str::<crate::app::PstDetail>(stdout_str.trim())
+                    .map_err(|e| format!("Error al decodificar metadatos: {} (Salida: {})", e, stdout_str))
+            }
+            Ok(output) => {
+                let stderr_str = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Error en subproceso PowerShell: {}", stderr_str))
+            }
+            Err(e) => Err(format!("No se pudo ejecutar PowerShell: {}", e)),
+        }
+    }
 }
