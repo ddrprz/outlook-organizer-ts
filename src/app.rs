@@ -308,8 +308,10 @@ pub enum TransferMode {
     Move,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RoutingGranularity {
+    #[default]
+    Mirror,
     Years,
     YearsAndMonths,
 }
@@ -465,7 +467,7 @@ impl AppState {
             include_custom_folders: true,
             transfer_mode: TransferMode::Copy,
             routing_enabled: true,
-            routing_granularity: RoutingGranularity::Years,
+            routing_granularity: RoutingGranularity::Mirror,
             specific_year: None,
             specific_month: None,
             routing_all_years: true,
@@ -516,8 +518,9 @@ impl AppState {
             WizardStep::FoldersMode => {
                 self.active_routing_modal = RoutingModal::Criterion;
                 self.routing_modal_criterion_idx = match self.routing_granularity {
-                    RoutingGranularity::Years => 0,
-                    RoutingGranularity::YearsAndMonths => 1,
+                    RoutingGranularity::Mirror => 0,
+                    RoutingGranularity::Years => 1,
+                    RoutingGranularity::YearsAndMonths => 2,
                 };
                 self.routing_modal_year_scope_idx = 0;
                 self.routing_modal_month_scope_idx = 0;
@@ -727,6 +730,67 @@ mod tests {
 
         assert_eq!(state.specific_year, Some(2023));
         assert_eq!(state.specific_month, Some(5));
+        assert!(!state.routing_all_months);
+    }
+
+    #[test]
+    fn test_routing_mirror_default_all_years_and_months() {
+        let mut state = AppState::new();
+        assert_eq!(state.routing_granularity, RoutingGranularity::Mirror);
+        assert_eq!(state.routing_modal_criterion_idx, 0);
+
+        state.step = WizardStep::FoldersMode;
+        state.next_step();
+        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.active_routing_modal, RoutingModal::Criterion);
+        assert_eq!(state.routing_modal_criterion_idx, 0);
+
+        // Confirmar criterio Espejo (índice 0) -> Pasa a YearScope
+        state.active_routing_modal = RoutingModal::YearScope;
+        state.routing_modal_year_scope_idx = 0; // Todos los años
+        state.specific_year = None;
+        state.routing_all_years = true;
+
+        // En Espejo, pasa a MonthScope
+        state.active_routing_modal = RoutingModal::MonthScope;
+        state.routing_modal_month_scope_idx = 0; // Todos los meses
+        state.specific_month = None;
+        state.routing_all_months = true;
+        state.active_routing_modal = RoutingModal::None;
+
+        assert_eq!(state.routing_granularity, RoutingGranularity::Mirror);
+        assert_eq!(state.specific_year, None);
+        assert_eq!(state.specific_month, None);
+        assert!(state.routing_all_years);
+        assert!(state.routing_all_months);
+    }
+
+    #[test]
+    fn test_routing_mirror_with_specific_year_and_month_filters() {
+        let mut state = AppState::new();
+        state.routing_granularity = RoutingGranularity::Mirror;
+
+        // Año específico
+        state.active_routing_modal = RoutingModal::YearScope;
+        state.routing_modal_year_scope_idx = 1;
+        state.active_routing_modal = RoutingModal::SpecificYear;
+        state.routing_input_year = "2024".to_string();
+        state.specific_year = Some(2024);
+        state.routing_all_years = false;
+
+        // Mes específico (Septiembre = 9)
+        state.active_routing_modal = RoutingModal::MonthScope;
+        state.routing_modal_month_scope_idx = 1;
+        state.active_routing_modal = RoutingModal::SpecificMonth;
+        state.routing_input_month = 9;
+        state.specific_month = Some(9);
+        state.routing_all_months = false;
+        state.active_routing_modal = RoutingModal::None;
+
+        assert_eq!(state.routing_granularity, RoutingGranularity::Mirror);
+        assert_eq!(state.specific_year, Some(2024));
+        assert_eq!(state.specific_month, Some(9));
+        assert!(!state.routing_all_years);
         assert!(!state.routing_all_months);
     }
 }
