@@ -47,6 +47,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(summary_block, chunks[0]);
 
     let gran_label = match state.routing_granularity {
+        RoutingGranularity::Mirror => "Espejo (Estructura original del PST sin agrupar por fecha)",
         RoutingGranularity::Years => "Agrupado por Años (1 nivel: [Buzón] / <Año>)",
         RoutingGranularity::YearsAndMonths => "Agrupado por Años y Meses (Jerárquico: [Buzón] / <Año> / <Mes>)",
     };
@@ -54,15 +55,28 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let scope_label = if let Some(year) = state.specific_year {
         if let Some(m) = state.specific_month {
             let month_str = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes desconocido");
-            format!("Año {} / {}", year, month_str)
+            if state.routing_granularity == RoutingGranularity::Mirror {
+                format!("Solo correos de: Año {} / {} (sin agrupar)", year, month_str)
+            } else {
+                format!("Año {} / {}", year, month_str)
+            }
         } else {
-            format!("Año {} (Todos los meses)", year)
+            if state.routing_granularity == RoutingGranularity::Mirror {
+                format!("Solo correos de: Año {} (Todos los meses, sin agrupar)", year)
+            } else {
+                format!("Año {} (Todos los meses)", year)
+            }
         }
     } else if let Some(m) = state.specific_month {
         let month_str = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes desconocido");
-        format!("Todos los años / {}", month_str)
+        if state.routing_granularity == RoutingGranularity::Mirror {
+            format!("Solo correos de: Todos los años / {} (sin agrupar)", month_str)
+        } else {
+            format!("Todos los años / {}", month_str)
+        }
     } else {
         match state.routing_granularity {
+            RoutingGranularity::Mirror => "Historial completo sin filtros (Estructura original intacta)".to_string(),
             RoutingGranularity::Years => "Todos los años (por defecto)".to_string(),
             RoutingGranularity::YearsAndMonths => "Todos los años / Todos los meses (por defecto)".to_string(),
         }
@@ -101,6 +115,44 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let preview_lines = match state.routing_granularity {
+        RoutingGranularity::Mirror => {
+            let filter_info = if let Some(y) = state.specific_year {
+                if let Some(m) = state.specific_month {
+                    let month_str = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes");
+                    format!("ℹ Filtro activo: solo correos de {} de {} serán copiados.", month_str, y)
+                } else {
+                    format!("ℹ Filtro activo: solo correos del año {} serán copiados.", y)
+                }
+            } else if let Some(m) = state.specific_month {
+                let month_str = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes");
+                format!("ℹ Filtro activo: solo correos del mes {} serán copiados.", month_str)
+            } else {
+                "ℹ Sin filtros de fecha: se copiará el historial completo del PST.".to_string()
+            };
+
+            vec![
+                Line::from(Span::styled("Estructura Espejo: el PST se transfiere exactamente a sus carpetas homólogas:", Style::default().fg(Theme::TEXT_MUTED))),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  📁 [Buzón Destino]  ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled("      ├── 📥 Bandeja de entrada /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("(Mapeo directo)", Style::default().fg(Theme::TEXT_MUTED)),
+                ]),
+                Line::from(vec![
+                    Span::styled("      ├── 📤 Elementos enviados /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("(Mapeo directo)", Style::default().fg(Theme::TEXT_MUTED)),
+                ]),
+                Line::from(vec![
+                    Span::styled("      └── 📂 Carpetas personalizadas / ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("(Mapeo directo)", Style::default().fg(Theme::TEXT_MUTED)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(filter_info, Style::default().fg(Theme::SUCCESS))),
+                Line::from(Span::styled("✓ No se crean carpetas de Año ni Mes. Los mensajes se depositan en las carpetas homólogas.", Style::default().fg(Theme::TEXT_MUTED))),
+            ]
+        }
         RoutingGranularity::Years => {
             if let Some(y) = state.specific_year {
                 vec![
@@ -210,8 +262,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
-    let modal_width = 74.min(area.width.saturating_sub(4));
-    let modal_height = 13.min(area.height.saturating_sub(2));
+    let modal_width = 76.min(area.width.saturating_sub(4));
+    let modal_height = 14.min(area.height.saturating_sub(2));
 
     let x = area.x + (area.width.saturating_sub(modal_width)) / 2;
     let y = area.y + (area.height.saturating_sub(modal_height)) / 2;
@@ -292,10 +344,20 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
     // 2. Opciones según el modal activo
     match state.active_routing_modal {
         RoutingModal::Criterion => {
-            let opt_years = "  Agrupado por Años  (1 nivel: [Buzón] / <Año>)";
-            let opt_months = "  Agrupado por Años y Meses  (Jerárquico: [Buzón] / <Año> / <Mes>)";
+            let opt_mirror = "  Espejo (Predeterminado - Estructura original sin agrupar por fecha)";
+            let opt_years = "  Agrupado por Años (1 nivel: [Buzón] / <Año>)";
+            let opt_months = "  Agrupado por Años y Meses (Jerárquico: [Buzón] / <Año> / <Mes>)";
 
-            let line_years = if state.routing_modal_criterion_idx == 0 {
+            let line_mirror = if state.routing_modal_criterion_idx == 0 {
+                Line::from(Span::styled(
+                    opt_mirror,
+                    Style::default().bg(Color::White).fg(Color::Black).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(Span::styled(opt_mirror, Style::default().fg(Color::Gray)))
+            };
+
+            let line_years = if state.routing_modal_criterion_idx == 1 {
                 Line::from(Span::styled(
                     opt_years,
                     Style::default().bg(Color::White).fg(Color::Black).add_modifier(Modifier::BOLD),
@@ -304,7 +366,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
                 Line::from(Span::styled(opt_years, Style::default().fg(Color::Gray)))
             };
 
-            let line_months = if state.routing_modal_criterion_idx == 1 {
+            let line_months = if state.routing_modal_criterion_idx == 2 {
                 Line::from(Span::styled(
                     opt_months,
                     Style::default().bg(Color::White).fg(Color::Black).add_modifier(Modifier::BOLD),
@@ -314,8 +376,8 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             };
 
             let opts_p = Paragraph::new(vec![
+                line_mirror,
                 line_years,
-                Line::from(""),
                 line_months,
             ]);
             f.render_widget(opts_p, chunks[2]);

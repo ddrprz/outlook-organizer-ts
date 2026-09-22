@@ -401,16 +401,19 @@ try {
                     $baseDest = Get-DestBaseFolder $destStore $cf.Type $cf.Name
                     $finalDest = $baseDest
 
-                    # Enrutamiento jerárquico por fecha
+                    # Enrutamiento jerárquico por fecha (solo cuando no es Espejo)
                     if ($config -and $config.routing_enabled) {
-                        $yearName = "$($rcvd.Year)"
-                        $yearFolder = Get-OrCreateFolder $baseDest $yearName
                         if ($config.routing_granularity -eq "YearsAndMonths") {
+                            $yearName = "$($rcvd.Year)"
+                            $yearFolder = Get-OrCreateFolder $baseDest $yearName
                             $mName = if ($monthNames.ContainsKey($rcvd.Month)) { $monthNames[$rcvd.Month] } else { "{0:D2}" -f $rcvd.Month }
                             $finalDest = Get-OrCreateFolder $yearFolder $mName
-                        } else {
+                        } elseif ($config.routing_granularity -eq "Years") {
+                            $yearName = "$($rcvd.Year)"
+                            $yearFolder = Get-OrCreateFolder $baseDest $yearName
                             $finalDest = $yearFolder
                         }
+                        # Si es "Mirror", $finalDest permanece como $baseDest (estructura original espejo sin agrupar por fecha)
                     }
 
                     # Deduplicación inteligente

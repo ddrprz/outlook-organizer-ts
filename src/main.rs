@@ -359,14 +359,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     WizardStep::Routing => {
                         match state.active_routing_modal {
                             RoutingModal::Criterion => match key.code {
-                                KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
-                                    state.routing_modal_criterion_idx = if state.routing_modal_criterion_idx == 0 { 1 } else { 0 };
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if state.routing_modal_criterion_idx > 0 {
+                                        state.routing_modal_criterion_idx -= 1;
+                                    } else {
+                                        state.routing_modal_criterion_idx = 2;
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if state.routing_modal_criterion_idx < 2 {
+                                        state.routing_modal_criterion_idx += 1;
+                                    } else {
+                                        state.routing_modal_criterion_idx = 0;
+                                    }
                                 }
                                 KeyCode::Enter => {
-                                    if state.routing_modal_criterion_idx == 0 {
-                                        state.routing_granularity = RoutingGranularity::Years;
-                                    } else {
-                                        state.routing_granularity = RoutingGranularity::YearsAndMonths;
+                                    match state.routing_modal_criterion_idx {
+                                        0 => state.routing_granularity = RoutingGranularity::Mirror,
+                                        1 => state.routing_granularity = RoutingGranularity::Years,
+                                        _ => state.routing_granularity = RoutingGranularity::YearsAndMonths,
                                     }
                                     state.routing_modal_year_scope_idx = 0;
                                     state.active_routing_modal = RoutingModal::YearScope;
@@ -487,8 +498,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 KeyCode::Char('c') | KeyCode::Char('C') | KeyCode::Char('m') | KeyCode::Char('M') | KeyCode::Char(' ') => {
                                     state.active_routing_modal = RoutingModal::Criterion;
                                     state.routing_modal_criterion_idx = match state.routing_granularity {
-                                        RoutingGranularity::Years => 0,
-                                        RoutingGranularity::YearsAndMonths => 1,
+                                        RoutingGranularity::Mirror => 0,
+                                        RoutingGranularity::Years => 1,
+                                        RoutingGranularity::YearsAndMonths => 2,
                                     };
                                 }
                                 _ => handle_navigation_keys(&mut state, key.code),
@@ -556,6 +568,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 include_custom_folders: state.include_custom_folders,
                                 routing_enabled: state.routing_enabled,
                                 routing_granularity: match state.routing_granularity {
+                                    RoutingGranularity::Mirror => "Mirror".to_string(),
                                     RoutingGranularity::Years => "Years".to_string(),
                                     RoutingGranularity::YearsAndMonths => "YearsAndMonths".to_string(),
                                 },
