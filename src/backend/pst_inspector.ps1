@@ -98,13 +98,20 @@ try {
             try {
                 $table = $folder.GetTable()
                 if ($table) {
-                    $tableSuccess = $true
+                    try { $table.Columns.Add("ReceivedTime") | Out-Null } catch {}
+                    try { $table.Columns.Add("SentOn") | Out-Null } catch {}
+
                     while (-not $table.EndOfTable) {
                         $row = $table.GetNextRow()
                         $rcvd = $null
-                        try { $rcvd = $row["ReceivedTime"] } catch {}
+                        try { $rcvd = $row.Item("ReceivedTime") } catch {}
+                        if ($null -eq $rcvd -or -not ($rcvd -is [DateTime])) {
+                            try { $rcvd = $row.Item("SentOn") } catch {}
+                        }
+
                         if ($null -ne $rcvd -and ($rcvd -is [DateTime])) {
                             if ($rcvd.Year -ge 1980 -and $rcvd.Year -le 2050) {
+                                $tableSuccess = $true
                                 $script:yearsSet[$rcvd.Year] = $true
                                 $yStr = "$($rcvd.Year)"
                                 if (-not $script:yearMonthsMap.ContainsKey($yStr)) {
@@ -132,7 +139,16 @@ try {
                         if ($firstItem) {
                             $t = $null
                             try { $t = $firstItem.ReceivedTime } catch {}
-                            if ($t -is [DateTime] -and $t -gt $script:maxDate) { $script:maxDate = $t }
+                            if ($null -eq $t -or -not ($t -is [DateTime])) {
+                                try { $t = $firstItem.SentOn } catch {}
+                            }
+                            if ($t -is [DateTime] -and $t.Year -ge 1980 -and $t.Year -le 2050) {
+                                if ($t -gt $script:maxDate) { $script:maxDate = $t }
+                                $script:yearsSet[$t.Year] = $true
+                                $yStr = "$($t.Year)"
+                                if (-not $script:yearMonthsMap.ContainsKey($yStr)) { $script:yearMonthsMap[$yStr] = @{} }
+                                $script:yearMonthsMap[$yStr][$t.Month] = $true
+                            }
                             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($firstItem) | Out-Null
                         }
                     } catch {}
@@ -143,7 +159,16 @@ try {
                         if ($lastItem) {
                             $t = $null
                             try { $t = $lastItem.ReceivedTime } catch {}
-                            if ($t -is [DateTime] -and $t -lt $script:minDate) { $script:minDate = $t }
+                            if ($null -eq $t -or -not ($t -is [DateTime])) {
+                                try { $t = $lastItem.SentOn } catch {}
+                            }
+                            if ($t -is [DateTime] -and $t.Year -ge 1980 -and $t.Year -le 2050) {
+                                if ($t -lt $script:minDate) { $script:minDate = $t }
+                                $script:yearsSet[$t.Year] = $true
+                                $yStr = "$($t.Year)"
+                                if (-not $script:yearMonthsMap.ContainsKey($yStr)) { $script:yearMonthsMap[$yStr] = @{} }
+                                $script:yearMonthsMap[$yStr][$t.Month] = $true
+                            }
                             [System.Runtime.InteropServices.Marshal]::ReleaseComObject($lastItem) | Out-Null
                         }
                     } catch {}
