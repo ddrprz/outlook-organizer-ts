@@ -173,6 +173,25 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(table, chunks[1]);
 
     // 3. Barra de atajos
+    let is_on_pst = explorer.entries.get(explorer.selected_idx)
+        .map(|e| e.item_type == ExplorerItemType::PstFile)
+        .unwrap_or(false);
+
+    let mut second_row = vec![
+        Span::styled("[C] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+        Span::styled("Usar Carpeta   ", Style::default().fg(Theme::SUCCESS)),
+        Span::styled("[B] ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Buscar (Discos)   ", Style::default().fg(Theme::BRAND_PRIMARY)),
+    ];
+
+    if is_on_pst {
+        second_row.push(Span::styled("[D] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)));
+        second_row.push(Span::styled("Ver Detalle PST   ", Style::default().fg(Theme::ACCENT_PRIMARY)));
+    }
+
+    second_row.push(Span::styled("[Esc] ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)));
+    second_row.push(Span::styled("Volver al Menú", Style::default().fg(Theme::TEXT_MUTED)));
+
     let shortcuts = vec![
         Line::from(vec![
             Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -184,15 +203,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("[Espacio] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled("Marcar PST  ", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
-        Line::from(vec![
-            Span::styled("[C] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled("Usar esta Carpeta para Importar  ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled("[D] ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Ver Discos  ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("[Esc] ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
-            Span::styled("Volver al Menú", Style::default().fg(Theme::TEXT_MUTED)),
-        ]),
+        Line::from(second_row),
     ];
 
     f.render_widget(Paragraph::new(shortcuts).alignment(Alignment::Center), chunks[2]);
+
+    // 4. Modal Flotante de Detalle PST (si está activo)
+    if state.pst_detail_modal != crate::app::PstDetailModalState::Closed {
+        crate::ui::screens::pst_source::render_pst_detail_modal(f, area, state);
+    }
 }

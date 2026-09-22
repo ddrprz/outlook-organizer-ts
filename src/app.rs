@@ -60,6 +60,33 @@ pub struct PstItem {
     pub selected: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct PstFolderDetail {
+    pub name: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct PstDetail {
+    pub file_name: String,
+    pub file_path: String,
+    pub size_mb: f64,
+    pub total_items: usize,
+    pub last_email_date: Option<String>,
+    pub first_email_date: Option<String>,
+    pub folders: Vec<PstFolderDetail>,
+    pub years: Vec<u32>,
+    pub year_months: std::collections::BTreeMap<String, Vec<u32>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PstDetailModalState {
+    Closed,
+    Loading { pst_path: String, pst_name: String },
+    Loaded(Box<PstDetail>),
+    Error { pst_name: String, message: String },
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MailboxItem {
     pub display_name: String,
@@ -423,6 +450,10 @@ pub struct AppState {
     // Métricas y progreso en tiempo real
     pub progress: ProgressState,
     pub activity_log: VecDeque<String>, // Buffer circular limitado (max 300)
+
+    // Modal flotante de detalle de PST
+    pub pst_detail_modal: PstDetailModalState,
+    pub pst_details_cache: std::collections::HashMap<String, PstDetail>,
 }
 
 pub fn default_fallback_mailboxes() -> Vec<MailboxItem> {
@@ -484,6 +515,8 @@ impl AppState {
             explorer,
             progress: ProgressState::default(),
             activity_log: VecDeque::with_capacity(300),
+            pst_detail_modal: PstDetailModalState::Closed,
+            pst_details_cache: std::collections::HashMap::new(),
         }
     }
 
@@ -507,6 +540,23 @@ impl AppState {
             self.activity_log.pop_front();
         }
         self.activity_log.push_back(event);
+    }
+
+    pub fn open_pst_detail(&mut self, path: String, name: String) -> bool {
+        if let Some(cached) = self.pst_details_cache.get(&path) {
+            self.pst_detail_modal = PstDetailModalState::Loaded(Box::new(cached.clone()));
+            false
+        } else {
+            self.pst_detail_modal = PstDetailModalState::Loading {
+                pst_path: path,
+                pst_name: name,
+            };
+            true
+        }
+    }
+
+    pub fn close_pst_detail(&mut self) {
+        self.pst_detail_modal = PstDetailModalState::Closed;
     }
 
     pub fn next_step(&mut self) {
@@ -792,5 +842,51 @@ mod tests {
         assert_eq!(state.specific_month, Some(9));
         assert!(!state.routing_all_years);
         assert!(!state.routing_all_months);
+    }
+
+    #[test]
+    fn test_pst_detail_modal_open_and_close() {
+        let mut state = AppState::new();
+        assert_eq!(state.pst_detail_modal, PstDetailModalState::Closed);
+
+        // Primera apertura: no está en caché -> retorna true para disparar inspección
+        let should_trigger = state.open_pst_detail(r"C:\Correo\archivo.pst".to_string(), "archivo.pst".to_string());
+        assert!(should_trigger);
+        match &state.pst_detail_modal {
+            PstDetailModalState::Loading { pst_path, pst_name } => {
+                assert_eq!(pst_path, r"C:\Correo\archivo.pst");
+                assert_eq!(pst_name, "archivo.pst");
+            }
+            _ => panic!("Debería estar en estado Loading"),
+        }
+
+        // Simular que se guarda en caché
+        let detail = PstDetail {
+            file_name: "archivo.pst".to_string(),
+            file_path: r"C:\Correo\archivo.pst".to_string(),
+            size_mb: 250.5,
+            total_items: 1200,
+            last_email_date: Some("2024-05-15 14:30:00".to_string()),
+            first_email_date: Some("2022-01-10 08:20:00".to_string()),
+            folders: vec![PstFolderDetail { name: "Bandeja de entrada".to_string(), count: 1200 }],
+            years: vec![2022, 2023, 2024],
+            year_months: std::collections::BTreeMap::new(),
+        };
+        state.pst_details_cache.insert(r"C:\Correo\archivo.pst".to_string(), detail.clone());
+
+        // Segunda apertura: ya en caché -> retorna false y pasa a Loaded de inmediato
+        let should_trigger_cached = state.open_pst_detail(r"C:\Correo\archivo.pst".to_string(), "archivo.pst".to_string());
+        assert!(!should_trigger_cached);
+        match &state.pst_detail_modal {
+            PstDetailModalState::Loaded(d) => {
+                assert_eq!(d.total_items, 1200);
+                assert_eq!(d.last_email_date.as_deref(), Some("2024-05-15 14:30:00"));
+            }
+            _ => panic!("Debería estar en estado Loaded"),
+        }
+
+        // Cerrar modal
+        state.close_pst_detail();
+        assert_eq!(state.pst_detail_modal, PstDetailModalState::Closed);
     }
 }
