@@ -207,9 +207,5 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     ];
 
     f.render_widget(Paragraph::new(shortcuts).alignment(Alignment::Center), chunks[2]);
-
-    // 4. Modal Flotante de Detalle PST (si está activo)
-    if state.pst_detail_modal != crate::app::PstDetailModalState::Closed {
-        crate::ui::screens::pst_source::render_pst_detail_modal(f, area, state);
-    }
 }
+

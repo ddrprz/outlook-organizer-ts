@@ -29,6 +29,10 @@ $foldersList = @()
 $totalItems = 0
 $yearsSet = @{}
 $yearMonthsMap = @{}
+$globalCountsByYear = @{}
+$globalCountsByMonth = @{}
+$globalSizesByYear = @{}
+$globalSizesByMonth = @{}
 $minDate = [DateTime]::MaxValue
 $maxDate = [DateTime]::MinValue
 
@@ -78,181 +82,129 @@ try {
 
     $root = $pstStore.GetRootFolder()
 
-    # Función de alta velocidad para obtener rango de fechas usando ordenamiento indexado MAPI
-    function Get-FolderDateRange($folder) {
-        $dateProps = @(
-            @{ Name = "ReceivedTime"; Dasl = "http://schemas.microsoft.com/mapi/proptag/0x0E060040" },
-            @{ Name = "SentOn";       Dasl = "http://schemas.microsoft.com/mapi/proptag/0x00390040" }
-        )
-        if ($folder.Name -match "enviad|sent") {
-            $dateProps = @(
-                @{ Name = "SentOn";       Dasl = "http://schemas.microsoft.com/mapi/proptag/0x00390040" },
-                @{ Name = "ReceivedTime"; Dasl = "http://schemas.microsoft.com/mapi/proptag/0x0E060040" }
-            )
-        }
-
-        foreach ($dp in $dateProps) {
-            $pName = $dp.Name
-            $pDasl = $dp.Dasl
-            try {
-                $tblMax = $folder.GetTable()
-                $tblMax.Columns.Add($pName) | Out-Null
-                $tblMax.Sort($pName, $true)
-                if (-not $tblMax.EndOfTable) {
-                    $row = $tblMax.GetNextRow()
-                    $valMax = $row.Item($pName)
-                    if ($null -ne $valMax -and ($valMax -is [DateTime]) -and $valMax.Year -ge 1980 -and $valMax.Year -le 2050) {
-                        $tblMin = $folder.GetTable()
-                        $tblMin.Columns.Add($pName) | Out-Null
-                        $tblMin.Sort($pName, $false)
-                        if (-not $tblMin.EndOfTable) {
-                            $rowMin = $tblMin.GetNextRow()
-                            $valMin = $rowMin.Item($pName)
-                            if ($null -ne $valMin -and ($valMin -is [DateTime]) -and $valMin.Year -ge 1980 -and $valMin.Year -le 2050) {
-                                return @{
-                                    MinDate  = $valMin
-                                    MaxDate  = $valMax
-                                    DaslProp = $pDasl
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch {}
-        }
-        return $null
-    }
-
-    # Función recursiva para explorar carpetas de forma ultrarrápida
-    function Inspect-Folder($folder) {
+    # Función recursiva para explorar carpetas, jerarquía y métricas temporales
+    function Inspect-Folder($folder, [string]$parentPath = "") {
         $fName = $folder.Name
+        $relPath = if ($parentPath) { "$parentPath\$fName" } else { $fName }
         $fCount = 0
-        try {
-            $fCount = $folder.Items.Count
-        } catch {}
+        try { $fCount = $folder.Items.Count } catch {}
+        $subCount = 0
+        try { $subCount = $folder.Folders.Count } catch {}
+        $hasChildren = ($subCount -gt 0)
+
+        $folderSizeBytes = 0
+        $fCountsByYear = @{}
+        $fCountsByMonth = @{}
+        $fSizesByYear = @{}
+        $fSizesByMonth = @{}
+        $fYearsSet = @{}
+        $fYearMonths = @{}
 
         if ($fCount -gt 0) {
-            $script:totalItems += $fCount
-            $script:foldersList += @{
-                name  = $fName
-                count = $fCount
-            }
+            try {
+                $tbl = $folder.GetTable()
+                try { $tbl.Columns.Add("MessageSize") | Out-Null } catch {}
+                try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
+                try { $tbl.Columns.Add("SentOn") | Out-Null } catch {}
 
-            $range = Get-FolderDateRange $folder
-            if ($range) {
-                if ($range.MinDate -lt $script:minDate) { $script:minDate = $range.MinDate }
-                if ($range.MaxDate -gt $script:maxDate) { $script:maxDate = $range.MaxDate }
+                while (-not $tbl.EndOfTable) {
+                    $row = $tbl.GetNextRow()
+                    $sz = $row.Item("MessageSize")
+                    if ($null -eq $sz -or $sz -lt 0) { $sz = 0 }
+                    $folderSizeBytes += $sz
 
-                $yMin = $range.MinDate.Year
-                $yMax = $range.MaxDate.Year
-
-                # Registrar siempre los años y meses de los extremos confirmados
-                $script:yearsSet[$yMin] = $true
-                $script:yearsSet[$yMax] = $true
-                $yMinStr = "$yMin"
-                $yMaxStr = "$yMax"
-                if (-not $script:yearMonthsMap.ContainsKey($yMinStr)) { $script:yearMonthsMap[$yMinStr] = @{} }
-                if (-not $script:yearMonthsMap.ContainsKey($yMaxStr)) { $script:yearMonthsMap[$yMaxStr] = @{} }
-                $script:yearMonthsMap[$yMinStr][$range.MinDate.Month] = $true
-                $script:yearMonthsMap[$yMaxStr][$range.MaxDate.Month] = $true
-
-                # Si abarca varios años o meses, consultar la presencia mediante índices DASL instantáneos
-                if ($yMin -ne $yMax -or $range.MinDate.Month -ne $range.MaxDate.Month) {
-                    for ($y = $yMin; $y -le $yMax; $y++) {
+                    $dt = $row.Item("ReceivedTime")
+                    if ($null -eq $dt -or -not ($dt -is [DateTime])) {
+                        $dt = $row.Item("SentOn")
+                    }
+                    if ($null -ne $dt -and ($dt -is [DateTime]) -and $dt.Year -ge 1980 -and $dt.Year -le 2050) {
+                        $y = $dt.Year
+                        $m = $dt.Month
                         $yStr = "$y"
-                        $hasYear = $true
-                        if ($y -ne $yMin -and $y -ne $yMax) {
-                            $yStart = (Get-Date -Year $y -Month 1 -Day 1 -Hour 0 -Minute 0 -Second 0).ToString("yyyy-MM-dd HH:mm:ss")
-                            $yEnd = (Get-Date -Year ($y + 1) -Month 1 -Day 1 -Hour 0 -Minute 0 -Second 0).ToString("yyyy-MM-dd HH:mm:ss")
-                            $filterY = "@SQL=""$($range.DaslProp)"" >= '$yStart' AND ""$($range.DaslProp)"" < '$yEnd'"
-                            try {
-                                $tblY = $folder.GetTable($filterY)
-                                $hasYear = ($tblY -and $tblY.GetRowCount() -gt 0)
-                            } catch { $hasYear = $true }
-                        }
+                        $ymStr = "$y-$("{0:D2}" -f $m)"
 
-                        if ($hasYear) {
-                            $script:yearsSet[$y] = $true
-                            if (-not $script:yearMonthsMap.ContainsKey($yStr)) {
-                                $script:yearMonthsMap[$yStr] = @{}
-                            }
+                        if ($dt -lt $script:minDate) { $script:minDate = $dt }
+                        if ($dt -gt $script:maxDate) { $script:maxDate = $dt }
 
-                            $mStart = if ($y -eq $yMin) { $range.MinDate.Month } else { 1 }
-                            $mEnd = if ($y -eq $yMax) { $range.MaxDate.Month } else { 12 }
+                        # Métricas a nivel de carpeta
+                        $fYearsSet[$y] = $true
+                        if (-not $fYearMonths.ContainsKey($yStr)) { $fYearMonths[$yStr] = @{} }
+                        $fYearMonths[$yStr][$m] = $true
 
-                            for ($m = $mStart; $m -le $mEnd; $m++) {
-                                # Si ya está registrado en este año, saltar consulta
-                                if ($script:yearMonthsMap[$yStr].ContainsKey($m)) { continue }
+                        if (-not $fCountsByYear.ContainsKey($yStr)) { $fCountsByYear[$yStr] = 0; $fSizesByYear[$yStr] = 0.0 }
+                        $fCountsByYear[$yStr]++
+                        $fSizesByYear[$yStr] += ($sz / 1MB)
 
-                                $dtStart = (Get-Date -Year $y -Month $m -Day 1 -Hour 0 -Minute 0 -Second 0)
-                                $dtEnd = $dtStart.AddMonths(1)
-                                $filterM = "@SQL=""$($range.DaslProp)"" >= '$($dtStart.ToString("yyyy-MM-dd HH:mm:ss"))' AND ""$($range.DaslProp)"" < '$($dtEnd.ToString("yyyy-MM-dd HH:mm:ss"))'"
-                                try {
-                                    $tblM = $folder.GetTable($filterM)
-                                    if ($tblM -and $tblM.GetRowCount() -gt 0) {
-                                        $script:yearMonthsMap[$yStr][$m] = $true
-                                    }
-                                } catch {}
-                            }
-                        }
+                        if (-not $fCountsByMonth.ContainsKey($ymStr)) { $fCountsByMonth[$ymStr] = 0; $fSizesByMonth[$ymStr] = 0.0 }
+                        $fCountsByMonth[$ymStr]++
+                        $fSizesByMonth[$ymStr] += ($sz / 1MB)
+
+                        # Métricas globales del PST
+                        $script:yearsSet[$y] = $true
+                        if (-not $script:yearMonthsMap.ContainsKey($yStr)) { $script:yearMonthsMap[$yStr] = @{} }
+                        $script:yearMonthsMap[$yStr][$m] = $true
+
+                        if (-not $script:globalCountsByYear.ContainsKey($yStr)) { $script:globalCountsByYear[$yStr] = 0; $script:globalSizesByYear[$yStr] = 0.0 }
+                        $script:globalCountsByYear[$yStr]++
+                        $script:globalSizesByYear[$yStr] += ($sz / 1MB)
+
+                        if (-not $script:globalCountsByMonth.ContainsKey($ymStr)) { $script:globalCountsByMonth[$ymStr] = 0; $script:globalSizesByMonth[$ymStr] = 0.0 }
+                        $script:globalCountsByMonth[$ymStr]++
+                        $script:globalSizesByMonth[$ymStr] += ($sz / 1MB)
                     }
                 }
-            } else {
-                # Fallback seguro con Items si GetTable no pudo ordenar por columnas
-                try {
-                    $items = $folder.Items
-                    try {
-                        $items.Sort("[ReceivedTime]", $true)
-                        $firstItem = $items.Item(1)
-                        if ($firstItem) {
-                            $t = $null
-                            try { $t = $firstItem.ReceivedTime } catch {}
-                            if ($null -eq $t -or -not ($t -is [DateTime])) { try { $t = $firstItem.SentOn } catch {} }
-                            if ($t -is [DateTime] -and $t.Year -ge 1980 -and $t.Year -le 2050) {
-                                if ($t -gt $script:maxDate) { $script:maxDate = $t }
-                                $script:yearsSet[$t.Year] = $true
-                                $yStr = "$($t.Year)"
-                                if (-not $script:yearMonthsMap.ContainsKey($yStr)) { $script:yearMonthsMap[$yStr] = @{} }
-                                $script:yearMonthsMap[$yStr][$t.Month] = $true
-                            }
-                            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($firstItem) | Out-Null
-                        }
-                    } catch {}
-
-                    try {
-                        $items.Sort("[ReceivedTime]", $false)
-                        $lastItem = $items.Item(1)
-                        if ($lastItem) {
-                            $t = $null
-                            try { $t = $lastItem.ReceivedTime } catch {}
-                            if ($null -eq $t -or -not ($t -is [DateTime])) { try { $t = $lastItem.SentOn } catch {} }
-                            if ($t -is [DateTime] -and $t.Year -ge 1980 -and $t.Year -le 2050) {
-                                if ($t -lt $script:minDate) { $script:minDate = $t }
-                                $script:yearsSet[$t.Year] = $true
-                                $yStr = "$($t.Year)"
-                                if (-not $script:yearMonthsMap.ContainsKey($yStr)) { $script:yearMonthsMap[$yStr] = @{} }
-                                $script:yearMonthsMap[$yStr][$t.Month] = $true
-                            }
-                            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($lastItem) | Out-Null
-                        }
-                    } catch {}
-                } catch {}
+            } catch {
+                # Fallback en caso de que GetTable encuentre alguna excepción MAPI
             }
         }
 
-        # Subcarpetas
+        # Redondear tamaños de carpeta
+        $fSizesByYearRounded = @{}
+        foreach ($k in $fSizesByYear.Keys) { $fSizesByYearRounded[$k] = [math]::Round($fSizesByYear[$k], 2) }
+        $fSizesByMonthRounded = @{}
+        foreach ($k in $fSizesByMonth.Keys) { $fSizesByMonthRounded[$k] = [math]::Round($fSizesByMonth[$k], 2) }
+
+        $fSortedYears = $fYearsSet.Keys | ForEach-Object { [int]$_ } | Sort-Object
+        $fFinalYearMonths = @{}
+        foreach ($y in $fSortedYears) {
+            $yStr = "$y"
+            if ($fYearMonths.ContainsKey($yStr)) {
+                $mList = $fYearMonths[$yStr].Keys | ForEach-Object { [int]$_ } | Sort-Object
+                $fFinalYearMonths[$yStr] = @($mList)
+            } else {
+                $fFinalYearMonths[$yStr] = @()
+            }
+        }
+
+        $script:totalItems += $fCount
+        $script:foldersList += @{
+            name              = $fName
+            path              = $relPath
+            parent_path       = if ($parentPath) { $parentPath } else { $null }
+            total_items       = $fCount
+            size_mb           = [math]::Round($folderSizeBytes / 1MB, 2)
+            has_children      = $hasChildren
+            years             = @($fSortedYears)
+            year_months       = $fFinalYearMonths
+            counts_by_year    = $fCountsByYear
+            counts_by_month   = $fCountsByMonth
+            sizes_by_year_mb  = $fSizesByYearRounded
+            sizes_by_month_mb = $fSizesByMonthRounded
+        }
+
+        # Subcarpetas recursivas
         try {
             foreach ($sub in $folder.Folders) {
-                Inspect-Folder $sub
+                Inspect-Folder $sub $relPath
             }
         } catch {}
     }
 
     foreach ($subF in $root.Folders) {
-        Inspect-Folder $subF
+        Inspect-Folder $subF ""
     }
 
-    # Estructurar resultado
+    # Estructurar resultado global
     $sortedYears = $yearsSet.Keys | ForEach-Object { [int]$_ } | Sort-Object
     $finalYearMonths = @{}
     foreach ($y in $sortedYears) {
@@ -264,6 +216,11 @@ try {
             $finalYearMonths[$yStr] = @()
         }
     }
+
+    $globalSizesByYearRounded = @{}
+    foreach ($k in $script:globalSizesByYear.Keys) { $globalSizesByYearRounded[$k] = [math]::Round($script:globalSizesByYear[$k], 2) }
+    $globalSizesByMonthRounded = @{}
+    foreach ($k in $script:globalSizesByMonth.Keys) { $globalSizesByMonthRounded[$k] = [math]::Round($script:globalSizesByMonth[$k], 2) }
 
     $lastDateStr = if ($maxDate -gt [DateTime]::MinValue) { $maxDate.ToString("yyyy-MM-dd HH:mm:ss") } else { $null }
     $firstDateStr = if ($minDate -lt [DateTime]::MaxValue) { $minDate.ToString("yyyy-MM-dd HH:mm:ss") } else { $null }
@@ -278,15 +235,19 @@ try {
     }
 
     $result = @{
-        file_name        = $fileName
-        file_path        = $PstPath
-        size_mb          = $sizeMb
-        total_items      = $totalItems
-        last_email_date  = $lastDateStr
-        first_email_date = $firstDateStr
-        folders          = $foldersList
-        years            = @($sortedYears)
-        year_months      = $finalYearMonths
+        file_name         = $fileName
+        file_path         = $PstPath
+        size_mb           = $sizeMb
+        total_items       = $totalItems
+        last_email_date   = $lastDateStr
+        first_email_date  = $firstDateStr
+        folders           = $foldersList
+        years             = @($sortedYears)
+        year_months       = $finalYearMonths
+        counts_by_year    = $script:globalCountsByYear
+        counts_by_month   = $script:globalCountsByMonth
+        sizes_by_year_mb  = $globalSizesByYearRounded
+        sizes_by_month_mb = $globalSizesByMonthRounded
     }
 
     Write-Output ($result | ConvertTo-Json -Compress)

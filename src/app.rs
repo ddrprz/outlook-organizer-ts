@@ -16,6 +16,7 @@ pub enum WizardStep {
     Summary,
     Execution,
     Completion,
+    PstDetailView,
 }
 
 impl WizardStep {
@@ -32,6 +33,7 @@ impl WizardStep {
             WizardStep::Summary => "Resumen Pre-Vuelo y Confirmación",
             WizardStep::Execution => "Procesando en Tiempo Real",
             WizardStep::Completion => "Operación Finalizada y Reportes",
+            WizardStep::PstDetailView => "Detalle Analítico del Archivo PST",
         }
     }
 
@@ -40,6 +42,7 @@ impl WizardStep {
             WizardStep::Welcome => 0,
             WizardStep::FileExplorer => 1,
             WizardStep::PstSource => 1,
+            WizardStep::PstDetailView => 1,
             WizardStep::Mailbox => 2,
             WizardStep::FoldersMode => 3,
             WizardStep::Routing => 4,
@@ -63,10 +66,50 @@ pub struct PstItem {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct PstFolderDetail {
     pub name: String,
+    #[serde(alias = "total_items", default)]
     pub count: usize,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub parent_path: Option<String>,
+    #[serde(default)]
+    pub size_mb: f64,
+    #[serde(default)]
+    pub has_children: bool,
+    #[serde(default)]
+    pub years: Vec<u32>,
+    #[serde(default)]
+    pub year_months: std::collections::BTreeMap<String, Vec<u32>>,
+    #[serde(default)]
+    pub counts_by_year: std::collections::BTreeMap<String, usize>,
+    #[serde(default)]
+    pub counts_by_month: std::collections::BTreeMap<String, usize>,
+    #[serde(default)]
+    pub sizes_by_year_mb: std::collections::BTreeMap<String, f64>,
+    #[serde(default)]
+    pub sizes_by_month_mb: std::collections::BTreeMap<String, f64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+impl Default for PstFolderDetail {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            count: 0,
+            path: String::new(),
+            parent_path: None,
+            size_mb: 0.0,
+            has_children: false,
+            years: Vec::new(),
+            year_months: std::collections::BTreeMap::new(),
+            counts_by_year: std::collections::BTreeMap::new(),
+            counts_by_month: std::collections::BTreeMap::new(),
+            sizes_by_year_mb: std::collections::BTreeMap::new(),
+            sizes_by_month_mb: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub struct PstDetail {
     pub file_name: String,
     pub file_path: String,
@@ -77,6 +120,172 @@ pub struct PstDetail {
     pub folders: Vec<PstFolderDetail>,
     pub years: Vec<u32>,
     pub year_months: std::collections::BTreeMap<String, Vec<u32>>,
+    #[serde(default)]
+    pub counts_by_year: std::collections::BTreeMap<String, usize>,
+    #[serde(default)]
+    pub counts_by_month: std::collections::BTreeMap<String, usize>,
+    #[serde(default)]
+    pub sizes_by_year_mb: std::collections::BTreeMap<String, f64>,
+    #[serde(default)]
+    pub sizes_by_month_mb: std::collections::BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PstFolderItemType {
+    ParentDir,
+    Folder,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PstFolderEntry {
+    pub name: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub count: usize,
+    pub size_mb: f64,
+    pub has_children: bool,
+    pub item_type: PstFolderItemType,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PstFolderExplorerState {
+    pub current_parent: Option<String>, // None = raíz de carpetas del PST
+    pub selected_idx: usize,
+    pub checked_folder_path: Option<String>, // Carpeta seleccionada con Espacio
+}
+
+impl PstFolderExplorerState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        self.current_parent = None;
+        self.selected_idx = 0;
+        self.checked_folder_path = None;
+    }
+
+    /// Obtiene las entradas a listar en el nivel actual
+    pub fn current_entries(&self, detail: &PstDetail) -> Vec<PstFolderEntry> {
+        let mut entries = Vec::new();
+
+        // Si estamos dentro de una subcarpeta, la primera opción es '..' para subir de nivel
+        if let Some(ref parent) = self.current_parent {
+            entries.push(PstFolderEntry {
+                name: ".. (Subir de nivel)".to_string(),
+                path: parent.clone(),
+                parent_path: None,
+                count: 0,
+                size_mb: 0.0,
+                has_children: false,
+                item_type: PstFolderItemType::ParentDir,
+            });
+        }
+
+        // Buscar las carpetas cuyo parent_path coincida con current_parent
+        for f in &detail.folders {
+            let is_match = match (&self.current_parent, &f.parent_path) {
+                (None, None) => true,
+                (None, Some(p)) if p.is_empty() => true,
+                (Some(curr), Some(p)) => curr == p,
+                _ => false,
+            };
+
+            if is_match {
+                entries.push(PstFolderEntry {
+                    name: f.name.clone(),
+                    path: if f.path.is_empty() { f.name.clone() } else { f.path.clone() },
+                    parent_path: f.parent_path.clone(),
+                    count: f.count,
+                    size_mb: f.size_mb,
+                    has_children: f.has_children,
+                    item_type: PstFolderItemType::Folder,
+                });
+            }
+        }
+
+        entries
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_idx > 0 {
+            self.selected_idx -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self, max_entries: usize) {
+        if max_entries > 0 && self.selected_idx + 1 < max_entries {
+            self.selected_idx += 1;
+        }
+    }
+
+    pub fn navigate_into(&mut self, detail: &PstDetail) -> bool {
+        let entries = self.current_entries(detail);
+        if let Some(entry) = entries.get(self.selected_idx) {
+            match entry.item_type {
+                PstFolderItemType::ParentDir => {
+                    self.navigate_up(detail);
+                    return true;
+                }
+                PstFolderItemType::Folder => {
+                    if entry.has_children {
+                        self.current_parent = Some(entry.path.clone());
+                        self.selected_idx = 0;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub fn navigate_up(&mut self, detail: &PstDetail) -> bool {
+        if let Some(ref current) = self.current_parent {
+            // Buscar cuál es el padre del current_parent
+            let parent_of_current = detail
+                .folders
+                .iter()
+                .find(|f| {
+                    let f_path = if f.path.is_empty() { &f.name } else { &f.path };
+                    f_path == current
+                })
+                .and_then(|f| f.parent_path.clone())
+                .filter(|p| !p.is_empty());
+
+            self.current_parent = parent_of_current;
+            self.selected_idx = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Alterna la selección con la tecla Espacio
+    pub fn toggle_select(&mut self, detail: &PstDetail) {
+        let entries = self.current_entries(detail);
+        if let Some(entry) = entries.get(self.selected_idx)
+            && entry.item_type == PstFolderItemType::Folder
+        {
+            if self.checked_folder_path.as_deref() == Some(&entry.path) {
+                // Si ya estaba seleccionada, deseleccionar para volver al resumen general
+                self.checked_folder_path = None;
+            } else {
+                self.checked_folder_path = Some(entry.path.clone());
+            }
+        }
+    }
+
+    /// Obtiene los detalles de la carpeta seleccionada actualmente (si hay una)
+    pub fn get_selected_folder_stats<'a>(&self, detail: &'a PstDetail) -> Option<&'a PstFolderDetail> {
+        if let Some(ref path) = self.checked_folder_path {
+            detail.folders.iter().find(|f| {
+                let f_path = if f.path.is_empty() { &f.name } else { &f.path };
+                f_path == path
+            })
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -451,7 +660,9 @@ pub struct AppState {
     pub progress: ProgressState,
     pub activity_log: VecDeque<String>, // Buffer circular limitado (max 300)
 
-    // Modal flotante de detalle de PST
+    // Modal y vista completa de detalle de PST
+    pub previous_step_before_detail: WizardStep,
+    pub pst_folder_explorer: PstFolderExplorerState,
     pub pst_detail_modal: PstDetailModalState,
     pub pst_details_cache: std::collections::HashMap<String, PstDetail>,
 }
@@ -515,6 +726,8 @@ impl AppState {
             explorer,
             progress: ProgressState::default(),
             activity_log: VecDeque::with_capacity(300),
+            previous_step_before_detail: WizardStep::PstSource,
+            pst_folder_explorer: PstFolderExplorerState::new(),
             pst_detail_modal: PstDetailModalState::Closed,
             pst_details_cache: std::collections::HashMap::new(),
         }
@@ -543,6 +756,11 @@ impl AppState {
     }
 
     pub fn open_pst_detail(&mut self, path: String, name: String) -> bool {
+        if self.step != WizardStep::PstDetailView {
+            self.previous_step_before_detail = self.step;
+        }
+        self.pst_folder_explorer.reset();
+        self.step = WizardStep::PstDetailView;
         if let Some(cached) = self.pst_details_cache.get(&path) {
             self.pst_detail_modal = PstDetailModalState::Loaded(Box::new(cached.clone()));
             false
@@ -557,6 +775,8 @@ impl AppState {
 
     pub fn close_pst_detail(&mut self) {
         self.pst_detail_modal = PstDetailModalState::Closed;
+        self.pst_folder_explorer.reset();
+        self.step = self.previous_step_before_detail;
     }
 
     pub fn next_step(&mut self) {
@@ -564,6 +784,7 @@ impl AppState {
             WizardStep::Welcome => WizardStep::PstSource,
             WizardStep::FileExplorer => WizardStep::PstSource,
             WizardStep::PstSource => WizardStep::Mailbox,
+            WizardStep::PstDetailView => self.previous_step_before_detail,
             WizardStep::Mailbox => WizardStep::FoldersMode,
             WizardStep::FoldersMode => {
                 self.active_routing_modal = RoutingModal::Criterion;
@@ -593,6 +814,7 @@ impl AppState {
             WizardStep::Welcome => WizardStep::Welcome,
             WizardStep::FileExplorer => WizardStep::Welcome,
             WizardStep::PstSource => WizardStep::Welcome,
+            WizardStep::PstDetailView => self.previous_step_before_detail,
             WizardStep::Mailbox => WizardStep::PstSource,
             WizardStep::FoldersMode => WizardStep::Mailbox,
             WizardStep::Routing => {
@@ -621,7 +843,7 @@ mod tests {
     fn test_list_windows_drives() {
         let drives = list_windows_drives();
         assert!(!drives.is_empty(), "Should detect at least one Windows drive");
-        let has_c = drives.iter().any(|d| d.path == PathBuf::from(r"C:\"));
+        let has_c = drives.iter().any(|d| d.path == std::path::Path::new(r"C:\"));
         assert!(has_c, "Drive C:\\ should be present");
     }
 
@@ -847,11 +1069,13 @@ mod tests {
     #[test]
     fn test_pst_detail_modal_open_and_close() {
         let mut state = AppState::new();
+        state.step = WizardStep::PstSource;
         assert_eq!(state.pst_detail_modal, PstDetailModalState::Closed);
 
         // Primera apertura: no está en caché -> retorna true para disparar inspección
         let should_trigger = state.open_pst_detail(r"C:\Correo\archivo.pst".to_string(), "archivo.pst".to_string());
         assert!(should_trigger);
+        assert_eq!(state.step, WizardStep::PstDetailView);
         match &state.pst_detail_modal {
             PstDetailModalState::Loading { pst_path, pst_name } => {
                 assert_eq!(pst_path, r"C:\Correo\archivo.pst");
@@ -868,9 +1092,14 @@ mod tests {
             total_items: 1200,
             last_email_date: Some("2024-05-15 14:30:00".to_string()),
             first_email_date: Some("2022-01-10 08:20:00".to_string()),
-            folders: vec![PstFolderDetail { name: "Bandeja de entrada".to_string(), count: 1200 }],
+            folders: vec![PstFolderDetail {
+                name: "Bandeja de entrada".to_string(),
+                count: 1200,
+                ..Default::default()
+            }],
             years: vec![2022, 2023, 2024],
             year_months: std::collections::BTreeMap::new(),
+            ..Default::default()
         };
         state.pst_details_cache.insert(r"C:\Correo\archivo.pst".to_string(), detail.clone());
 
@@ -885,8 +1114,86 @@ mod tests {
             _ => panic!("Debería estar en estado Loaded"),
         }
 
-        // Cerrar modal
+        // Cerrar modal y vista completa
         state.close_pst_detail();
         assert_eq!(state.pst_detail_modal, PstDetailModalState::Closed);
+        assert_eq!(state.step, WizardStep::PstSource);
+    }
+
+    #[test]
+    fn test_pst_folder_explorer_navigation_and_selection() {
+        let detail = PstDetail {
+            file_name: "test.pst".to_string(),
+            file_path: r"C:\Correo\test.pst".to_string(),
+            size_mb: 150.0,
+            total_items: 500,
+            folders: vec![
+                PstFolderDetail {
+                    name: "Bandeja de entrada".to_string(),
+                    path: "Bandeja de entrada".to_string(),
+                    parent_path: None,
+                    count: 300,
+                    size_mb: 90.0,
+                    has_children: true,
+                    ..Default::default()
+                },
+                PstFolderDetail {
+                    name: "Facturas 2024".to_string(),
+                    path: r"Bandeja de entrada\Facturas 2024".to_string(),
+                    parent_path: Some("Bandeja de entrada".to_string()),
+                    count: 150,
+                    size_mb: 45.0,
+                    has_children: false,
+                    ..Default::default()
+                },
+                PstFolderDetail {
+                    name: "Elementos enviados".to_string(),
+                    path: "Elementos enviados".to_string(),
+                    parent_path: None,
+                    count: 50,
+                    size_mb: 15.0,
+                    has_children: false,
+                    ..Default::default()
+                },
+            ],
+            years: vec![2024],
+            ..Default::default()
+        };
+
+        let mut explorer = PstFolderExplorerState::new();
+
+        // Nivel raíz: debe listar 2 carpetas principales
+        let root_entries = explorer.current_entries(&detail);
+        assert_eq!(root_entries.len(), 2);
+        assert_eq!(root_entries[0].name, "Bandeja de entrada");
+        assert_eq!(root_entries[1].name, "Elementos enviados");
+
+        // Seleccionar Bandeja de entrada con Espacio
+        explorer.toggle_select(&detail);
+        assert_eq!(explorer.checked_folder_path, Some("Bandeja de entrada".to_string()));
+        let selected_stats = explorer.get_selected_folder_stats(&detail);
+        assert!(selected_stats.is_some());
+        assert_eq!(selected_stats.unwrap().count, 300);
+
+        // Deseleccionar con Espacio nuevamente
+        explorer.toggle_select(&detail);
+        assert_eq!(explorer.checked_folder_path, None);
+        assert!(explorer.get_selected_folder_stats(&detail).is_none());
+
+        // Entrar con 'E' a Bandeja de entrada
+        let entered = explorer.navigate_into(&detail);
+        assert!(entered);
+        assert_eq!(explorer.current_parent, Some("Bandeja de entrada".to_string()));
+
+        // En subnivel: debe haber ".. (Subir de nivel)" y "Facturas 2024"
+        let sub_entries = explorer.current_entries(&detail);
+        assert_eq!(sub_entries.len(), 2);
+        assert_eq!(sub_entries[0].item_type, PstFolderItemType::ParentDir);
+        assert_eq!(sub_entries[1].name, "Facturas 2024");
+
+        // Subir de nivel con navigate_up
+        let went_up = explorer.navigate_up(&detail);
+        assert!(went_up);
+        assert_eq!(explorer.current_parent, None);
     }
 }

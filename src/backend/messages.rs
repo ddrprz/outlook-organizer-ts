@@ -39,6 +39,6 @@ pub enum BackendMessage {
     PstDetailLoaded {
         pst_path: String,
         pst_name: String,
-        detail: Result<crate::app::PstDetail, String>,
+        detail: Result<Box<crate::app::PstDetail>, String>,
     },
 }
