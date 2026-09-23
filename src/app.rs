@@ -290,6 +290,255 @@ impl PstFolderExplorerState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FolderTreeNode {
+    pub name: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub count: usize,
+    pub selected: bool,
+    pub expanded: bool,
+    pub level: usize,
+    pub has_children: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FolderTreeState {
+    pub nodes: Vec<FolderTreeNode>,
+    pub selected_idx: usize,
+}
+
+impl FolderTreeState {
+    pub fn new() -> Self {
+        let mut s = Self::default();
+        s.init_defaults();
+        s
+    }
+
+    pub fn init_defaults(&mut self) {
+        self.nodes = vec![
+            FolderTreeNode {
+                name: "Bandeja de entrada".to_string(),
+                path: "Bandeja de entrada".to_string(),
+                parent_path: None,
+                count: 0,
+                selected: true,
+                expanded: true,
+                level: 0,
+                has_children: false,
+            },
+            FolderTreeNode {
+                name: "Elementos enviados".to_string(),
+                path: "Elementos enviados".to_string(),
+                parent_path: None,
+                count: 0,
+                selected: true,
+                expanded: true,
+                level: 0,
+                has_children: false,
+            },
+            FolderTreeNode {
+                name: "Elementos eliminados".to_string(),
+                path: "Elementos eliminados".to_string(),
+                parent_path: None,
+                count: 0,
+                selected: false,
+                expanded: true,
+                level: 0,
+                has_children: false,
+            },
+            FolderTreeNode {
+                name: "Carpetas personalizadas / subcarpetas".to_string(),
+                path: "Carpetas personalizadas".to_string(),
+                parent_path: None,
+                count: 0,
+                selected: true,
+                expanded: true,
+                level: 0,
+                has_children: false,
+            },
+        ];
+        self.selected_idx = 0;
+    }
+
+    /// Construye el árbol jerárquico a partir de los PstDetail cargados
+    pub fn build_from_pst_details(&mut self, details: &[&PstDetail]) {
+        if details.is_empty() {
+            self.init_defaults();
+            return;
+        }
+
+        let mut folder_map: std::collections::HashMap<String, PstFolderDetail> = std::collections::HashMap::new();
+        for d in details {
+            for f in &d.folders {
+                let f_path = if f.path.is_empty() { f.name.clone() } else { f.path.clone() };
+                folder_map.entry(f_path).and_modify(|existing| {
+                    existing.count += f.count;
+                    existing.size_mb += f.size_mb;
+                    if f.has_children {
+                        existing.has_children = true;
+                    }
+                }).or_insert_with(|| f.clone());
+            }
+        }
+
+        if folder_map.is_empty() {
+            self.init_defaults();
+            return;
+        }
+
+        let mut nodes = Vec::new();
+        Self::append_nodes_recursive(&folder_map, None, 0, &mut nodes);
+
+        if nodes.is_empty() {
+            self.init_defaults();
+        } else {
+            self.nodes = nodes;
+            self.selected_idx = 0;
+        }
+    }
+
+    fn append_nodes_recursive(
+        folder_map: &std::collections::HashMap<String, PstFolderDetail>,
+        parent_path: Option<&str>,
+        level: usize,
+        out: &mut Vec<FolderTreeNode>,
+    ) {
+        let mut children: Vec<&PstFolderDetail> = folder_map
+            .values()
+            .filter(|f| {
+                match (&f.parent_path, parent_path) {
+                    (None, None) => true,
+                    (Some(p), None) => p.is_empty(),
+                    (Some(p), Some(target)) => p == target,
+                    _ => false,
+                }
+            })
+            .collect();
+
+        children.sort_by(|a, b| {
+            fn folder_priority(name: &str) -> usize {
+                let lower = name.to_lowercase();
+                if lower.contains("bandeja de entrada") || lower == "inbox" {
+                    0
+                } else if lower.contains("elementos enviados") || lower.contains("sent") {
+                    1
+                } else if lower.contains("elementos eliminados") || lower.contains("deleted") || lower.contains("trash") {
+                    9
+                } else {
+                    2
+                }
+            }
+            let p_a = folder_priority(&a.name);
+            let p_b = folder_priority(&b.name);
+            if p_a != p_b {
+                p_a.cmp(&p_b)
+            } else {
+                a.name.cmp(&b.name)
+            }
+        });
+
+        for child in children {
+            let f_path = if child.path.is_empty() { child.name.clone() } else { child.path.clone() };
+            let has_sub = child.has_children || folder_map.values().any(|f| f.parent_path.as_deref() == Some(&f_path));
+            let is_deleted = child.name.to_lowercase().contains("eliminados") || child.name.to_lowercase().contains("deleted");
+
+            out.push(FolderTreeNode {
+                name: child.name.clone(),
+                path: f_path.clone(),
+                parent_path: parent_path.map(|s| s.to_string()),
+                count: child.count,
+                selected: !is_deleted,
+                expanded: true,
+                level,
+                has_children: has_sub,
+            });
+
+            Self::append_nodes_recursive(folder_map, Some(&f_path), level + 1, out);
+        }
+    }
+
+    /// Retorna los índices en `self.nodes` de los nodos visibles (cuyos ancestros están expandidos)
+    pub fn visible_indices(&self) -> Vec<usize> {
+        let mut visible = Vec::new();
+        let mut expanded_paths = std::collections::HashSet::new();
+
+        for (i, node) in self.nodes.iter().enumerate() {
+            let is_visible = match &node.parent_path {
+                None => true,
+                Some(p) if p.is_empty() => true,
+                Some(p) => expanded_paths.contains(p.as_str()),
+            };
+
+            if is_visible {
+                visible.push(i);
+                if node.expanded {
+                    expanded_paths.insert(node.path.as_str());
+                }
+            }
+        }
+        visible
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_idx > 0 {
+            self.selected_idx -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        let visible = self.visible_indices();
+        if !visible.is_empty() && self.selected_idx + 1 < visible.len() {
+            self.selected_idx += 1;
+        }
+    }
+
+    pub fn toggle_expand(&mut self) {
+        let visible = self.visible_indices();
+        if let Some(&node_idx) = visible.get(self.selected_idx)
+            && let Some(node) = self.nodes.get_mut(node_idx)
+            && node.has_children
+        {
+            node.expanded = !node.expanded;
+        }
+    }
+
+    pub fn toggle_select(&mut self) {
+        let visible = self.visible_indices();
+        if let Some(&node_idx) = visible.get(self.selected_idx)
+            && let Some(node) = self.nodes.get(node_idx)
+        {
+            let target_path = node.path.clone();
+            let new_state = !node.selected;
+
+            for n in &mut self.nodes {
+                if n.path == target_path
+                    || n.path.starts_with(&format!(r"{}\", target_path))
+                    || n.path.starts_with(&format!("{}/", target_path))
+                {
+                    n.selected = new_state;
+                }
+            }
+        }
+    }
+
+    pub fn select_all(&mut self) {
+        for n in &mut self.nodes {
+            n.selected = true;
+        }
+    }
+
+    pub fn deselect_all(&mut self) {
+        for n in &mut self.nodes {
+            n.selected = false;
+        }
+    }
+
+    pub fn selected_paths(&self) -> Vec<String> {
+        self.nodes.iter().filter(|n| n.selected).map(|n| n.path.clone()).collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum PstDetailModalState {
     Closed,
     Loading {
@@ -637,6 +886,7 @@ pub struct AppState {
     pub include_deleted: bool,
     pub include_custom_folders: bool,
     pub transfer_mode: TransferMode,
+    pub folder_tree: FolderTreeState,
 
     // Configuración Paso 5: Enrutamiento
     pub routing_enabled: bool,
@@ -714,6 +964,7 @@ impl AppState {
             include_deleted: false,
             include_custom_folders: true,
             transfer_mode: TransferMode::Copy,
+            folder_tree: FolderTreeState::new(),
             routing_enabled: true,
             routing_granularity: RoutingGranularity::Mirror,
             specific_year: None,
@@ -787,14 +1038,54 @@ impl AppState {
         self.step = self.previous_step_before_detail;
     }
 
+    pub fn sync_folder_tree_from_selected_psts(&mut self) {
+        let selected_details: Vec<&PstDetail> = self
+            .discovered_psts
+            .iter()
+            .filter(|p| p.selected)
+            .filter_map(|p| self.pst_details_cache.get(&p.path))
+            .collect();
+
+        self.folder_tree.build_from_pst_details(&selected_details);
+        self.sync_legacy_folder_flags();
+    }
+
+    pub fn sync_legacy_folder_flags(&mut self) {
+        let paths = self.folder_tree.selected_paths();
+        if !paths.is_empty() {
+            self.include_inbox = paths.iter().any(|p| {
+                let l = p.to_lowercase();
+                l == "bandeja de entrada" || l == "inbox" || l.starts_with(r"bandeja de entrada\") || l.starts_with("inbox/")
+            });
+            self.include_sent = paths.iter().any(|p| {
+                let l = p.to_lowercase();
+                l == "elementos enviados" || l == "sent items" || l.starts_with(r"elementos enviados\") || l.starts_with("sent items/")
+            });
+            self.include_deleted = paths.iter().any(|p| {
+                let l = p.to_lowercase();
+                l == "elementos eliminados" || l == "deleted items" || l.starts_with(r"elementos eliminados\") || l.starts_with("deleted items/")
+            });
+            self.include_custom_folders = paths.iter().any(|p| {
+                let l = p.to_lowercase();
+                !l.contains("bandeja de entrada") && !l.contains("inbox")
+                    && !l.contains("elementos enviados") && !l.contains("sent items")
+                    && !l.contains("elementos eliminados") && !l.contains("deleted items")
+            });
+        }
+    }
+
     pub fn next_step(&mut self) {
         self.step = match self.step {
             WizardStep::Welcome => WizardStep::PstSource,
             WizardStep::FileExplorer => WizardStep::PstSource,
             WizardStep::PstSource => WizardStep::Mailbox,
             WizardStep::PstDetailView => self.previous_step_before_detail,
-            WizardStep::Mailbox => WizardStep::FoldersMode,
+            WizardStep::Mailbox => {
+                self.sync_folder_tree_from_selected_psts();
+                WizardStep::FoldersMode
+            }
             WizardStep::FoldersMode => {
+                self.sync_legacy_folder_flags();
                 self.active_routing_modal = RoutingModal::Criterion;
                 self.routing_modal_criterion_idx = match self.routing_granularity {
                     RoutingGranularity::Mirror => 0,
@@ -827,6 +1118,7 @@ impl AppState {
             WizardStep::FoldersMode => WizardStep::Mailbox,
             WizardStep::Routing => {
                 self.active_routing_modal = RoutingModal::None;
+                self.sync_folder_tree_from_selected_psts();
                 WizardStep::FoldersMode
             }
             WizardStep::Deduplication => {
@@ -1215,6 +1507,81 @@ mod tests {
         assert_eq!(d.folders.len(), 1);
         assert_eq!(d.folders[0].name, "Bandeja de entrada");
         assert_eq!(d.folders[0].years, vec![2026]);
+    }
+
+    #[test]
+    fn test_folder_tree_state_navigation_and_selection() {
+        let mut tree = FolderTreeState::new();
+        assert_eq!(tree.nodes.len(), 4);
+        assert_eq!(tree.visible_indices().len(), 4);
+
+        // Crear una estructura con subcarpetas
+        let detail = PstDetail {
+            file_name: "test.pst".to_string(),
+            file_path: r"C:\Correo\test.pst".to_string(),
+            folders: vec![
+                PstFolderDetail {
+                    name: "Bandeja de entrada".to_string(),
+                    path: "Bandeja de entrada".to_string(),
+                    parent_path: None,
+                    count: 960,
+                    has_children: true,
+                    ..Default::default()
+                },
+                PstFolderDetail {
+                    name: "JORGE S.".to_string(),
+                    path: r"Bandeja de entrada\JORGE S.".to_string(),
+                    parent_path: Some("Bandeja de entrada".to_string()),
+                    count: 24,
+                    has_children: false,
+                    ..Default::default()
+                },
+                PstFolderDetail {
+                    name: "Elementos enviados".to_string(),
+                    path: "Elementos enviados".to_string(),
+                    parent_path: None,
+                    count: 357,
+                    has_children: false,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        tree.build_from_pst_details(&[&detail]);
+        assert_eq!(tree.nodes.len(), 3);
+        assert_eq!(tree.nodes[0].name, "Bandeja de entrada");
+        assert!(tree.nodes[0].has_children);
+        assert_eq!(tree.nodes[1].name, "JORGE S.");
+        assert_eq!(tree.nodes[1].level, 1);
+        assert_eq!(tree.nodes[2].name, "Elementos enviados");
+
+        // Todos expandidos inicialmente: 3 visibles
+        assert_eq!(tree.visible_indices().len(), 3);
+
+        // Colapsar Bandeja de entrada con toggle_expand (índice 0)
+        tree.toggle_expand();
+        assert!(!tree.nodes[0].expanded);
+        // Ahora solo 2 visibles: Bandeja de entrada y Elementos enviados
+        assert_eq!(tree.visible_indices().len(), 2);
+
+        // Volver a expandir
+        tree.toggle_expand();
+        assert!(tree.nodes[0].expanded);
+        assert_eq!(tree.visible_indices().len(), 3);
+
+        // Deseleccionar Bandeja de entrada (debe deseleccionar también JORGE S.)
+        tree.toggle_select();
+        assert!(!tree.nodes[0].selected);
+        assert!(!tree.nodes[1].selected);
+        assert!(tree.nodes[2].selected);
+
+        // Seleccionar todo
+        tree.select_all();
+        assert!(tree.nodes[0].selected);
+        assert!(tree.nodes[1].selected);
+        assert!(tree.nodes[2].selected);
+        assert_eq!(tree.selected_paths().len(), 3);
     }
 }
 

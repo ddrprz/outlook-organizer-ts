@@ -82,6 +82,76 @@ function Get-DestBaseFolder($destStore, [string]$folderType, [string]$customName
     }
 }
 
+function Get-DestFolderByPath($destStore, [string]$relPath, [string]$folderType) {
+    if (-not $relPath -or $relPath.Trim() -eq "") {
+        return Get-DestBaseFolder $destStore $folderType ""
+    }
+    $parts = $relPath -split "[\\/]"
+    if ($parts.Length -eq 0 -or [string]::IsNullOrWhiteSpace($parts[0])) {
+        return Get-DestBaseFolder $destStore $folderType ""
+    }
+    $topName = $parts[0]
+    $topType = Get-FolderType $topName
+    $currentDest = Get-DestBaseFolder $destStore $topType $topName
+    for ($i = 1; $i -lt $parts.Length; $i++) {
+        $subName = $parts[$i]
+        if (-not [string]::IsNullOrWhiteSpace($subName)) {
+            $currentDest = Get-OrCreateFolder $currentDest $subName
+        }
+    }
+    return $currentDest
+}
+
+function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collections.Generic.List[hashtable]]$collector, $selectedPathsSet, [bool]$hasSubpaths, $config) {
+    foreach ($sub in $folder.Folders) {
+        $subName = $sub.Name
+        # Ignorar carpetas internas de sistema irrelevantes
+        if ($subName -match "^(Yammer Root|Quick Step Settings|Conversation History|Social Activity Provider RSS Feeds|Sync Issues|Problemas de sincronización|Conflictos|Errores locales|Fallos del servidor)$") {
+            continue
+        }
+
+        $subPath = if ($currentPath -eq "") { $subName } else { "$currentPath\$subName" }
+        $fType = Get-FolderType $subName
+
+        $shouldInclude = $false
+        if ($selectedPathsSet -and $selectedPathsSet.Count -gt 0) {
+            if ($hasSubpaths) {
+                # Modo árbol detallado: coincidencia exacta de ruta
+                if ($selectedPathsSet.Contains($subPath)) {
+                    $shouldInclude = $true
+                }
+            } else {
+                # Modo básico: coincidencia por top-level o ancestro raíz
+                $topAncestor = ($subPath -split "[\\/]")[0]
+                if ($selectedPathsSet.Contains($topAncestor) -or $selectedPathsSet.Contains($subName)) {
+                    $shouldInclude = $true
+                }
+            }
+        } else {
+            # Compatibilidad con flags heredados (legacy flags)
+            switch ($fType) {
+                "inbox"   { $shouldInclude = if ($config) { [bool]$config.include_inbox } else { $true } }
+                "sent"    { $shouldInclude = if ($config) { [bool]$config.include_sent } else { $true } }
+                "deleted" { $shouldInclude = if ($config) { [bool]$config.include_deleted } else { $false } }
+                "custom"  { $shouldInclude = if ($config) { [bool]$config.include_custom_folders } else { $true } }
+                default   { $shouldInclude = $true }
+            }
+        }
+
+        if ($shouldInclude) {
+            $collector.Add(@{
+                Folder  = $sub
+                Type    = $fType
+                Name    = $subName
+                RelPath = $subPath
+            })
+        }
+
+        # Continuar la recolección recursiva en subcarpetas
+        Collect-CandidateFolders $sub $subPath $collector $selectedPathsSet $hasSubpaths $config
+    }
+}
+
 function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.HashSet[string]]$seenSet, [bool]$deepScan) {
     try {
         $items = $targetFolder.Items
@@ -298,20 +368,23 @@ try {
             continue
         }
 
-        $candidateFolders = @()
-        foreach ($f in $pstRoot.Folders) {
-            $fType = Get-FolderType $f.Name
-            $include = $false
-            switch ($fType) {
-                "inbox"   { $include = if ($config) { [bool]$config.include_inbox } else { $true } }
-                "sent"    { $include = if ($config) { [bool]$config.include_sent } else { $true } }
-                "deleted" { $include = if ($config) { [bool]$config.include_deleted } else { $false } }
-                "custom"  { $include = if ($config) { [bool]$config.include_custom_folders } else { $true } }
-            }
-            if ($include) {
-                $candidateFolders += @{ Folder = $f; Type = $fType; Name = $f.Name }
+        $selectedPathsSet = $null
+        $hasSubpaths = $false
+        if ($config -and $config.selected_folder_paths -and $config.selected_folder_paths.Count -gt 0) {
+            $selectedPathsSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($sp in $config.selected_folder_paths) {
+                if ($sp -and $sp.Trim() -ne "") {
+                    [void]$selectedPathsSet.Add($sp.Trim())
+                    if ($sp.Contains("\") -or $sp.Contains("/")) {
+                        $hasSubpaths = $true
+                    }
+                }
             }
         }
+
+        $candidateList = New-Object 'System.Collections.Generic.List[hashtable]'
+        Collect-CandidateFolders $pstRoot "" $candidateList $selectedPathsSet $hasSubpaths $config
+        $candidateFolders = $candidateList.ToArray()
 
         # Pre-conteo de elementos para barra de progreso precisa
         $totalPstItems = 0
@@ -349,7 +422,7 @@ try {
                 continue
             }
 
-            Log-Message "Procesando carpeta '$($cf.Name)' ($itemCount correos)..."
+            Log-Message "Procesando carpeta '$($cf.RelPath)' ($itemCount correos)..."
 
             # Iterar elementos en orden inverso (seguro para Copy y Move)
             for ($idx = $itemCount; $idx -ge 1; $idx--) {
@@ -398,7 +471,7 @@ try {
                     }
 
                     # Determinar carpeta de destino base
-                    $baseDest = Get-DestBaseFolder $destStore $cf.Type $cf.Name
+                    $baseDest = Get-DestFolderByPath $destStore $cf.RelPath $cf.Type
                     $finalDest = $baseDest
 
                     # Enrutamiento jerárquico por fecha (solo cuando no es Espejo)

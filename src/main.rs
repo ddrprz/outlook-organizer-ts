@@ -119,6 +119,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.pst_details_cache.insert(pst_path, *d.clone());
                             state.pst_detail_modal = app::PstDetailModalState::Loaded(d);
                             state.pst_folder_explorer.reset();
+                            if state.step == WizardStep::FoldersMode {
+                                state.sync_folder_tree_from_selected_psts();
+                            }
                         }
                         Err(err) => {
                             state.pst_detail_modal = app::PstDetailModalState::Error {
@@ -461,11 +464,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ => {}
                 },
                 WizardStep::FoldersMode => match key.code {
-                    KeyCode::Char('1') => state.include_inbox = !state.include_inbox,
-                    KeyCode::Char('2') => state.include_sent = !state.include_sent,
-                    KeyCode::Char('3') => state.include_deleted = !state.include_deleted,
+                    KeyCode::Up | KeyCode::Char('k') => state.folder_tree.move_up(),
+                    KeyCode::Down | KeyCode::Char('j') => state.folder_tree.move_down(),
+                    KeyCode::Char('e')
+                    | KeyCode::Char('E')
+                    | KeyCode::Left
+                    | KeyCode::Right => state.folder_tree.toggle_expand(),
+                    KeyCode::Char(' ') => {
+                        state.folder_tree.toggle_select();
+                        state.sync_legacy_folder_flags();
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        state.folder_tree.select_all();
+                        state.sync_legacy_folder_flags();
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('N') => {
+                        state.folder_tree.deselect_all();
+                        state.sync_legacy_folder_flags();
+                    }
+                    KeyCode::Char('1') => {
+                        state.include_inbox = !state.include_inbox;
+                    }
+                    KeyCode::Char('2') => {
+                        state.include_sent = !state.include_sent;
+                    }
+                    KeyCode::Char('3') => {
+                        state.include_deleted = !state.include_deleted;
+                    }
                     KeyCode::Char('4') => {
-                        state.include_custom_folders = !state.include_custom_folders
+                        state.include_custom_folders = !state.include_custom_folders;
                     }
                     KeyCode::Char('m') | KeyCode::Char('M') => {
                         state.transfer_mode = match state.transfer_mode {
@@ -720,6 +747,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             include_sent: state.include_sent,
                             include_deleted: state.include_deleted,
                             include_custom_folders: state.include_custom_folders,
+                            selected_folder_paths: state.folder_tree.selected_paths(),
                             routing_enabled: state.routing_enabled,
                             routing_granularity: match state.routing_granularity {
                                 RoutingGranularity::Mirror => "Mirror".to_string(),
@@ -898,7 +926,10 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
             ("Esc", "Atrás"),
         ],
         WizardStep::FoldersMode => vec![
-            ("1-4", "Carpetas"),
+            ("↑/↓", "Navegar"),
+            ("E", "Desplegar"),
+            ("Espacio", "Seleccionar"),
+            ("A/N", "Todas/Ninguna"),
             ("M", "Copiar/Mover"),
             ("Enter", "Siguiente"),
             ("Esc", "Atrás"),
