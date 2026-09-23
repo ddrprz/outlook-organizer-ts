@@ -114,6 +114,7 @@ pub struct PstDetail {
     pub file_name: String,
     pub file_path: String,
     pub size_mb: f64,
+    #[serde(alias = "count", default)]
     pub total_items: usize,
     pub last_email_date: Option<String>,
     pub first_email_date: Option<String>,
@@ -1196,4 +1197,17 @@ mod tests {
         assert!(went_up);
         assert_eq!(explorer.current_parent, None);
     }
+
+    #[test]
+    fn test_pst_detail_deserialization_from_powershell_output() {
+        let json_str = r#"{"file_path":"C:\\Correo\\test.pst","year_months":{"2026":[1,2,3,4,5,6,7]},"last_email_date":"2026-07-06 18:04:02","size_mb":573.03,"years":[2026],"first_email_date":"2026-01-19 09:25:29","file_name":"test.pst","counts_by_month":{"2026-07":82,"2026-06":339},"folders":[{"path":"Bandeja de entrada","parent_path":null,"years":[2026],"counts_by_year":{"2026":960},"has_children":true,"year_months":{"2026":[1,2,3,4,5,6,7]},"count":960,"name":"Bandeja de entrada","sizes_by_year_mb":{"2026":328.07},"size_mb":328.07,"sizes_by_month_mb":{"2026-03":52.12},"counts_by_month":{"2026-07":63}}],"sizes_by_year_mb":{"2026":510.22},"sizes_by_month_mb":{"2026-03":111.6},"count":1341,"counts_by_year":{"2026":1341}}"#;
+        let detail: Result<PstDetail, _> = serde_json::from_str(json_str);
+        assert!(detail.is_ok(), "Deserialization should succeed: {:?}", detail.err());
+        let d = detail.unwrap();
+        assert_eq!(d.file_name, "test.pst");
+        assert_eq!(d.folders.len(), 1);
+        assert_eq!(d.folders[0].name, "Bandeja de entrada");
+        assert_eq!(d.folders[0].years, vec![2026]);
+    }
 }
+

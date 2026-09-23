@@ -103,19 +103,21 @@ try {
         if ($fCount -gt 0) {
             try {
                 $tbl = $folder.GetTable()
-                try { $tbl.Columns.Add("MessageSize") | Out-Null } catch {}
+                try { $tbl.Columns.Add("Size") | Out-Null } catch {}
                 try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
                 try { $tbl.Columns.Add("SentOn") | Out-Null } catch {}
 
                 while (-not $tbl.EndOfTable) {
                     $row = $tbl.GetNextRow()
-                    $sz = $row.Item("MessageSize")
+                    $sz = 0
+                    try { $sz = $row.Item("Size") } catch {}
                     if ($null -eq $sz -or $sz -lt 0) { $sz = 0 }
                     $folderSizeBytes += $sz
 
-                    $dt = $row.Item("ReceivedTime")
+                    $dt = $null
+                    try { $dt = $row.Item("ReceivedTime") } catch {}
                     if ($null -eq $dt -or -not ($dt -is [DateTime])) {
-                        $dt = $row.Item("SentOn")
+                        try { $dt = $row.Item("SentOn") } catch {}
                     }
                     if ($null -ne $dt -and ($dt -is [DateTime]) -and $dt.Year -ge 1980 -and $dt.Year -le 2050) {
                         $y = $dt.Year
@@ -181,6 +183,7 @@ try {
             name              = $fName
             path              = $relPath
             parent_path       = if ($parentPath) { $parentPath } else { $null }
+            count             = $fCount
             total_items       = $fCount
             size_mb           = [math]::Round($folderSizeBytes / 1MB, 2)
             has_children      = $hasChildren
@@ -238,6 +241,7 @@ try {
         file_name         = $fileName
         file_path         = $PstPath
         size_mb           = $sizeMb
+        count             = $totalItems
         total_items       = $totalItems
         last_email_date   = $lastDateStr
         first_email_date  = $firstDateStr
@@ -250,13 +254,13 @@ try {
         sizes_by_month_mb = $globalSizesByMonthRounded
     }
 
-    Write-Output ($result | ConvertTo-Json -Compress)
+    Write-Output ($result | ConvertTo-Json -Depth 15 -Compress)
 }
 catch {
     $errObj = @{
         error = "Excepción al inspeccionar PST: $_"
     }
-    Write-Output ($errObj | ConvertTo-Json -Compress)
+    Write-Output ($errObj | ConvertTo-Json -Depth 5 -Compress)
 }
 finally {
     if ($wasMountedByUs -and $null -ne $pstStore) {

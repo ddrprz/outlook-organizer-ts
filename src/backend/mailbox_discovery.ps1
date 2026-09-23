@@ -58,7 +58,7 @@ try {
         }
     }
 
-    $stores | ConvertTo-Json -Compress
+    ConvertTo-Json -InputObject @($stores) -Depth 5 -Compress
 }
 catch {
     Write-Output "[]"
