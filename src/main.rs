@@ -128,6 +128,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                BackendMessage::PstInspectionProgress { pst_path, folder_name, scanned_items } => {
+                    if let app::PstDetailModalState::Loading { pst_path: ref p, ref mut current_folder, scanned_items: ref mut items, .. } = state.pst_detail_modal
+                        && p == &pst_path {
+                        *current_folder = Some(folder_name);
+                        *items = scanned_items;
+                    }
+                }
             }
         }
 
