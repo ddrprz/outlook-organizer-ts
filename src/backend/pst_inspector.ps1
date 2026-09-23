@@ -100,63 +100,73 @@ try {
         $fYearsSet = @{}
         $fYearMonths = @{}
 
+        $prog = @{ folder = $fName; items = $script:totalItems } | ConvertTo-Json -Compress
+        Write-Output "PROGRESS:$prog"
+
         if ($fCount -gt 0) {
+            $tbl = $null
             try {
                 $tbl = $folder.GetTable()
+                try { $tbl.Columns.RemoveAll() } catch {}
                 try { $tbl.Columns.Add("Size") | Out-Null } catch {}
                 try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
                 try { $tbl.Columns.Add("SentOn") | Out-Null } catch {}
 
+                $batchSize = 10000
                 while (-not $tbl.EndOfTable) {
-                    $row = $tbl.GetNextRow()
-                    $sz = 0
-                    try { $sz = $row.Item("Size") } catch {}
-                    if ($null -eq $sz -or $sz -lt 0) { $sz = 0 }
-                    $folderSizeBytes += $sz
+                    $arr = $tbl.GetArray($batchSize)
+                    $rowsInBatch = $arr.GetLength(0)
+                    if ($rowsInBatch -eq 0) { break }
 
-                    $dt = $null
-                    try { $dt = $row.Item("ReceivedTime") } catch {}
-                    if ($null -eq $dt -or -not ($dt -is [DateTime])) {
-                        try { $dt = $row.Item("SentOn") } catch {}
-                    }
-                    if ($null -ne $dt -and ($dt -is [DateTime]) -and $dt.Year -ge 1980 -and $dt.Year -le 2050) {
-                        $y = $dt.Year
-                        $m = $dt.Month
-                        $yStr = "$y"
-                        $ymStr = "$y-$("{0:D2}" -f $m)"
+                    for ($i = 0; $i -lt $rowsInBatch; $i++) {
+                        $sz = $arr[$i, 0]
+                        if ($null -eq $sz -or $sz -lt 0) { $sz = 0 }
+                        $folderSizeBytes += $sz
 
-                        if ($dt -lt $script:minDate) { $script:minDate = $dt }
-                        if ($dt -gt $script:maxDate) { $script:maxDate = $dt }
+                        $dt = $arr[$i, 1]
+                        if ($null -eq $dt -or -not ($dt -is [DateTime])) {
+                            $dt = $arr[$i, 2]
+                        }
+                        if ($null -ne $dt -and ($dt -is [DateTime]) -and $dt.Year -ge 1980 -and $dt.Year -le 2050) {
+                            $y = $dt.Year
+                            $m = $dt.Month
+                            $mStr = if ($m -lt 10) { "0$m" } else { "$m" }
+                            $yStr = "$y"
+                            $ymStr = "$y-$mStr"
 
-                        # Métricas a nivel de carpeta
-                        $fYearsSet[$y] = $true
-                        if (-not $fYearMonths.ContainsKey($yStr)) { $fYearMonths[$yStr] = @{} }
-                        $fYearMonths[$yStr][$m] = $true
+                            if ($dt -lt $script:minDate) { $script:minDate = $dt }
+                            if ($dt -gt $script:maxDate) { $script:maxDate = $dt }
 
-                        if (-not $fCountsByYear.ContainsKey($yStr)) { $fCountsByYear[$yStr] = 0; $fSizesByYear[$yStr] = 0.0 }
-                        $fCountsByYear[$yStr]++
-                        $fSizesByYear[$yStr] += ($sz / 1MB)
+                            # Métricas a nivel de carpeta
+                            $fYearsSet[$y] = $true
+                            if (-not $fYearMonths.ContainsKey($yStr)) { $fYearMonths[$yStr] = @{} }
+                            $fYearMonths[$yStr][$m] = $true
 
-                        if (-not $fCountsByMonth.ContainsKey($ymStr)) { $fCountsByMonth[$ymStr] = 0; $fSizesByMonth[$ymStr] = 0.0 }
-                        $fCountsByMonth[$ymStr]++
-                        $fSizesByMonth[$ymStr] += ($sz / 1MB)
+                            $fCountsByYear[$yStr] = ($fCountsByYear[$yStr] + 1)
+                            $fSizesByYear[$yStr] = ($fSizesByYear[$yStr] + ($sz / 1MB))
 
-                        # Métricas globales del PST
-                        $script:yearsSet[$y] = $true
-                        if (-not $script:yearMonthsMap.ContainsKey($yStr)) { $script:yearMonthsMap[$yStr] = @{} }
-                        $script:yearMonthsMap[$yStr][$m] = $true
+                            $fCountsByMonth[$ymStr] = ($fCountsByMonth[$ymStr] + 1)
+                            $fSizesByMonth[$ymStr] = ($fSizesByMonth[$ymStr] + ($sz / 1MB))
 
-                        if (-not $script:globalCountsByYear.ContainsKey($yStr)) { $script:globalCountsByYear[$yStr] = 0; $script:globalSizesByYear[$yStr] = 0.0 }
-                        $script:globalCountsByYear[$yStr]++
-                        $script:globalSizesByYear[$yStr] += ($sz / 1MB)
+                            # Métricas globales del PST
+                            $script:yearsSet[$y] = $true
+                            if (-not $script:yearMonthsMap.ContainsKey($yStr)) { $script:yearMonthsMap[$yStr] = @{} }
+                            $script:yearMonthsMap[$yStr][$m] = $true
 
-                        if (-not $script:globalCountsByMonth.ContainsKey($ymStr)) { $script:globalCountsByMonth[$ymStr] = 0; $script:globalSizesByMonth[$ymStr] = 0.0 }
-                        $script:globalCountsByMonth[$ymStr]++
-                        $script:globalSizesByMonth[$ymStr] += ($sz / 1MB)
+                            $script:globalCountsByYear[$yStr] = ($script:globalCountsByYear[$yStr] + 1)
+                            $script:globalSizesByYear[$yStr] = ($script:globalSizesByYear[$yStr] + ($sz / 1MB))
+
+                            $script:globalCountsByMonth[$ymStr] = ($script:globalCountsByMonth[$ymStr] + 1)
+                            $script:globalSizesByMonth[$ymStr] = ($script:globalSizesByMonth[$ymStr] + ($sz / 1MB))
+                        }
                     }
                 }
             } catch {
                 # Fallback en caso de que GetTable encuentre alguna excepción MAPI
+            } finally {
+                if ($null -ne $tbl) {
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tbl) | Out-Null } catch {}
+                }
             }
         }
 

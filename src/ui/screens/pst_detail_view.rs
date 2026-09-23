@@ -13,8 +13,8 @@ use crate::{
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     match &state.pst_detail_modal {
-        PstDetailModalState::Loading { pst_path, pst_name } => {
-            render_loading(f, area, pst_name, pst_path);
+        PstDetailModalState::Loading { pst_path, pst_name, current_folder, scanned_items } => {
+            render_loading(f, area, pst_name, pst_path, current_folder.as_deref(), *scanned_items);
         }
         PstDetailModalState::Error { pst_name, message } => {
             render_error(f, area, pst_name, message);
@@ -33,7 +33,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     }
 }
 
-fn render_loading(f: &mut Frame, area: Rect, pst_name: &str, pst_path: &str) {
+fn render_loading(
+    f: &mut Frame,
+    area: Rect,
+    pst_name: &str,
+    pst_path: &str,
+    current_folder: Option<&str>,
+    scanned_items: usize,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
@@ -43,7 +50,7 @@ fn render_loading(f: &mut Frame, area: Rect, pst_name: &str, pst_path: &str) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let content = vec![
+    let mut content = vec![
         Line::from(""),
         Line::from(vec![
             Span::styled("  ⏳ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -58,11 +65,26 @@ fn render_loading(f: &mut Frame, area: Rect, pst_name: &str, pst_path: &str) {
             Span::styled(pst_path, Style::default().fg(Theme::ACCENT_PRIMARY)),
         ]),
         Line::from(""),
-        Line::from(Span::styled("  Extrayendo jerarquía de carpetas, fechas, distribución por años y meses.", Style::default().fg(Theme::TEXT_MUTED))),
-        Line::from(Span::styled("  Calculando tamaños por periodo y volumen de mensajes...", Style::default().fg(Theme::SUCCESS))),
-        Line::from(""),
-        Line::from(Span::styled("  [Esc / Q] Cancelar y volver", Style::default().fg(Theme::TEXT_MUTED))),
     ];
+
+    if let Some(folder) = current_folder {
+        content.push(Line::from(vec![
+            Span::styled("  ▶ Carpeta activa: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(folder, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" ({} correos indexados hasta ahora)", scanned_items), Style::default().fg(Theme::SUCCESS)),
+        ]));
+    } else {
+        content.push(Line::from(vec![
+            Span::styled("  ▶ Estado: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Conectando con motor MAPI e indexando carpetas...", Style::default().fg(Theme::WARNING)),
+        ]));
+    }
+
+    content.push(Line::from(""));
+    content.push(Line::from(Span::styled("  Extrayendo jerarquía de carpetas, fechas, distribución por años y meses.", Style::default().fg(Theme::TEXT_MUTED))));
+    content.push(Line::from(Span::styled("  Calculando tamaños por periodo y volumen de mensajes...", Style::default().fg(Theme::TEXT_MUTED))));
+    content.push(Line::from(""));
+    content.push(Line::from(Span::styled("  [Esc / Q] Cancelar y volver", Style::default().fg(Theme::TEXT_MUTED))));
 
     f.render_widget(Paragraph::new(content), inner);
 }

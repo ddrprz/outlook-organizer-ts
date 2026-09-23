@@ -41,4 +41,10 @@ pub enum BackendMessage {
         pst_name: String,
         detail: Result<Box<crate::app::PstDetail>, String>,
     },
+    #[serde(rename = "pst_inspection_progress")]
+    PstInspectionProgress {
+        pst_path: String,
+        folder_name: String,
+        scanned_items: usize,
+    },
 }

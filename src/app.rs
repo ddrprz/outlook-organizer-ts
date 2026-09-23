@@ -292,7 +292,12 @@ impl PstFolderExplorerState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PstDetailModalState {
     Closed,
-    Loading { pst_path: String, pst_name: String },
+    Loading {
+        pst_path: String,
+        pst_name: String,
+        current_folder: Option<String>,
+        scanned_items: usize,
+    },
     Loaded(Box<PstDetail>),
     Error { pst_name: String, message: String },
 }
@@ -769,6 +774,8 @@ impl AppState {
             self.pst_detail_modal = PstDetailModalState::Loading {
                 pst_path: path,
                 pst_name: name,
+                current_folder: None,
+                scanned_items: 0,
             };
             true
         }
@@ -1078,7 +1085,7 @@ mod tests {
         assert!(should_trigger);
         assert_eq!(state.step, WizardStep::PstDetailView);
         match &state.pst_detail_modal {
-            PstDetailModalState::Loading { pst_path, pst_name } => {
+            PstDetailModalState::Loading { pst_path, pst_name, .. } => {
                 assert_eq!(pst_path, r"C:\Correo\archivo.pst");
                 assert_eq!(pst_name, "archivo.pst");
             }

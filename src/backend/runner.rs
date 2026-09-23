@@ -191,7 +191,7 @@ impl BackendRunner {
         tx: UnboundedSender<BackendMessage>,
     ) {
         tokio::spawn(async move {
-            let res = Self::inspect_pst(&pst_path, profile.as_deref()).await;
+            let res = Self::inspect_pst(&pst_path, profile.as_deref(), Some(&tx)).await;
             let _ = tx.send(BackendMessage::PstDetailLoaded {
                 pst_path,
                 pst_name,
@@ -203,6 +203,7 @@ impl BackendRunner {
     pub async fn inspect_pst(
         pst_path: &str,
         profile: Option<&str>,
+        tx: Option<&UnboundedSender<BackendMessage>>,
     ) -> Result<crate::app::PstDetail, String> {
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("outlook_organizer_inspector.ps1");
@@ -226,26 +227,70 @@ impl BackendRunner {
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-        match cmd.output().await {
-            Ok(output) if output.status.success() => {
-                let stdout_str = String::from_utf8_lossy(&output.stdout);
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => return Err(format!("No se pudo ejecutar PowerShell: {}", e)),
+        };
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let mut last_json_line = String::new();
+
+        if let Some(out) = stdout {
+            let reader = BufReader::new(out);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Some(rest) = trimmed.strip_prefix("PROGRESS:") {
+                    #[derive(serde::Deserialize)]
+                    struct ProgressPayload {
+                        folder: Option<String>,
+                        items: Option<usize>,
+                    }
+                    if let Ok(p) = serde_json::from_str::<ProgressPayload>(rest)
+                        && let Some(sender) = tx {
+                        let _ = sender.send(BackendMessage::PstInspectionProgress {
+                            pst_path: pst_path.to_string(),
+                            folder_name: p.folder.unwrap_or_default(),
+                            scanned_items: p.items.unwrap_or(0),
+                        });
+                    }
+                } else {
+                    last_json_line = trimmed.to_string();
+                }
+            }
+        }
+
+        let status = child.wait().await;
+        match status {
+            Ok(s) if s.success() => {
                 #[derive(serde::Deserialize)]
                 struct InspectorError {
                     error: Option<String>,
                 }
-                if let Ok(err_obj) = serde_json::from_str::<InspectorError>(stdout_str.trim())
+                if let Ok(err_obj) = serde_json::from_str::<InspectorError>(&last_json_line)
                     && let Some(err_msg) = err_obj.error {
                     return Err(err_msg);
                 }
 
-                serde_json::from_str::<crate::app::PstDetail>(stdout_str.trim())
-                    .map_err(|e| format!("Error al decodificar metadatos: {} (Salida: {})", e, stdout_str))
+                serde_json::from_str::<crate::app::PstDetail>(&last_json_line)
+                    .map_err(|e| format!("Error al decodificar metadatos: {} (Salida: {})", e, last_json_line))
             }
-            Ok(output) => {
-                let stderr_str = String::from_utf8_lossy(&output.stderr);
-                Err(format!("Error en subproceso PowerShell: {}", stderr_str))
+            Ok(_) => {
+                let mut err_msg = String::new();
+                if let Some(err) = stderr {
+                    let mut r = BufReader::new(err);
+                    let mut buf = String::new();
+                    let _ = tokio::io::AsyncReadExt::read_to_string(&mut r, &mut buf).await;
+                    err_msg = buf;
+                }
+                Err(format!("Error en subproceso PowerShell: {}", err_msg))
             }
-            Err(e) => Err(format!("No se pudo ejecutar PowerShell: {}", e)),
+            Err(e) => Err(format!("Error al esperar finalización de PowerShell: {}", e)),
         }
     }
 }
