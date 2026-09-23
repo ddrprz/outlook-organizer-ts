@@ -114,20 +114,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 BackendMessage::PstDetailLoaded { pst_path, pst_name, detail } => {
+                    state.inspecting_psts.remove(&pst_path);
                     match detail {
                         Ok(d) => {
-                            state.pst_details_cache.insert(pst_path, *d.clone());
-                            state.pst_detail_modal = app::PstDetailModalState::Loaded(d);
-                            state.pst_folder_explorer.reset();
-                            if state.step == WizardStep::FoldersMode {
-                                state.sync_folder_tree_from_selected_psts();
+                            state.pst_details_cache.insert(pst_path.clone(), *d.clone());
+                            if let app::PstDetailModalState::Loading { pst_path: ref p, .. } = state.pst_detail_modal
+                                && p == &pst_path {
+                                state.pst_detail_modal = app::PstDetailModalState::Loaded(d);
+                                state.pst_folder_explorer.reset();
                             }
+                            state.sync_folder_tree_from_selected_psts();
                         }
                         Err(err) => {
-                            state.pst_detail_modal = app::PstDetailModalState::Error {
-                                pst_name,
-                                message: err,
-                            };
+                            if let app::PstDetailModalState::Loading { pst_path: ref p, .. } = state.pst_detail_modal
+                                && p == &pst_path {
+                                state.pst_detail_modal = app::PstDetailModalState::Error {
+                                    pst_name,
+                                    message: err,
+                                };
+                            }
                         }
                     }
                 }
@@ -139,6 +144,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+        }
+
+        // Disparar inspección en segundo plano para cualquier PST seleccionado que no tenga detalles cargados
+        for pst in state.selected_uninspected_psts() {
+            state.inspecting_psts.insert(pst.path.clone());
+            let profile = if state.use_default_profile {
+                None
+            } else {
+                Some(state.custom_profile_name.clone())
+            };
+            BackendRunner::trigger_pst_inspection(pst.path, pst.name, profile, tx.clone());
         }
 
         terminal.draw(|f| draw_ui(f, &state))?;
