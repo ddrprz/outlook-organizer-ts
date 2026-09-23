@@ -195,7 +195,7 @@ impl BackendRunner {
             let _ = tx.send(BackendMessage::PstDetailLoaded {
                 pst_path,
                 pst_name,
-                detail: res,
+                detail: res.map(Box::new),
             });
         });
     }

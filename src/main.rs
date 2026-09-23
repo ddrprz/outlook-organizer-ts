@@ -27,8 +27,8 @@ use ui::{
     footer::render_footer,
     header::render_header,
     screens::{
-        completion, deduplication, execution, explorer, filters, folders_mode, mailbox, pst_source,
-        routing, summary, welcome,
+        completion, deduplication, execution, explorer, filters, folders_mode, mailbox,
+        pst_detail_view, pst_source, routing, summary, welcome,
     },
 };
 
@@ -116,8 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 BackendMessage::PstDetailLoaded { pst_path, pst_name, detail } => {
                     match detail {
                         Ok(d) => {
-                            state.pst_details_cache.insert(pst_path, d.clone());
-                            state.pst_detail_modal = app::PstDetailModalState::Loaded(Box::new(d));
+                            state.pst_details_cache.insert(pst_path, *d.clone());
+                            state.pst_detail_modal = app::PstDetailModalState::Loaded(d);
+                            state.pst_folder_explorer.reset();
                         }
                         Err(err) => {
                             state.pst_detail_modal = app::PstDetailModalState::Error {
@@ -238,144 +239,159 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                WizardStep::FileExplorer => {
-                    if state.pst_detail_modal != app::PstDetailModalState::Closed {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                state.close_pst_detail();
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        match key.code {
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                if state.explorer.selected_idx > 0 {
-                                    state.explorer.selected_idx -= 1;
-                                }
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                if state.explorer.selected_idx + 1 < state.explorer.entries.len() {
-                                    state.explorer.selected_idx += 1;
-                                }
-                            }
-                            KeyCode::Enter => {
-                                state.explorer.navigate_into_selected();
-                            }
-                            KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
-                                state.explorer.navigate_up();
-                            }
-                            KeyCode::Char(' ') => {
-                                if let Some(entry) =
-                                    state.explorer.entries.get_mut(state.explorer.selected_idx)
-                                    && entry.item_type == ExplorerItemType::PstFile
-                                {
-                                    entry.selected = !entry.selected;
-                                }
-                            }
-                            KeyCode::Char('c') | KeyCode::Char('C') => {
-                                let psts = state.explorer.collect_selected_psts();
-                                if !psts.is_empty() {
-                                    state.discovered_psts = psts;
-                                    state.pst_scan_path =
-                                        state.explorer.current_path.to_string_lossy().to_string();
-                                    state.selected_pst_table_idx = 0;
-                                    state.step = WizardStep::PstSource;
-                                } else if !state.explorer.is_drives_view
-                                    && state.explorer.current_path.exists()
-                                {
-                                    state.discovered_psts = Vec::new();
-                                    state.pst_scan_path =
-                                        state.explorer.current_path.to_string_lossy().to_string();
-                                    state.selected_pst_table_idx = 0;
-                                    state.step = WizardStep::PstSource;
-                                }
-                            }
-                            KeyCode::Char('b') | KeyCode::Char('B') => {
-                                state.explorer.is_drives_view = true;
-                                state.explorer.current_path = PathBuf::new();
-                                state.explorer.refresh();
-                            }
-                            KeyCode::Char('d') | KeyCode::Char('D') => {
-                                if let Some(entry) = state.explorer.entries.get(state.explorer.selected_idx)
-                                    && entry.item_type == ExplorerItemType::PstFile
-                                {
-                                    let path = entry.path.to_string_lossy().to_string();
-                                    let name = entry.name.clone();
-                                    if state.open_pst_detail(path.clone(), name.clone()) {
-                                        BackendRunner::trigger_pst_inspection(
-                                            path,
-                                            name,
-                                            if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
-                                            tx.clone(),
-                                        );
-                                    }
-                                }
-                            }
-                            KeyCode::Esc => {
-                                state.step = WizardStep::Welcome;
-                            }
-                            _ => {}
+                WizardStep::FileExplorer => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if state.explorer.selected_idx > 0 {
+                            state.explorer.selected_idx -= 1;
                         }
                     }
-                }
-                WizardStep::PstSource => {
-                    if state.pst_detail_modal != app::PstDetailModalState::Closed {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                state.close_pst_detail();
-                            }
-                            _ => {}
-                        }
-                    } else {
-                        match key.code {
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                if state.selected_pst_table_idx > 0 {
-                                    state.selected_pst_table_idx -= 1;
-                                }
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                if state.selected_pst_table_idx + 1 < state.discovered_psts.len() {
-                                    state.selected_pst_table_idx += 1;
-                                }
-                            }
-                            KeyCode::Char(' ') => {
-                                if let Some(item) =
-                                    state.discovered_psts.get_mut(state.selected_pst_table_idx)
-                                {
-                                    item.selected = !item.selected;
-                                }
-                            }
-                            KeyCode::Char('d') | KeyCode::Char('D') => {
-                                if let Some(item) = state.discovered_psts.get(state.selected_pst_table_idx) {
-                                    let path = item.path.clone();
-                                    let name = item.name.clone();
-                                    if state.open_pst_detail(path.clone(), name.clone()) {
-                                        BackendRunner::trigger_pst_inspection(
-                                            path,
-                                            name,
-                                            if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
-                                            tx.clone(),
-                                        );
-                                    }
-                                }
-                            }
-                            KeyCode::Char('e') | KeyCode::Char('E') => {
-                                open_file_explorer(&mut state);
-                            }
-                            KeyCode::Char('a') | KeyCode::Char('A') => {
-                                for item in &mut state.discovered_psts {
-                                    item.selected = true;
-                                }
-                            }
-                            KeyCode::Char('n') | KeyCode::Char('N') => {
-                                for item in &mut state.discovered_psts {
-                                    item.selected = false;
-                                }
-                            }
-                            _ => handle_navigation_keys(&mut state, key.code),
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if state.explorer.selected_idx + 1 < state.explorer.entries.len() {
+                            state.explorer.selected_idx += 1;
                         }
                     }
-                }
+                    KeyCode::Enter => {
+                        state.explorer.navigate_into_selected();
+                    }
+                    KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+                        state.explorer.navigate_up();
+                    }
+                    KeyCode::Char(' ') => {
+                        if let Some(entry) =
+                            state.explorer.entries.get_mut(state.explorer.selected_idx)
+                            && entry.item_type == ExplorerItemType::PstFile
+                        {
+                            entry.selected = !entry.selected;
+                        }
+                    }
+                    KeyCode::Char('c') | KeyCode::Char('C') => {
+                        let psts = state.explorer.collect_selected_psts();
+                        if !psts.is_empty() {
+                            state.discovered_psts = psts;
+                            state.pst_scan_path =
+                                state.explorer.current_path.to_string_lossy().to_string();
+                            state.selected_pst_table_idx = 0;
+                            state.step = WizardStep::PstSource;
+                        } else if !state.explorer.is_drives_view
+                            && state.explorer.current_path.exists()
+                        {
+                            state.discovered_psts = Vec::new();
+                            state.pst_scan_path =
+                                state.explorer.current_path.to_string_lossy().to_string();
+                            state.selected_pst_table_idx = 0;
+                            state.step = WizardStep::PstSource;
+                        }
+                    }
+                    KeyCode::Char('b') | KeyCode::Char('B') => {
+                        state.explorer.is_drives_view = true;
+                        state.explorer.current_path = PathBuf::new();
+                        state.explorer.refresh();
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        if let Some(entry) = state.explorer.entries.get(state.explorer.selected_idx)
+                            && entry.item_type == ExplorerItemType::PstFile
+                        {
+                            let path = entry.path.to_string_lossy().to_string();
+                            let name = entry.name.clone();
+                            if state.open_pst_detail(path.clone(), name.clone()) {
+                                BackendRunner::trigger_pst_inspection(
+                                    path,
+                                    name,
+                                    if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
+                                    tx.clone(),
+                                );
+                            }
+                        }
+                    }
+                    KeyCode::Esc => {
+                        state.step = WizardStep::Welcome;
+                    }
+                    _ => {}
+                },
+                WizardStep::PstSource => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if state.selected_pst_table_idx > 0 {
+                            state.selected_pst_table_idx -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if state.selected_pst_table_idx + 1 < state.discovered_psts.len() {
+                            state.selected_pst_table_idx += 1;
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        if let Some(item) =
+                            state.discovered_psts.get_mut(state.selected_pst_table_idx)
+                        {
+                            item.selected = !item.selected;
+                        }
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        if let Some(item) = state.discovered_psts.get(state.selected_pst_table_idx) {
+                            let path = item.path.clone();
+                            let name = item.name.clone();
+                            if state.open_pst_detail(path.clone(), name.clone()) {
+                                BackendRunner::trigger_pst_inspection(
+                                    path,
+                                    name,
+                                    if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
+                                    tx.clone(),
+                                );
+                            }
+                        }
+                    }
+                    KeyCode::Char('e') | KeyCode::Char('E') => {
+                        open_file_explorer(&mut state);
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        for item in &mut state.discovered_psts {
+                            item.selected = true;
+                        }
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('N') => {
+                        for item in &mut state.discovered_psts {
+                            item.selected = false;
+                        }
+                    }
+                    _ => handle_navigation_keys(&mut state, key.code),
+                },
+                WizardStep::PstDetailView => {
+                    match &state.pst_detail_modal {
+                        app::PstDetailModalState::Loaded(detail) => {
+                            let detail_clone = detail.clone();
+                            let entries_len = state.pst_folder_explorer.current_entries(&detail_clone).len();
+                            match key.code {
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    state.pst_folder_explorer.move_up();
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    state.pst_folder_explorer.move_down(entries_len);
+                                }
+                                KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Enter => {
+                                    state.pst_folder_explorer.navigate_into(&detail_clone);
+                                }
+                                KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
+                                    state.pst_folder_explorer.navigate_up(&detail_clone);
+                                }
+                                KeyCode::Char(' ') => {
+                                    state.pst_folder_explorer.toggle_select(&detail_clone);
+                                }
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Char('d') | KeyCode::Char('D') => {
+                                    state.close_pst_detail();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {
+                            match key.code {
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Enter => {
+                                    state.close_pst_detail();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                },
                 WizardStep::Mailbox => match key.code {
                     KeyCode::Up | KeyCode::Char('k') => {
                         if state.selected_mailbox_idx > 0 {
@@ -839,6 +855,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::Summary => summary::render(f, chunks[1], state),
         WizardStep::Execution => execution::render(f, chunks[1], state),
         WizardStep::Completion => completion::render(f, chunks[1], state),
+        WizardStep::PstDetailView => pst_detail_view::render(f, chunks[1], state),
     }
 
     // 3. Footer con Marca de Agua Timeless Support
@@ -911,6 +928,13 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         ],
         WizardStep::Execution => vec![("Esc", "Parada Segura")],
         WizardStep::Completion => vec![("H", "Informe HTML"), ("Enter/q", "Salir")],
+        WizardStep::PstDetailView => vec![
+            ("↑/↓", "Navegar"),
+            ("E", "Entrar"),
+            ("Backspace", "Subir"),
+            ("Espacio", "Detalle"),
+            ("Esc/Q", "Volver"),
+        ],
     };
 
     render_footer(f, chunks[2], &shortcuts);

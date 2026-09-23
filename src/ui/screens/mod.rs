@@ -5,6 +5,7 @@ pub mod explorer;
 pub mod filters;
 pub mod folders_mode;
 pub mod mailbox;
+pub mod pst_detail_view;
 pub mod pst_source;
 pub mod routing;
 pub mod summary;
