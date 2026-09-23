@@ -184,7 +184,6 @@ try {
             path              = $relPath
             parent_path       = if ($parentPath) { $parentPath } else { $null }
             count             = $fCount
-            total_items       = $fCount
             size_mb           = [math]::Round($folderSizeBytes / 1MB, 2)
             has_children      = $hasChildren
             years             = @($fSortedYears)
@@ -241,7 +240,6 @@ try {
         file_name         = $fileName
         file_path         = $PstPath
         size_mb           = $sizeMb
-        count             = $totalItems
         total_items       = $totalItems
         last_email_date   = $lastDateStr
         first_email_date  = $firstDateStr
