@@ -289,12 +289,20 @@ impl PstFolderExplorerState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckboxState {
+    Unchecked,     // [ ]
+    Checked,       // [x]
+    Indeterminate, // [ - ]
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FolderTreeNode {
     pub name: String,
     pub path: String,
     pub parent_path: Option<String>,
     pub count: usize,
+    pub size_mb: f64,
     pub selected: bool,
     pub expanded: bool,
     pub level: usize,
@@ -321,8 +329,9 @@ impl FolderTreeState {
                 path: "Bandeja de entrada".to_string(),
                 parent_path: None,
                 count: 0,
+                size_mb: 0.0,
                 selected: true,
-                expanded: true,
+                expanded: false,
                 level: 0,
                 has_children: false,
             },
@@ -331,8 +340,9 @@ impl FolderTreeState {
                 path: "Elementos enviados".to_string(),
                 parent_path: None,
                 count: 0,
+                size_mb: 0.0,
                 selected: true,
-                expanded: true,
+                expanded: false,
                 level: 0,
                 has_children: false,
             },
@@ -341,8 +351,9 @@ impl FolderTreeState {
                 path: "Elementos eliminados".to_string(),
                 parent_path: None,
                 count: 0,
+                size_mb: 0.0,
                 selected: false,
-                expanded: true,
+                expanded: false,
                 level: 0,
                 has_children: false,
             },
@@ -351,8 +362,9 @@ impl FolderTreeState {
                 path: "Carpetas personalizadas".to_string(),
                 parent_path: None,
                 count: 0,
+                size_mb: 0.0,
                 selected: true,
-                expanded: true,
+                expanded: false,
                 level: 0,
                 has_children: false,
             },
@@ -447,13 +459,51 @@ impl FolderTreeState {
                 path: f_path.clone(),
                 parent_path: parent_path.map(|s| s.to_string()),
                 count: child.count,
+                size_mb: child.size_mb,
                 selected: !is_deleted,
-                expanded: true,
+                expanded: false,
                 level,
                 has_children: has_sub,
             });
 
             Self::append_nodes_recursive(folder_map, Some(&f_path), level + 1, out);
+        }
+    }
+
+    /// Retorna el estado del checkbox (Unchecked, Checked, Indeterminate) considerando subcarpetas
+    pub fn checkbox_state(&self, node_idx: usize) -> CheckboxState {
+        if let Some(node) = self.nodes.get(node_idx) {
+            if !node.has_children {
+                if node.selected {
+                    CheckboxState::Checked
+                } else {
+                    CheckboxState::Unchecked
+                }
+            } else {
+                let prefix1 = format!(r"{}\", node.path);
+                let prefix2 = format!("{}/", node.path);
+                let mut total = 0;
+                let mut selected = 0;
+
+                for n in &self.nodes {
+                    if n.path == node.path || n.path.starts_with(&prefix1) || n.path.starts_with(&prefix2) {
+                        total += 1;
+                        if n.selected {
+                            selected += 1;
+                        }
+                    }
+                }
+
+                if selected == 0 {
+                    CheckboxState::Unchecked
+                } else if selected == total {
+                    CheckboxState::Checked
+                } else {
+                    CheckboxState::Indeterminate
+                }
+            }
+        } else {
+            CheckboxState::Unchecked
         }
     }
 
@@ -507,13 +557,18 @@ impl FolderTreeState {
         if let Some(&node_idx) = visible.get(self.selected_idx)
             && let Some(node) = self.nodes.get(node_idx)
         {
+            let current_state = self.checkbox_state(node_idx);
             let target_path = node.path.clone();
-            let new_state = !node.selected;
+            // Si está Checked [x], pasa a false [ ]. Si está Unchecked [ ] o Indeterminate [ - ], pasa a true [x]
+            let new_state = current_state != CheckboxState::Checked;
+
+            let prefix1 = format!(r"{}\", target_path);
+            let prefix2 = format!("{}/", target_path);
 
             for n in &mut self.nodes {
                 if n.path == target_path
-                    || n.path.starts_with(&format!(r"{}\", target_path))
-                    || n.path.starts_with(&format!("{}/", target_path))
+                    || n.path.starts_with(&prefix1)
+                    || n.path.starts_with(&prefix2)
                 {
                     n.selected = new_state;
                 }
@@ -921,6 +976,7 @@ pub struct AppState {
     pub pst_folder_explorer: PstFolderExplorerState,
     pub pst_detail_modal: PstDetailModalState,
     pub pst_details_cache: std::collections::HashMap<String, PstDetail>,
+    pub inspecting_psts: std::collections::HashSet<String>,
 }
 
 pub fn default_fallback_mailboxes() -> Vec<MailboxItem> {
@@ -987,7 +1043,22 @@ impl AppState {
             pst_folder_explorer: PstFolderExplorerState::new(),
             pst_detail_modal: PstDetailModalState::Closed,
             pst_details_cache: std::collections::HashMap::new(),
+            inspecting_psts: std::collections::HashSet::new(),
         }
+    }
+
+    pub fn is_inspecting_selected_psts(&self) -> bool {
+        let has_uninspected = self.discovered_psts.iter().any(|p| p.selected && !self.pst_details_cache.contains_key(&p.path));
+        let has_running = !self.inspecting_psts.is_empty();
+        has_uninspected || has_running
+    }
+
+    pub fn selected_uninspected_psts(&self) -> Vec<PstItem> {
+        self.discovered_psts
+            .iter()
+            .filter(|p| p.selected && !self.pst_details_cache.contains_key(&p.path) && !self.inspecting_psts.contains(&p.path))
+            .cloned()
+            .collect()
     }
 
     pub fn selected_mailboxes(&self) -> Vec<&MailboxItem> {
@@ -1556,25 +1627,34 @@ mod tests {
         assert_eq!(tree.nodes[1].level, 1);
         assert_eq!(tree.nodes[2].name, "Elementos enviados");
 
-        // Todos expandidos inicialmente: 3 visibles
-        assert_eq!(tree.visible_indices().len(), 3);
-
-        // Colapsar Bandeja de entrada con toggle_expand (índice 0)
-        tree.toggle_expand();
-        assert!(!tree.nodes[0].expanded);
-        // Ahora solo 2 visibles: Bandeja de entrada y Elementos enviados
+        // Inicia colapsado con children ocultos: 2 visibles (Bandeja de entrada y Elementos enviados)
         assert_eq!(tree.visible_indices().len(), 2);
+        assert!(!tree.nodes[0].expanded);
 
-        // Volver a expandir
+        // Expandir Bandeja de entrada con toggle_expand (índice 0)
         tree.toggle_expand();
         assert!(tree.nodes[0].expanded);
         assert_eq!(tree.visible_indices().len(), 3);
 
-        // Deseleccionar Bandeja de entrada (debe deseleccionar también JORGE S.)
+        // Estado inicial de checkbox: ambos seleccionados -> Checked
+        assert_eq!(tree.checkbox_state(0), CheckboxState::Checked);
+
+        // Deseleccionar solo el hijo JORGE S. (índice 1):
+        tree.nodes[1].selected = false;
+        // Ahora Bandeja de entrada debe estar parcialmente seleccionada: Indeterminate [ - ]
+        assert_eq!(tree.checkbox_state(0), CheckboxState::Indeterminate);
+
+        // Al hacer toggle_select sobre un nodo Indeterminate, debe marcarse completo (Checked)
+        tree.toggle_select();
+        assert!(tree.nodes[0].selected);
+        assert!(tree.nodes[1].selected);
+        assert_eq!(tree.checkbox_state(0), CheckboxState::Checked);
+
+        // Al hacer toggle_select sobre un nodo Checked, debe desmarcarse todo (Unchecked)
         tree.toggle_select();
         assert!(!tree.nodes[0].selected);
         assert!(!tree.nodes[1].selected);
-        assert!(tree.nodes[2].selected);
+        assert_eq!(tree.checkbox_state(0), CheckboxState::Unchecked);
 
         // Seleccionar todo
         tree.select_all();
@@ -1582,6 +1662,7 @@ mod tests {
         assert!(tree.nodes[1].selected);
         assert!(tree.nodes[2].selected);
         assert_eq!(tree.selected_paths().len(), 3);
+        assert_eq!(tree.checkbox_state(0), CheckboxState::Checked);
     }
 }
 

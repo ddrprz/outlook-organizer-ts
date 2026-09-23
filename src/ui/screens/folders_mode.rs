@@ -1,13 +1,13 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
     Frame,
 };
 
 use crate::{
-    app::{AppState, TransferMode},
+    app::{AppState, CheckboxState, TransferMode},
     ui::theme::Theme,
 };
 
@@ -30,87 +30,129 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let folders_inner = folders_block.inner(chunks[0]);
     f.render_widget(folders_block, chunks[0]);
 
-    let visible_indices = state.folder_tree.visible_indices();
-    let selected_count = state.folder_tree.nodes.iter().filter(|n| n.selected).count();
-    let total_nodes = state.folder_tree.nodes.len();
-
-    let mut folder_lines = vec![
-        Line::from(vec![
-            Span::styled("Estructura de carpetas ", Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("({} de {} seleccionadas):", selected_count, total_nodes), Style::default().fg(Theme::TEXT_MUTED)),
-        ]),
-        Line::from(""),
-    ];
-
-    if visible_indices.is_empty() {
-        folder_lines.push(Line::from(Span::styled("  No hay carpetas disponibles.", Style::default().fg(Theme::TEXT_MUTED))));
+    if state.is_inspecting_selected_psts() {
+        let loading_lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  ⏳ Obteniendo carpetas internas del archivo PST...", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Analizando jerarquía de carpetas, conteos y tamaños en disco.", Style::default().fg(Theme::TEXT_MUTED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Por favor espere un momento...", Style::default().fg(Theme::TEXT_MUTED)),
+            ]),
+        ];
+        f.render_widget(Paragraph::new(loading_lines), folders_inner);
     } else {
-        for (v_idx, &node_idx) in visible_indices.iter().enumerate() {
-            if let Some(node) = state.folder_tree.nodes.get(node_idx) {
-                let is_focused = v_idx == state.folder_tree.selected_idx;
-                let indent = "   ".repeat(node.level);
+        let visible_indices = state.folder_tree.visible_indices();
+        let selected_count = state.folder_tree.nodes.iter().filter(|n| n.selected).count();
+        let total_nodes = state.folder_tree.nodes.len();
 
-                let expand_icon = if node.has_children {
-                    if node.expanded { "▼ " } else { "▶ " }
-                } else {
-                    "• "
-                };
+        let mut folder_lines = vec![
+            Line::from(vec![
+                Span::styled("Estructura de carpetas ", Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("({} de {} seleccionadas):", selected_count, total_nodes), Style::default().fg(Theme::TEXT_MUTED)),
+            ]),
+            Line::from(""),
+        ];
 
-                let checkbox = if node.selected { "[x] " } else { "[ ] " };
-                let prefix = if is_focused { "▶ " } else { "  " };
+        let content_width = folders_inner.width as usize;
 
-                let mut spans = Vec::new();
-                spans.push(Span::styled(
-                    prefix,
-                    Style::default().fg(if is_focused { Theme::ACCENT_PRIMARY } else { Theme::TEXT_MUTED }),
-                ));
-                spans.push(Span::raw(indent));
-                spans.push(Span::styled(
-                    expand_icon,
-                    Style::default().fg(if node.has_children { Theme::ACCENT_PRIMARY } else { Theme::TEXT_MUTED }),
-                ));
-                spans.push(Span::styled(
-                    checkbox,
-                    Style::default().fg(if node.selected { Theme::SUCCESS } else { Theme::TEXT_MUTED })
-                        .add_modifier(if node.selected { Modifier::BOLD } else { Modifier::empty() }),
-                ));
+        if visible_indices.is_empty() {
+            folder_lines.push(Line::from(Span::styled("  No hay carpetas disponibles.", Style::default().fg(Theme::TEXT_MUTED))));
+        } else {
+            for (v_idx, &node_idx) in visible_indices.iter().enumerate() {
+                if let Some(node) = state.folder_tree.nodes.get(node_idx) {
+                    let is_focused = v_idx == state.folder_tree.selected_idx;
+                    let cb_state = state.folder_tree.checkbox_state(node_idx);
 
-                let name_style = if is_focused {
-                    Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
-                } else if node.selected {
-                    Style::default().fg(Theme::TEXT_MAIN)
-                } else {
-                    Style::default().fg(Theme::TEXT_MUTED)
-                };
-                spans.push(Span::styled(&node.name, name_style));
+                    // Formato de checkbox de ancho uniforme (6 caracteres)
+                    let cb_span = match cb_state {
+                        CheckboxState::Unchecked => Span::styled("[ ]   ", Style::default().fg(Theme::TEXT_MUTED)),
+                        CheckboxState::Checked => Span::styled("[x]   ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+                        CheckboxState::Indeterminate => Span::styled("[ - ] ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                    };
 
-                if node.count > 0 {
-                    spans.push(Span::styled(
-                        format!(" ({} correos)", node.count),
-                        Style::default().fg(if is_focused { Theme::TEXT_MAIN } else { Theme::TEXT_MUTED }),
-                    ));
+                    let indent_str = "   ".repeat(node.level);
+
+                    let name_with_indicator = if node.has_children {
+                        if node.expanded {
+                            format!("{} ▼", node.name)
+                        } else {
+                            format!("{} ▶", node.name)
+                        }
+                    } else {
+                        node.name.clone()
+                    };
+
+                    let name_style = if is_focused {
+                        Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    } else if node.selected || cb_state != CheckboxState::Unchecked {
+                        Style::default().fg(Theme::TEXT_MAIN)
+                    } else {
+                        Style::default().fg(Theme::TEXT_MUTED)
+                    };
+
+                    let count_str = format!("{}", node.count);
+                    let size_str = if node.size_mb <= 0.0 {
+                        "0 MB".to_string()
+                    } else if node.size_mb >= 1024.0 {
+                        format!("{:.1} GB", node.size_mb / 1024.0)
+                    } else {
+                        format!("{:.1} MB", node.size_mb)
+                    };
+
+                    // Anchos de columnas derechas
+                    let right_count = format!("{:>7}", count_str);
+                    let right_size = format!("{:>10}", size_str);
+                    let right_cols_len = 7 + 3 + 10; // 20 caracteres
+
+                    // Estimación de ancho visual izquierdo:
+                    // indent (level * 3) + cb (6) + icon 📁 (2 visible cols + 1 space = 3) + name_with_indicator
+                    let left_vis_len = (node.level * 3) + 6 + 3 + name_with_indicator.chars().count();
+                    let padding = content_width.saturating_sub(left_vis_len + right_cols_len);
+                    let pad_str = " ".repeat(padding.max(2));
+
+                    let row_bg = if is_focused {
+                        Color::Rgb(38, 42, 52)
+                    } else {
+                        Color::Reset
+                    };
+
+                    let line = Line::from(vec![
+                        Span::raw(indent_str),
+                        cb_span,
+                        Span::raw("📁 "),
+                        Span::styled(name_with_indicator, name_style),
+                        Span::raw(pad_str),
+                        Span::styled(right_count, Style::default().fg(if is_focused { Theme::TEXT_MAIN } else { Theme::TEXT_MUTED })),
+                        Span::raw("   "),
+                        Span::styled(right_size, Style::default().fg(if is_focused { Theme::TEXT_MAIN } else { Theme::TEXT_MUTED })),
+                    ]).style(Style::default().bg(row_bg));
+
+                    folder_lines.push(line);
                 }
-
-                folder_lines.push(Line::from(spans));
             }
         }
+
+        folder_lines.push(Line::from(""));
+        folder_lines.push(Line::from(vec![
+            Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+            Span::styled("Navegar  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[E] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+            Span::styled("Desplegar  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[Espacio] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+            Span::styled("Seleccionar  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[A] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+            Span::styled("Todas  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[N] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+            Span::styled("Ninguna", Style::default().fg(Theme::TEXT_MUTED)),
+        ]));
+
+        f.render_widget(Paragraph::new(folder_lines), folders_inner);
     }
-
-    folder_lines.push(Line::from(""));
-    folder_lines.push(Line::from(vec![
-        Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-        Span::styled("Navegar  ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[E/Enter] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-        Span::styled("Desplegar  ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[Espacio] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-        Span::styled("Seleccionar  ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[A] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-        Span::styled("Todas  ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[N] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-        Span::styled("Ninguna", Style::default().fg(Theme::TEXT_MUTED)),
-    ]));
-
-    f.render_widget(Paragraph::new(folder_lines), folders_inner);
 
     // 2. Panel Modo de Transferencia
     let mode_border_color = match state.transfer_mode {
