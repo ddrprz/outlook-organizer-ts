@@ -21,6 +21,8 @@ pub struct WorkerConfig {
     pub include_sent: bool,
     pub include_deleted: bool,
     pub include_custom_folders: bool,
+    #[serde(default)]
+    pub selected_folder_paths: Vec<String>,
     pub routing_enabled: bool,
     pub routing_granularity: String,
     pub specific_year: Option<u32>,
