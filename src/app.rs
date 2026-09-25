@@ -865,7 +865,8 @@ pub enum RoutingGranularity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutingModal {
     None,
-    Criterion,     // Criterio de Enrutamiento (Años vs Meses)
+    #[allow(dead_code)]
+    Criterion,     // Criterio de Enrutamiento (Modal clásico alternativo)
     YearScope,     // Alcance de años (Todos los años vs Año específico)
     SpecificYear,  // Año específico (Input numérico)
     MonthScope,    // Alcance de meses (Todos los meses [contextual] vs Mes específico)
@@ -1157,7 +1158,7 @@ impl AppState {
             }
             WizardStep::FoldersMode => {
                 self.sync_legacy_folder_flags();
-                self.active_routing_modal = RoutingModal::Criterion;
+                self.active_routing_modal = RoutingModal::None;
                 self.routing_modal_criterion_idx = match self.routing_granularity {
                     RoutingGranularity::Mirror => 0,
                     RoutingGranularity::Years => 1,
@@ -1304,10 +1305,10 @@ mod tests {
         state.step = WizardStep::FoldersMode;
         state.next_step();
         assert_eq!(state.step, WizardStep::Routing);
-        assert_eq!(state.active_routing_modal, RoutingModal::Criterion);
+        assert_eq!(state.active_routing_modal, RoutingModal::None);
 
         // Seleccionar granularidad de Meses (Años y Meses)
-        state.routing_modal_criterion_idx = 1;
+        state.routing_modal_criterion_idx = 2;
         state.routing_granularity = RoutingGranularity::YearsAndMonths;
         state.active_routing_modal = RoutingModal::YearScope;
 
@@ -1385,16 +1386,16 @@ mod tests {
         state.step = WizardStep::FoldersMode;
         state.next_step();
         assert_eq!(state.step, WizardStep::Routing);
-        assert_eq!(state.active_routing_modal, RoutingModal::Criterion);
+        assert_eq!(state.active_routing_modal, RoutingModal::None);
         assert_eq!(state.routing_modal_criterion_idx, 0);
 
-        // Confirmar criterio Espejo (índice 0) -> Pasa a YearScope
+        // Configurar alcance YearScope
         state.active_routing_modal = RoutingModal::YearScope;
         state.routing_modal_year_scope_idx = 0; // Todos los años
         state.specific_year = None;
         state.routing_all_years = true;
 
-        // En Espejo, pasa a MonthScope
+        // Pasa a MonthScope
         state.active_routing_modal = RoutingModal::MonthScope;
         state.routing_modal_month_scope_idx = 0; // Todos los meses
         state.specific_month = None;
@@ -1435,6 +1436,43 @@ mod tests {
         assert_eq!(state.specific_month, Some(9));
         assert!(!state.routing_all_years);
         assert!(!state.routing_all_months);
+    }
+
+    #[test]
+    fn test_routing_interactive_card_selection_and_filter_reset() {
+        let mut state = AppState::new();
+        state.step = WizardStep::FoldersMode;
+        state.next_step();
+        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.active_routing_modal, RoutingModal::None);
+
+        // Por defecto: Mirror (Estructura Original)
+        assert_eq!(state.routing_granularity, RoutingGranularity::Mirror);
+
+        // Seleccionar tarjeta 2 (Años)
+        state.routing_granularity = RoutingGranularity::Years;
+        assert_eq!(state.routing_granularity, RoutingGranularity::Years);
+
+        // Seleccionar tarjeta 3 (Años y Meses)
+        state.routing_granularity = RoutingGranularity::YearsAndMonths;
+        assert_eq!(state.routing_granularity, RoutingGranularity::YearsAndMonths);
+
+        // Aplicar filtro de fecha
+        state.specific_year = Some(2025);
+        state.specific_month = Some(6);
+        state.routing_all_years = false;
+        state.routing_all_months = false;
+
+        // Restablecer filtro (tecla R)
+        state.specific_year = None;
+        state.specific_month = None;
+        state.routing_all_years = true;
+        state.routing_all_months = true;
+
+        assert_eq!(state.specific_year, None);
+        assert_eq!(state.specific_month, None);
+        assert!(state.routing_all_years);
+        assert!(state.routing_all_months);
     }
 
     #[test]

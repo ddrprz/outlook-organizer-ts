@@ -521,6 +521,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 WizardStep::Routing => {
                     match state.active_routing_modal {
                         RoutingModal::Criterion => match key.code {
+                            KeyCode::Char('1') => {
+                                state.routing_granularity = RoutingGranularity::Mirror;
+                                state.routing_modal_criterion_idx = 0;
+                                state.routing_modal_year_scope_idx = 0;
+                                state.active_routing_modal = RoutingModal::YearScope;
+                            }
+                            KeyCode::Char('2') => {
+                                state.routing_granularity = RoutingGranularity::Years;
+                                state.routing_modal_criterion_idx = 1;
+                                state.routing_modal_year_scope_idx = 0;
+                                state.active_routing_modal = RoutingModal::YearScope;
+                            }
+                            KeyCode::Char('3') => {
+                                state.routing_granularity = RoutingGranularity::YearsAndMonths;
+                                state.routing_modal_criterion_idx = 2;
+                                state.routing_modal_year_scope_idx = 0;
+                                state.active_routing_modal = RoutingModal::YearScope;
+                            }
                             KeyCode::Up | KeyCode::Char('k') => {
                                 if state.routing_modal_criterion_idx > 0 {
                                     state.routing_modal_criterion_idx -= 1;
@@ -583,7 +601,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                state.active_routing_modal = RoutingModal::Criterion;
+                                state.active_routing_modal = RoutingModal::None;
                             }
                             _ => {}
                         },
@@ -677,18 +695,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             _ => {}
                         },
                         RoutingModal::None => match key.code {
-                            KeyCode::Char('c')
-                            | KeyCode::Char('C')
-                            | KeyCode::Char('m')
-                            | KeyCode::Char('M')
-                            | KeyCode::Char(' ') => {
-                                state.active_routing_modal = RoutingModal::Criterion;
-                                state.routing_modal_criterion_idx = match state.routing_granularity
-                                {
+                            KeyCode::Char('1') => {
+                                state.routing_granularity = RoutingGranularity::Mirror;
+                                state.routing_modal_criterion_idx = 0;
+                            }
+                            KeyCode::Char('2') => {
+                                state.routing_granularity = RoutingGranularity::Years;
+                                state.routing_modal_criterion_idx = 1;
+                            }
+                            KeyCode::Char('3') => {
+                                state.routing_granularity = RoutingGranularity::YearsAndMonths;
+                                state.routing_modal_criterion_idx = 2;
+                            }
+                            KeyCode::Left | KeyCode::Char('h') => {
+                                state.routing_granularity = match state.routing_granularity {
+                                    RoutingGranularity::Mirror => RoutingGranularity::YearsAndMonths,
+                                    RoutingGranularity::Years => RoutingGranularity::Mirror,
+                                    RoutingGranularity::YearsAndMonths => RoutingGranularity::Years,
+                                };
+                                state.routing_modal_criterion_idx = match state.routing_granularity {
                                     RoutingGranularity::Mirror => 0,
                                     RoutingGranularity::Years => 1,
                                     RoutingGranularity::YearsAndMonths => 2,
                                 };
+                            }
+                            KeyCode::Right | KeyCode::Char('l') => {
+                                state.routing_granularity = match state.routing_granularity {
+                                    RoutingGranularity::Mirror => RoutingGranularity::Years,
+                                    RoutingGranularity::Years => RoutingGranularity::YearsAndMonths,
+                                    RoutingGranularity::YearsAndMonths => RoutingGranularity::Mirror,
+                                };
+                                state.routing_modal_criterion_idx = match state.routing_granularity {
+                                    RoutingGranularity::Mirror => 0,
+                                    RoutingGranularity::Years => 1,
+                                    RoutingGranularity::YearsAndMonths => 2,
+                                };
+                            }
+                            KeyCode::Char('f')
+                            | KeyCode::Char('F')
+                            | KeyCode::Char('c')
+                            | KeyCode::Char('C') => {
+                                state.routing_modal_year_scope_idx =
+                                    if state.specific_year.is_some() { 1 } else { 0 };
+                                state.active_routing_modal = RoutingModal::YearScope;
+                            }
+                            KeyCode::Char('r') | KeyCode::Char('R') => {
+                                state.specific_year = None;
+                                state.specific_month = None;
+                                state.routing_all_years = true;
+                                state.routing_all_months = true;
                             }
                             _ => handle_navigation_keys(&mut state, key.code),
                         },

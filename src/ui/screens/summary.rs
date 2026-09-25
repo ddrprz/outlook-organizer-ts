@@ -56,7 +56,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         };
 
         match state.routing_granularity {
-            RoutingGranularity::Mirror => format!("Espejo / Estructura original ({})", scope_str),
+            RoutingGranularity::Mirror => format!("Conservar Estructura Original (Nativa del PST) ({})", scope_str),
             RoutingGranularity::Years => format!("Por Años ({})", scope_str),
             RoutingGranularity::YearsAndMonths => format!("Por Meses ({})", scope_str),
         }
