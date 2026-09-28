@@ -303,6 +303,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.pst_scan_path =
                                 state.explorer.current_path.to_string_lossy().to_string();
                             state.selected_pst_table_idx = 0;
+                            state.pst_warning_notice = None;
                             state.step = WizardStep::PstSource;
                         } else if !state.explorer.is_drives_view
                             && state.explorer.current_path.exists()
@@ -311,6 +312,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.pst_scan_path =
                                 state.explorer.current_path.to_string_lossy().to_string();
                             state.selected_pst_table_idx = 0;
+                            state.pst_warning_notice = None;
                             state.step = WizardStep::PstSource;
                         }
                     }
@@ -357,6 +359,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         {
                             item.selected = !item.selected;
                         }
+                        state.pst_warning_notice = None;
                     }
                     KeyCode::Char('d') | KeyCode::Char('D') => {
                         if let Some(item) = state.discovered_psts.get(state.selected_pst_table_idx) {
@@ -373,19 +376,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Char('e') | KeyCode::Char('E') => {
+                        state.pst_warning_notice = None;
                         open_file_explorer(&mut state);
                     }
                     KeyCode::Char('a') | KeyCode::Char('A') => {
                         for item in &mut state.discovered_psts {
                             item.selected = true;
                         }
+                        state.pst_warning_notice = None;
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') => {
                         for item in &mut state.discovered_psts {
                             item.selected = false;
                         }
                     }
-                    _ => handle_navigation_keys(&mut state, key.code),
+                    KeyCode::Enter => {
+                        if state.selected_psts().is_empty() {
+                            state.pst_warning_notice = Some(
+                                "Debe seleccionar al menos un archivo PST con la barra espaciadora para continuar."
+                                    .to_string(),
+                            );
+                        } else {
+                            state.pst_warning_notice = None;
+                            state.next_step();
+                        }
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.pst_warning_notice = None;
+                        state.prev_step();
+                    }
+                    KeyCode::Char('q') | KeyCode::Char('Q') => state.should_quit = true,
+                    _ => {}
                 },
                 WizardStep::PstDetailView => {
                     match &state.pst_detail_modal {
@@ -913,6 +934,7 @@ fn start_import_or_explore(state: &mut AppState) {
         state.discovered_psts = crate::app::scan_folder_for_psts(default_path);
         state.pst_scan_path = r"C:\Correo".to_string();
         state.selected_pst_table_idx = 0;
+        state.pst_warning_notice = None;
         state.step = WizardStep::PstSource;
     } else {
         state.explorer.warning_notice = Some(

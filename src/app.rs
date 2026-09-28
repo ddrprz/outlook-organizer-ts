@@ -804,7 +804,7 @@ pub fn read_directory(path: &Path) -> (Vec<ExplorerEntry>, bool) {
                         path: entry.path(),
                         item_type: ExplorerItemType::PstFile,
                         size_mb: Some(size_mb),
-                        selected: true,
+                        selected: false,
                     });
                 }
             }
@@ -838,7 +838,7 @@ pub fn scan_folder_for_psts(folder: &Path) -> Vec<PstItem> {
                         path: entry.path().to_string_lossy().to_string(),
                         name,
                         size_mb,
-                        selected: true,
+                        selected: false,
                     });
                 }
             }
@@ -929,6 +929,7 @@ pub struct AppState {
     pub pst_scan_path: String,
     pub discovered_psts: Vec<PstItem>,
     pub selected_pst_table_idx: usize,
+    pub pst_warning_notice: Option<String>,
 
     // Configuración Paso 3: Buzones Destino MAPI
     pub discovered_mailboxes: Vec<MailboxItem>,
@@ -1012,6 +1013,7 @@ impl AppState {
             pst_scan_path: r"C:\Correo".to_string(),
             discovered_psts: initial_psts,
             selected_pst_table_idx: 0,
+            pst_warning_notice: None,
             discovered_mailboxes: default_fallback_mailboxes(),
             selected_mailbox_idx: 0,
             is_loading_mailboxes: false,
@@ -1046,6 +1048,10 @@ impl AppState {
             pst_details_cache: std::collections::HashMap::new(),
             inspecting_psts: std::collections::HashSet::new(),
         }
+    }
+
+    pub fn selected_psts(&self) -> Vec<&PstItem> {
+        self.discovered_psts.iter().filter(|p| p.selected).collect()
     }
 
     pub fn is_inspecting_selected_psts(&self) -> bool {
@@ -1251,16 +1257,45 @@ mod tests {
         assert!(pst_entry.is_some());
         assert_eq!(pst_entry.unwrap().item_type, ExplorerItemType::PstFile);
         assert!(pst_entry.unwrap().size_mb.unwrap() >= 0.9);
+        assert!(!pst_entry.unwrap().selected, "PST entry should be unselected by default");
 
         let psts = scan_folder_for_psts(&temp_dir);
         assert_eq!(psts.len(), 1);
         assert_eq!(psts[0].name, "test_archive.pst");
+        assert!(!psts[0].selected, "PST item should be unselected by default from scan_folder_for_psts");
 
         let explorer = FileExplorerState::new(temp_dir.clone());
         let collected = explorer.collect_selected_psts();
         assert_eq!(collected.len(), 1);
+        assert!(!collected[0].selected, "PST item collected via explorer fallback should be unselected by default");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_no_psts_selected_by_default() {
+        let mut state = AppState::new();
+        state.discovered_psts.clear();
+        state.discovered_psts.push(PstItem {
+            path: r"C:\Correo\archivo1.pst".to_string(),
+            name: "archivo1.pst".to_string(),
+            size_mb: 15.0,
+            selected: false,
+        });
+        state.discovered_psts.push(PstItem {
+            path: r"C:\Correo\archivo2.pst".to_string(),
+            name: "archivo2.pst".to_string(),
+            size_mb: 25.0,
+            selected: false,
+        });
+
+        assert_eq!(state.selected_psts().len(), 0);
+        assert!(state.selected_psts().is_empty());
+
+        // Toggle first item
+        state.discovered_psts[0].selected = true;
+        assert_eq!(state.selected_psts().len(), 1);
+        assert_eq!(state.selected_psts()[0].name, "archivo1.pst");
     }
 
     #[test]

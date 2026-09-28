@@ -9,13 +9,23 @@ use ratatui::{
 use crate::{app::AppState, ui::theme::Theme};
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
+    let has_warning = state.pst_warning_notice.is_some();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),  // Modo de escaneo y ruta
-            Constraint::Min(8),     // Tabla de PSTs encontrados
-            Constraint::Length(2),  // Atajos rápidos
-        ])
+        .constraints(if has_warning {
+            vec![
+                Constraint::Length(5),  // Modo de escaneo y ruta
+                Constraint::Min(8),     // Tabla de PSTs encontrados
+                Constraint::Length(2),  // Advertencia
+                Constraint::Length(2),  // Atajos rápidos
+            ]
+        } else {
+            vec![
+                Constraint::Length(5),  // Modo de escaneo y ruta
+                Constraint::Min(8),     // Tabla de PSTs encontrados
+                Constraint::Length(2),  // Atajos rápidos
+            ]
+        })
         .split(area);
 
     // 1. Selector de Origen / Ruta
@@ -88,12 +98,27 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-            .title(" Archivos PST Seleccionados "),
+            .title(" Archivos PST Encontrados (Marca con Espacio los que deseas importar) "),
     );
 
     f.render_widget(table, chunks[1]);
 
-    // 3. Atajos
+    // 3. Advertencia si aplica
+    let help_idx = if has_warning {
+        if let Some(ref notice) = state.pst_warning_notice {
+            let warn_p = Paragraph::new(Line::from(vec![
+                Span::styled("⚠️  ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled(notice.as_str(), Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+            ]))
+            .alignment(Alignment::Center);
+            f.render_widget(warn_p, chunks[2]);
+        }
+        3
+    } else {
+        2
+    };
+
+    // 4. Atajos
     let help_line = Line::from(vec![
         Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled("Navegar fila   ", Style::default().fg(Theme::TEXT_MUTED)),
@@ -108,5 +133,5 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Span::styled("[Enter] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
         Span::styled("Continuar", Style::default().fg(Theme::SUCCESS)),
     ]);
-    f.render_widget(Paragraph::new(help_line).alignment(Alignment::Center), chunks[2]);
+    f.render_widget(Paragraph::new(help_line).alignment(Alignment::Center), chunks[help_idx]);
 }
