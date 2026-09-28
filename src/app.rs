@@ -1476,6 +1476,41 @@ mod tests {
     }
 
     #[test]
+    fn test_routing_criterion_modal_state_change() {
+        let mut state = AppState::new();
+        state.step = WizardStep::Routing;
+        assert_eq!(state.routing_granularity, RoutingGranularity::Mirror);
+
+        // Abrir modal de Criterio (tecla C)
+        state.active_routing_modal = RoutingModal::Criterion;
+        state.routing_modal_criterion_idx = 1; // Seleccionar opción 2: Por Años
+
+        // Confirmar selección (Enter)
+        state.routing_granularity = match state.routing_modal_criterion_idx {
+            0 => RoutingGranularity::Mirror,
+            1 => RoutingGranularity::Years,
+            _ => RoutingGranularity::YearsAndMonths,
+        };
+        state.active_routing_modal = RoutingModal::None;
+
+        assert_eq!(state.routing_granularity, RoutingGranularity::Years);
+        assert_eq!(state.active_routing_modal, RoutingModal::None);
+
+        // Avanzar a Deduplicación y luego a Resumen
+        state.next_step(); // Deduplication
+        assert_eq!(state.step, WizardStep::Deduplication);
+        assert_eq!(state.routing_granularity, RoutingGranularity::Years);
+
+        state.next_step(); // Filters
+        assert_eq!(state.step, WizardStep::Filters);
+        assert_eq!(state.routing_granularity, RoutingGranularity::Years);
+
+        state.next_step(); // Summary
+        assert_eq!(state.step, WizardStep::Summary);
+        assert_eq!(state.routing_granularity, RoutingGranularity::Years);
+    }
+
+    #[test]
     fn test_pst_detail_modal_open_and_close() {
         let mut state = AppState::new();
         state.step = WizardStep::PstSource;
