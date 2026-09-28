@@ -192,11 +192,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 WizardStep::Welcome => {
                     if state.is_editing_profile {
                         match key.code {
-                            KeyCode::Esc => {
+                            KeyCode::Esc | KeyCode::Enter => {
                                 state.is_editing_profile = false;
-                            }
-                            KeyCode::Enter => {
-                                state.is_editing_profile = false;
+                                state.is_loading_mailboxes = true;
+                                BackendRunner::trigger_mailbox_discovery(
+                                    if state.use_default_profile {
+                                        None
+                                    } else {
+                                        Some(state.custom_profile_name.clone())
+                                    },
+                                    tx.clone(),
+                                );
                             }
                             KeyCode::Tab | KeyCode::Up | KeyCode::Down => {
                                 state.use_default_profile = !state.use_default_profile;
