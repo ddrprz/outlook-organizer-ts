@@ -161,12 +161,25 @@ impl BackendRunner {
         match cmd.output().await {
             Ok(output) if output.status.success() => {
                 let stdout_str = String::from_utf8_lossy(&output.stdout);
-                if let Ok(mut items) = serde_json::from_str::<Vec<crate::app::MailboxItem>>(stdout_str.trim())
-                    && !items.is_empty() {
-                    if !items.iter().any(|m| m.selected) {
-                        items[0].selected = true;
+                if let Ok(mut items) = serde_json::from_str::<Vec<crate::app::MailboxItem>>(stdout_str.trim()) {
+                    // Garantizar que ningún archivo PST sea tratado como buzón de destino
+                    items.retain(|m| {
+                        m.store_type != "PST"
+                            && !m.display_name.to_lowercase().ends_with(".pst")
+                            && !m
+                                .file_path
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_lowercase()
+                                .ends_with(".pst")
+                    });
+
+                    if !items.is_empty() {
+                        if !items.iter().any(|m| m.selected) {
+                            items[0].selected = true;
+                        }
+                        return items;
                     }
-                    return items;
                 }
                 crate::app::default_fallback_mailboxes()
             }
@@ -293,6 +306,25 @@ impl BackendRunner {
                 Err(format!("Error en subproceso PowerShell: {}", err_msg))
             }
             Err(e) => Err(format!("Error al esperar finalización de PowerShell: {}", e)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_fetch_outlook_mailboxes_live() {
+        let items = BackendRunner::fetch_outlook_mailboxes(None).await;
+        println!("FETCHED ITEMS: {:?}", items);
+        assert!(!items.is_empty());
+        for item in &items {
+            assert_ne!(item.store_type, "PST");
+            assert!(!item.display_name.to_lowercase().ends_with(".pst"));
+            if let Some(ref path) = item.file_path {
+                assert!(!path.to_lowercase().ends_with(".pst"));
+            }
         }
     }
 }
