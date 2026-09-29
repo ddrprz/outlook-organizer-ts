@@ -232,6 +232,7 @@ $globalTotalItems = 0
 $startTime = [DateTime]::UtcNow
 $lastTelemetryTime = [DateTime]::MinValue
 $targetSets = @{}
+$processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 
 try {
     # 2. Conectar a Outlook COM en modo STA
@@ -517,10 +518,27 @@ try {
                     if ($isDuplicate) {
                         $totalDuplicates++
                         $pstProcessedCount++
+                        if ($processedItemsList.Count -lt 5000) {
+                            $itemKb = 0.0
+                            try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
+                            $processedItemsList.Add(@{
+                                subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                                date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
+                                source_folder = $cf.RelPath
+                                dest_folder   = $finalDest.Name
+                                pst_name      = $pstName
+                                status        = "Duplicado Omitido"
+                                size_kb       = $itemKb
+                            })
+                        }
                         continue
                     }
 
                     # Transferencia: Copiar (predeterminado) o Mover
+                    $itemKb = 0.0
+                    try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
+
                     if ($config -and $config.transfer_mode -eq "Move") {
                         $item.Move($finalDest) | Out-Null
                         $totalImported++
@@ -533,6 +551,19 @@ try {
                         }
                         $totalImported++
                         $pstProcessedCount++
+                    }
+
+                    if ($processedItemsList.Count -lt 5000) {
+                        $processedItemsList.Add(@{
+                            subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                            sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                            date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
+                            source_folder = $cf.RelPath
+                            dest_folder   = $finalDest.Name
+                            pst_name      = $pstName
+                            status        = "Importado"
+                            size_kb       = $itemKb
+                        })
                     }
 
                     # Registrar clave para deduplicar futuros correos de la misma sesión
@@ -574,6 +605,18 @@ try {
                 catch {
                     $totalErrors++
                     $pstProcessedCount++
+                    if ($processedItemsList.Count -lt 5000) {
+                        $processedItemsList.Add(@{
+                            subject       = "(Error al leer correo)"
+                            sender        = "-"
+                            date          = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                            source_folder = $cf.RelPath
+                            dest_folder   = "-"
+                            pst_name      = $pstName
+                            status        = "Error"
+                            size_kb       = 0.0
+                        })
+                    }
                 }
                 finally {
                     if ($null -ne $item) {
@@ -596,6 +639,16 @@ try {
         }
 
         if ($isAborted) { break }
+    }
+
+    # Guardar reporte de elementos procesados en archivo temporal JSON para el informe interactivo HTML
+    $itemsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_items.json"
+    try {
+        $itemsJson = $processedItemsList | ConvertTo-Json -Depth 3 -Compress
+        [System.IO.File]::WriteAllText($itemsTempFile, $itemsJson, [System.Text.Encoding]::UTF8)
+        Log-Message "Historial de correos ($($processedItemsList.Count) items) preparado para informe interactivo."
+    } catch {
+        Log-Message "Aviso al escribir historial temporal de correos: $_" "WARN"
     }
 
     $finalStatus = if ($isAborted) { "aborted" } else { "completed" }

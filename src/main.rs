@@ -99,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.progress.imported_count = imported;
                     state.progress.duplicates_skipped = duplicates;
                     state.progress.error_count = errors;
+                    state.load_processed_items_from_temp();
                     state.log_event(format!("[FIN] Operación finalizada con estado: {}", status));
 
                     // Auditoría JSON automática (solo si es .exe de producción)
@@ -915,14 +916,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('h') | KeyCode::Char('H') => {
                         match generate_html_report(&state, None) {
                             Ok(path) => {
+                                state.html_report_path = Some(path.clone());
                                 state.log_event(format!(
                                     "[INFORME HTML] Generado exitosamente en: {}",
                                     path.display()
                                 ));
+                                let _ = std::process::Command::new("cmd")
+                                    .args(["/C", "start", "", &path.to_string_lossy()])
+                                    .spawn();
                             }
                             Err(e) => {
                                 state.log_event(format!("[ERROR] Fallo al generar HTML: {}", e));
                             }
+                        }
+                    }
+                    KeyCode::Char('o') | KeyCode::Char('O') => {
+                        if let Some(ref path) = state.html_report_path {
+                            let _ = std::process::Command::new("cmd")
+                                .args(["/C", "start", "", &path.to_string_lossy()])
+                                .spawn();
                         }
                     }
                     _ => {}

@@ -45,9 +45,13 @@ impl BackendRunner {
         let config_path = temp_dir.join("outlook_organizer_config.json");
         let abort_path = temp_dir.join("outlook_organizer_abort.flag");
 
-        // Limpiar bandera previa de cancelación
+        // Limpiar bandera previa de cancelación e historial previo de items
         if abort_path.exists() {
             let _ = fs::remove_file(&abort_path);
+        }
+        let items_path = temp_dir.join("outlook_organizer_items.json");
+        if items_path.exists() {
+            let _ = fs::remove_file(&items_path);
         }
 
         // Escribir script y archivo de configuración JSON con BOM UTF-8 para PowerShell 5.1
