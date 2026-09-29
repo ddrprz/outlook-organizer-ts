@@ -120,8 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.pst_details_cache.insert(pst_path.clone(), *d.clone());
                             if let app::PstDetailModalState::Loading { pst_path: ref p, .. } = state.pst_detail_modal
                                 && p == &pst_path {
+                                state.pst_folder_explorer.build_from_detail(&d);
                                 state.pst_detail_modal = app::PstDetailModalState::Loaded(d);
-                                state.pst_folder_explorer.reset();
                             }
                             state.sync_folder_tree_from_selected_psts();
                         }
@@ -155,6 +155,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(state.custom_profile_name.clone())
             };
             BackendRunner::trigger_pst_inspection(pst.path, pst.name, profile, tx.clone());
+        }
+
+        // Garantizar que si el detalle está cargado, el árbol de carpetas esté construido
+        if let app::PstDetailModalState::Loaded(ref detail) = state.pst_detail_modal
+            && state.pst_folder_explorer.nodes.is_empty() && !detail.folders.is_empty()
+        {
+            state.pst_folder_explorer.build_from_detail(detail);
         }
 
         terminal.draw(|f| draw_ui(f, &state))?;
@@ -410,24 +417,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 WizardStep::PstDetailView => {
                     match &state.pst_detail_modal {
-                        app::PstDetailModalState::Loaded(detail) => {
-                            let detail_clone = detail.clone();
-                            let entries_len = state.pst_folder_explorer.current_entries(&detail_clone).len();
+                        app::PstDetailModalState::Loaded(_) => {
                             match key.code {
                                 KeyCode::Up | KeyCode::Char('k') => {
                                     state.pst_folder_explorer.move_up();
                                 }
                                 KeyCode::Down | KeyCode::Char('j') => {
-                                    state.pst_folder_explorer.move_down(entries_len);
+                                    state.pst_folder_explorer.move_down();
                                 }
-                                KeyCode::Char('e') | KeyCode::Char('E') | KeyCode::Enter => {
-                                    state.pst_folder_explorer.navigate_into(&detail_clone);
+                                KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => {
+                                    state.pst_folder_explorer.toggle_expand();
                                 }
-                                KeyCode::Backspace | KeyCode::Left | KeyCode::Char('h') => {
-                                    state.pst_folder_explorer.navigate_up(&detail_clone);
+                                KeyCode::Right | KeyCode::Char('l') => {
+                                    state.pst_folder_explorer.expand();
+                                }
+                                KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace => {
+                                    state.pst_folder_explorer.collapse();
                                 }
                                 KeyCode::Char(' ') => {
-                                    state.pst_folder_explorer.toggle_select(&detail_clone);
+                                    state.pst_folder_explorer.toggle_select();
                                 }
                                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Char('d') | KeyCode::Char('D') => {
                                     state.close_pst_detail();
@@ -1075,9 +1083,9 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::Completion => vec![("H", "Informe HTML"), ("Enter/q", "Salir")],
         WizardStep::PstDetailView => vec![
             ("↑/↓", "Navegar"),
-            ("E", "Entrar"),
-            ("Backspace", "Subir"),
-            ("Espacio", "Detalle"),
+            ("Enter/E/→", "Desplegar"),
+            ("←/Backspace", "Plegar"),
+            ("Espacio", "Aislar Métricas"),
             ("Esc/Q", "Volver"),
         ],
     };
