@@ -131,15 +131,33 @@ pub struct PstDetail {
     pub sizes_by_month_mb: std::collections::BTreeMap<String, f64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + serde::Deserialize<'de>,
+{
+    use serde::Deserialize;
+    let opt = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub struct ProcessedEmailItem {
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub subject: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub sender: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub date: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub source_folder: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub dest_folder: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub pst_name: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub status: String, // "Importado" | "Duplicado Omitido" | "Error"
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub size_kb: f64,
 }
 
@@ -1275,9 +1293,11 @@ impl AppState {
         let temp_items = std::env::temp_dir().join("outlook_organizer_items.json");
         if temp_items.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_items)
-            && let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(&content)
         {
-            self.processed_items = items;
+            let trimmed = content.trim_start_matches('\u{feff}');
+            if let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(trimmed) {
+                self.processed_items = items;
+            }
         }
     }
 
@@ -1354,6 +1374,18 @@ impl AppState {
     pub fn get_effective_email_items(&self) -> Vec<ProcessedEmailItem> {
         if !self.processed_items.is_empty() {
             return self.processed_items.clone();
+        }
+
+        let temp_items = std::env::temp_dir().join("outlook_organizer_items.json");
+        if temp_items.exists()
+            && let Ok(content) = std::fs::read_to_string(&temp_items)
+        {
+            let trimmed = content.trim_start_matches('\u{feff}');
+            if let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(trimmed)
+                && !items.is_empty()
+            {
+                return items;
+            }
         }
 
         let mut sample = Vec::new();
