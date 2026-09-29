@@ -31,7 +31,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Constraint::Length(3), // 1. Ribbon de Estado y Contexto MAPI
                 Constraint::Length(5), // 2. Barra ÚNICA de Progreso para 1 PST
                 Constraint::Min(8),    // 3. Panel de Métricas KPI y Log en Vivo
-                Constraint::Length(1), // 4. Banner de Parada Segura
             ])
             .split(area)
     } else {
@@ -42,7 +41,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Constraint::Length(4), // 2. Barra 1: PST Actual
                 Constraint::Length(4), // 3. Barra 2: Progreso Global Consolidado
                 Constraint::Min(8),    // 4. Panel de Métricas KPI y Log en Vivo
-                Constraint::Length(1), // 5. Banner de Parada Segura
             ])
             .split(area)
     };
@@ -67,7 +65,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let status_badge = if progress.graceful_cancelling {
         Span::styled(
-            " ⏳ CANCELANDO CON SEGURIDAD ",
+            " ■ CANCELANDO CON SEGURIDAD ",
             Style::default()
                 .bg(Theme::WARNING)
                 .fg(Color::Black)
@@ -75,7 +73,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else if progress.throttling_active {
         Span::styled(
-            " ⚠️ THROTTLING ACTIVO ",
+            " ▲ THROTTLING ACTIVO ",
             Style::default()
                 .bg(Theme::WARNING)
                 .fg(Color::Black)
@@ -83,7 +81,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else {
         Span::styled(
-            " ⚡ EN EJECUCIÓN ACTIVA ",
+            " ● EN EJECUCIÓN ACTIVA ",
             Style::default()
                 .bg(Theme::SUCCESS)
                 .fg(Color::Black)
@@ -99,6 +97,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     } else {
         selected_mboxes.iter().map(|m| m.display_name.as_str()).collect::<Vec<_>>().join(", ")
     };
+
     let mode_badge = match state.transfer_mode {
         TransferMode::Copy => Span::styled("Modo: Copiar (Intacto)", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
         TransferMode::Move => Span::styled("Modo: Mover (Transaccional)", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
@@ -138,7 +137,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         0
     };
 
-    let (bottom_area, hint_area) = if is_single_pst {
+    let bottom_area = if is_single_pst {
         // --- CASO 1: UN SOLO PST -> UNA SOLA BARRA MODERNA Y COMPLETA ---
         let label = format!(
             " {}%  •  {}/{} correos  •  Velocidad: {:.1} msgs/s  •  ETA: ~{}s ",
@@ -167,7 +166,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .label(label);
 
         f.render_widget(single_gauge, chunks[1]);
-        (chunks[2], chunks[3])
+        chunks[2]
     } else {
         // --- CASO 2: MÚLTIPLES PSTs -> DOS BARRAS (PST ACTUAL + GLOBAL) ---
         let current_idx = progress.current_pst_idx.max(1);
@@ -227,7 +226,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .label(global_label);
         f.render_widget(global_gauge, chunks[2]);
 
-        (chunks[3], chunks[4])
+        chunks[3]
     };
 
     // =========================================================================
@@ -241,12 +240,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ])
         .split(bottom_area);
 
-    // --- Panel Izquierdo: Métricas en Directo ---
+    // --- Panel Izquierdo: Métricas en Directo con Símbolos Uniformes ---
     let metrics_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" 📊 Métricas en Directo ");
+        .title(" ◈ Métricas en Directo ◈ ");
 
     let metrics_inner = metrics_block.inner(bottom_chunks[0]);
     f.render_widget(metrics_block, bottom_chunks[0]);
@@ -267,7 +266,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("⚠ Errores Lectura:   ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("▲ Errores Lectura:   ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 format!("{}", progress.error_count),
                 if progress.error_count > 0 {
@@ -279,24 +278,24 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("⚡ Velocidad MAPI:    ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("▸ Velocidad MAPI:    ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 format!("{:.1} correos/seg", progress.speed_mps),
                 Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("⏱ Tiempo Estimado:   ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("◷ Tiempo Estimado:   ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 format!("~{} segundos", progress.eta_seconds),
                 Style::default().fg(Theme::ACCENT_PRIMARY),
             ),
         ]),
         Line::from(vec![
-            Span::styled("🛡 Anti-Throttling:   ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("◆ Anti-Throttling:   ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 if progress.throttling_active {
-                    "⚠️ Pausa activa (429 Backoff)"
+                    "▲ Pausa activa (429 Backoff)"
                 } else {
                     "● Normal (Velocidad óptima)"
                 },
@@ -306,7 +305,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("🔒 Integridad PST:   ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("◈ Integridad PST:    ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("Desmontaje seguro activo", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
@@ -314,9 +313,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     // --- Panel Derecho: Log en Directo con Auto-Scroll y Sintaxis ---
     let log_title = if progress.graceful_cancelling {
-        " ⚠️ REGISTRO: PARADA SEGURA EN CURSO (DESMONTANDO PST) "
+        " ▲ REGISTRO: PARADA SEGURA EN CURSO (DESMONTANDO PST) "
     } else {
-        " 📜 Registro de Actividad y Telemetría MAPI "
+        " ◈ Registro de Actividad y Telemetría MAPI ◈ "
     };
 
     let log_border_color = if progress.graceful_cancelling {
@@ -365,28 +364,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     f.render_widget(Paragraph::new(log_lines), log_inner);
-
-    // =========================================================================
-    // 4. BANNER INFERIOR DE AYUDA Y PARADA SEGURA
-    // =========================================================================
-    let hint_line = if progress.graceful_cancelling {
-        Line::from(vec![
-            Span::styled(" ⚠️ AVISO: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                "Finalizando correo en curso y desmontando PST de Outlook... Por favor espere, no fuerce el cierre.",
-                Style::default().fg(Theme::WARNING),
-            ),
-        ])
-    } else {
-        Line::from(vec![
-            Span::styled(" [Esc / Q] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(
-                "Solicitar Parada Segura (Detiene el proceso ordenadamente sin riesgo de dañar los archivos PST)",
-                Style::default().fg(Theme::TEXT_MUTED),
-            ),
-        ])
-    };
-    f.render_widget(Paragraph::new(hint_line), hint_area);
 }
 
 #[cfg(test)]

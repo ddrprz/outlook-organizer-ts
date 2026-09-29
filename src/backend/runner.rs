@@ -50,9 +50,9 @@ impl BackendRunner {
             let _ = fs::remove_file(&abort_path);
         }
 
-        // Escribir script y archivo de configuración JSON
+        // Escribir script y archivo de configuración JSON con BOM UTF-8 para PowerShell 5.1
         let script_content = include_str!("worker.ps1");
-        fs::write(&script_path, script_content)?;
+        fs::write(&script_path, format!("\u{feff}{}", script_content))?;
 
         let config_json = serde_json::to_string_pretty(config)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -141,7 +141,7 @@ impl BackendRunner {
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("outlook_organizer_discovery.ps1");
         let script_content = include_str!("mailbox_discovery.ps1");
-        let _ = fs::write(&script_path, script_content);
+        let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
 
         let mut cmd = Command::new("powershell");
         cmd.arg("-Sta")
@@ -223,7 +223,7 @@ impl BackendRunner {
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("outlook_organizer_inspector.ps1");
         let script_content = include_str!("pst_inspector.ps1");
-        let _ = fs::write(&script_path, script_content);
+        let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
 
         let mut cmd = Command::new("powershell");
         cmd.arg("-Sta")
