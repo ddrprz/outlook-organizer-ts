@@ -53,26 +53,39 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let report_inner = report_block.inner(chunks[1]);
     f.render_widget(report_block, chunks[1]);
 
-    let report_lines = vec![
+    let mut report_lines = vec![
         Line::from(vec![
             Span::styled("• Registro JSON de Auditoría: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("Generado automáticamente en carpeta fechada (Modo Producción .exe)", Style::default().fg(Theme::TEXT_MAIN)),
         ]),
-        Line::from(Span::styled("  Ubicación: .\\logs\\2026-09-15\\run_audit.json", Style::default().fg(Theme::BRAND_PRIMARY))),
+        Line::from(Span::styled("  Ubicación: .\\logs\\YYYY-MM-DD\\run_audit.json", Style::default().fg(Theme::BRAND_PRIMARY))),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("• Informe Visual HTML: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("¿Desea generar el informe interactivo HTML con diseño web moderno?", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("  [H] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled("Generar Informe HTML en carpeta predeterminada", Style::default().fg(Theme::TEXT_MAIN)),
-        ]),
-        Line::from(vec![
-            Span::styled("  [C] ", Style::default().fg(Theme::ACCENT_SECONDARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Especificar ruta personalizada de guardado", Style::default().fg(Theme::TEXT_MAIN)),
-        ]),
     ];
+
+    if let Some(ref path) = state.html_report_path {
+        report_lines.push(Line::from(vec![
+            Span::styled("✓ Informe Interactivo HTML Generado: ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(path.display().to_string(), Style::default().fg(Theme::TEXT_MAIN)),
+        ]));
+        report_lines.push(Line::from(""));
+        report_lines.push(Line::from(vec![
+            Span::styled("  [O] ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("Abrir Informe en el Navegador Web", Style::default().fg(Theme::TEXT_MAIN)),
+        ]));
+        report_lines.push(Line::from(vec![
+            Span::styled("  [H] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled("Volver a generar y abrir informe interactivo", Style::default().fg(Theme::TEXT_MAIN)),
+        ]));
+    } else {
+        report_lines.push(Line::from(vec![
+            Span::styled("• Informe Visual HTML: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Tablas interactivas con búsqueda de carpetas y correos en tiempo real", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        ]));
+        report_lines.push(Line::from(vec![
+            Span::styled("  [H] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled("Generar y Abrir Informe HTML Interactivo", Style::default().fg(Theme::TEXT_MAIN)),
+        ]));
+    }
     f.render_widget(Paragraph::new(report_lines), report_inner);
 
     // 3. Salida
