@@ -101,7 +101,7 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
         .filter(|p| p.selected)
         .map(|p| {
             format!(
-                "<tr><td><span class='icon'>📁</span> <strong>{}</strong></td><td class='muted-cell'>{}</td><td>{:.1} MB</td><td><span class='badge badge-success'>✓ Procesado</span></td></tr>",
+                r#"<tr><td><svg class="cell-svg" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> <strong>{}</strong></td><td class="muted-cell">{}</td><td>{:.1} MB</td><td><span class="badge badge-success"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Procesado</span></td></tr>"#,
                 p.name, p.path, p.size_mb
             )
         })
@@ -180,6 +180,47 @@ fn get_html_template() -> &'static str {
       margin: 0 auto;
     }
 
+    /* Iconos Vectoriales SVG */
+    .icon {
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      vertical-align: -2px;
+      flex-shrink: 0;
+    }
+    .icon-cyan {
+      stroke: var(--cyan);
+    }
+    .header-title-svg {
+      width: 26px;
+      height: 26px;
+      display: inline-block;
+      vertical-align: -4px;
+      margin-right: 0.35rem;
+      filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.6));
+    }
+    .badge-svg {
+      width: 12px;
+      height: 12px;
+      display: inline-block;
+      vertical-align: -1px;
+      flex-shrink: 0;
+    }
+    .cell-svg {
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      vertical-align: -3px;
+      margin-right: 5px;
+    }
+    .path-arrow {
+      width: 14px;
+      height: 14px;
+      display: inline-block;
+      vertical-align: -2px;
+      margin-right: 4px;
+    }
+
     /* Header */
     .header {
       background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%);
@@ -194,51 +235,85 @@ fn get_html_template() -> &'static str {
       gap: 1.5rem;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
     }
+    .header-left {
+      flex: 1;
+      min-width: 300px;
+    }
     .header-left h1 {
       font-size: 1.85rem;
       color: var(--text);
       display: flex;
       align-items: center;
-      gap: 0.65rem;
+      gap: 0.5rem;
       letter-spacing: -0.5px;
-    }
-    .header-left h1 .symbol {
-      color: var(--cyan);
-      text-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
     }
     .header-meta {
       display: flex;
-      gap: 1rem;
-      margin-top: 0.5rem;
-      font-size: 0.85rem;
+      gap: 0.65rem;
+      margin-top: 0.75rem;
+      font-size: 0.82rem;
       color: var(--text-muted);
       flex-wrap: wrap;
     }
-    .header-meta span {
+    .meta-pill {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--border);
+      padding: 0.25rem 0.65rem;
+      border-radius: 6px;
       display: inline-flex;
       align-items: center;
-      gap: 0.35rem;
+      gap: 0.45rem;
     }
+    .meta-pill strong {
+      color: var(--text);
+    }
+
     .header-right {
       display: flex;
       flex-direction: column;
       align-items: flex-end;
+      justify-content: center;
+      gap: 0.9rem;
+    }
+    .brand-box {
+      display: flex;
+      justify-content: flex-end;
+      width: 100%;
+    }
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       gap: 0.75rem;
+      background: rgba(0, 229, 255, 0.05);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      padding: 0.55rem 1.4rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0, 229, 255, 0.08);
+      text-align: center;
     }
-    .brand-tag {
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .brand-title {
+      font-size: 1.1rem;
       font-weight: 800;
+      letter-spacing: 2.5px;
       color: var(--cyan);
-      letter-spacing: 1.5px;
-      font-size: 1rem;
-      text-align: right;
+      text-shadow: 0 0 12px rgba(0, 229, 255, 0.45);
+      line-height: 1;
     }
-    .brand-tag small {
-      display: block;
+    .brand-subtitle {
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 2px;
       color: var(--text-muted);
-      font-size: 0.7rem;
-      font-weight: 500;
-      letter-spacing: 1px;
+      line-height: 1;
+      margin-top: 3px;
     }
+
     .action-bar {
       display: flex;
       gap: 0.5rem;
@@ -445,13 +520,14 @@ fn get_html_template() -> &'static str {
       flex: 1;
       min-width: 260px;
     }
-    .search-icon {
+    .search-icon-wrapper {
       position: absolute;
       left: 1rem;
       top: 50%;
       transform: translateY(-50%);
       color: var(--text-dim);
-      font-size: 0.95rem;
+      display: flex;
+      align-items: center;
       pointer-events: none;
     }
     .search-input {
@@ -478,8 +554,8 @@ fn get_html_template() -> &'static str {
       border: none;
       color: var(--text-dim);
       cursor: pointer;
-      font-size: 0.85rem;
       display: none;
+      padding: 4px;
     }
     .search-clear:hover { color: var(--text); }
     .filter-chips {
@@ -496,6 +572,9 @@ fn get_html_template() -> &'static str {
       font-size: 0.78rem;
       font-weight: 600;
       cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
       transition: all 0.2s ease;
     }
     .chip:hover {
@@ -570,7 +649,7 @@ fn get_html_template() -> &'static str {
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.3rem;
+      gap: 0.35rem;
       padding: 0.25rem 0.65rem;
       border-radius: 9999px;
       font-size: 0.72rem;
@@ -606,6 +685,9 @@ fn get_html_template() -> &'static str {
       border-radius: 6px;
       font-size: 0.8rem;
       cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
     }
     .page-btn:disabled {
       opacity: 0.4;
@@ -724,23 +806,56 @@ fn get_html_template() -> &'static str {
     <!-- Header -->
     <header class="header">
       <div class="header-left">
-        <h1><span class="symbol">◈</span> Informe de Migración & Auditoría</h1>
+        <h1>
+          <svg class="header-title-svg" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2.5">
+            <polygon points="12 2 22 12 12 22 2 12"/>
+          </svg>
+          Informe de Migración &amp; Auditoría
+        </h1>
         <div class="header-meta">
-          <span>📅 Fecha: <strong>__DATE_STR__</strong></span>
-          <span>⏰ Hora: <strong>__TIME_STR__</strong></span>
-          <span>⚡ Motor: <strong>Outlook COM / MAPI</strong></span>
-          <span>🏢 Perfil: <strong>__PROFILE_INFO__</strong></span>
+          <span class="meta-pill">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            Fecha: <strong>__DATE_STR__</strong>
+          </span>
+          <span class="meta-pill">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Hora: <strong>__TIME_STR__</strong>
+          </span>
+          <span class="meta-pill">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Motor: <strong>Outlook COM / MAPI</strong>
+          </span>
+          <span class="meta-pill">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Perfil: <strong>__PROFILE_INFO__</strong>
+          </span>
         </div>
       </div>
       <div class="header-right">
-        <div class="brand-tag">
-          ◈ TIMELESS
-          <small>SUPPORT</small>
+        <div class="brand-box">
+          <div class="brand-badge">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2.5">
+              <polygon points="12 2 22 12 12 22 2 12" />
+            </svg>
+            <div class="brand-text">
+              <span class="brand-title">TIMELESS</span>
+              <span class="brand-subtitle">SUPPORT</span>
+            </div>
+          </div>
         </div>
         <div class="action-bar">
-          <button class="btn btn-primary" onclick="window.print()">⎙ Imprimir / PDF</button>
-          <button class="btn" onclick="copyExecutiveSummary()">📋 Copiar Resumen</button>
-          <button class="btn" onclick="exportEmailsToCsv()">⬇ Exportar CSV</button>
+          <button class="btn btn-primary" onclick="window.print()">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Imprimir / PDF
+          </button>
+          <button class="btn" onclick="copyExecutiveSummary()">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+            Copiar Resumen
+          </button>
+          <button class="btn" onclick="exportEmailsToCsv()">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Exportar CSV
+          </button>
         </div>
       </div>
     </header>
@@ -750,7 +865,7 @@ fn get_html_template() -> &'static str {
       <div class="kpi-card kpi-imported">
         <div class="kpi-title">
           <span>Correos Importados</span>
-          <span class="badge badge-success">✓ Transferidos</span>
+          <span class="badge badge-success"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Transferidos</span>
         </div>
         <div class="kpi-value success">__IMPORTED_COUNT__</div>
         <div class="kpi-sub">__IMPORTED_PCT__ del total de elementos procesados</div>
@@ -759,7 +874,7 @@ fn get_html_template() -> &'static str {
       <div class="kpi-card kpi-duplicates">
         <div class="kpi-title">
           <span>Duplicados Omitidos</span>
-          <span class="badge badge-duplicate">⧉ Conservados</span>
+          <span class="badge badge-duplicate"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Conservados</span>
         </div>
         <div class="kpi-value cyan">__DUPLICATES_COUNT__</div>
         <div class="kpi-sub">__DUPLICATES_PCT__ detectados por Message-ID / Hash</div>
@@ -768,7 +883,7 @@ fn get_html_template() -> &'static str {
       <div class="kpi-card kpi-errors">
         <div class="kpi-title">
           <span>Errores de Lectura</span>
-          <span class="badge badge-error">⚠ Incidentes</span>
+          <span class="badge badge-error"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Incidentes</span>
         </div>
         <div class="kpi-value danger">__ERRORS_COUNT__</div>
         <div class="kpi-sub">__ERRORS_PCT__ de fallos MAPI registrados</div>
@@ -777,7 +892,7 @@ fn get_html_template() -> &'static str {
       <div class="kpi-card kpi-target">
         <div class="kpi-title">
           <span>Buzón(es) Destino</span>
-          <span class="badge badge-duplicate">MAPI Store</span>
+          <span class="badge badge-duplicate"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> MAPI Store</span>
         </div>
         <div class="kpi-value purple">__MAILBOX_NAME__</div>
         <div class="kpi-sub">Modo: <strong>__TRANSFER_MODE__</strong></div>
@@ -804,17 +919,32 @@ fn get_html_template() -> &'static str {
 
     <!-- Navigation Tabs -->
     <nav class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('tab-summary')">◈ Resumen & Auditoría</button>
-      <button class="tab-btn" onclick="switchTab('tab-folders')">📁 Carpetas Importadas <span class="tab-badge" id="folderTabCount">0</span></button>
-      <button class="tab-btn" onclick="switchTab('tab-emails')">✉ Explorador de Correos <span class="tab-badge" id="emailTabCount">0</span></button>
-      <button class="tab-btn" onclick="switchTab('tab-logs')">📜 Registro de Telemetría <span class="tab-badge" id="logTabCount">0</span></button>
+      <button class="tab-btn active" onclick="switchTab('tab-summary')">
+        <svg class="icon icon-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 22 12 12 22 2 12"/></svg>
+        Resumen &amp; Auditoría
+      </button>
+      <button class="tab-btn" onclick="switchTab('tab-folders')">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        Carpetas Importadas <span class="tab-badge" id="folderTabCount">0</span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('tab-emails')">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        Explorador de Correos <span class="tab-badge" id="emailTabCount">0</span>
+      </button>
+      <button class="tab-btn" onclick="switchTab('tab-logs')">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        Registro de Telemetría <span class="tab-badge" id="logTabCount">0</span>
+      </button>
     </nav>
 
     <!-- TAB 1: Resumen & Auditoría -->
     <section id="tab-summary" class="tab-content active">
       <div class="table-card" style="margin-bottom: 2rem;">
         <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);">
-          <h2 style="font-size: 1.15rem; color: var(--cyan);">📁 Archivos PST Procesados en la Sesión</h2>
+          <h2 style="font-size: 1.15rem; color: var(--cyan); display: flex; align-items: center; gap: 0.5rem;">
+            <svg class="icon icon-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            Archivos PST Procesados en la Sesión
+          </h2>
         </div>
         <div class="table-responsive">
           <table>
@@ -835,7 +965,10 @@ fn get_html_template() -> &'static str {
 
       <div class="audit-grid">
         <div class="info-card">
-          <h3>⚙ Políticas de Transferencia</h3>
+          <h3>
+            <svg class="icon icon-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Políticas de Transferencia
+          </h3>
           <div class="info-row">
             <span class="info-label">Acción sobre el Correo:</span>
             <span class="info-val">__TRANSFER_MODE__</span>
@@ -855,7 +988,10 @@ fn get_html_template() -> &'static str {
         </div>
 
         <div class="info-card">
-          <h3>🛡 Seguridad & Rendimiento MAPI</h3>
+          <h3>
+            <svg class="icon icon-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Seguridad &amp; Rendimiento MAPI
+          </h3>
           <div class="info-row">
             <span class="info-label">Throttling Adaptativo:</span>
             <span class="info-val">__THROTTLING_INFO__</span>
@@ -880,9 +1016,13 @@ fn get_html_template() -> &'static str {
     <section id="tab-folders" class="tab-content">
       <div class="filter-panel">
         <div class="search-group">
-          <span class="search-icon">🔍</span>
+          <span class="search-icon-wrapper">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
           <input type="text" id="folderSearch" class="search-input" placeholder="Buscar carpeta origen, PST o ruta de destino..." oninput="onFolderSearchChange()">
-          <button id="folderSearchClear" class="search-clear" onclick="clearFolderSearch()">✕</button>
+          <button id="folderSearchClear" class="search-clear" onclick="clearFolderSearch()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
         <div style="font-size: 0.85rem; color: var(--text-muted);">
           Mostrando <strong id="folderMatchCount" style="color: var(--cyan);">0</strong> de <span id="folderTotalCount">0</span> carpetas
@@ -914,15 +1054,30 @@ fn get_html_template() -> &'static str {
     <section id="tab-emails" class="tab-content">
       <div class="filter-panel">
         <div class="search-group">
-          <span class="search-icon">🔍</span>
+          <span class="search-icon-wrapper">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
           <input type="text" id="emailSearch" class="search-input" placeholder="Buscar por Asunto / Título del correo, remitente o carpeta..." oninput="onEmailSearchChange()">
-          <button id="emailSearchClear" class="search-clear" onclick="clearEmailSearch()">✕</button>
+          <button id="emailSearchClear" class="search-clear" onclick="clearEmailSearch()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
         <div class="filter-chips">
-          <button class="chip active" id="filter-all" onclick="setEmailStatusFilter('all')">Todos (<span id="count-all">0</span>)</button>
-          <button class="chip" id="filter-imported" onclick="setEmailStatusFilter('Importado')">✓ Importados (<span id="count-imported">0</span>)</button>
-          <button class="chip" id="filter-dup" onclick="setEmailStatusFilter('Duplicado Omitido')">⧉ Duplicados (<span id="count-dup">0</span>)</button>
-          <button class="chip" id="filter-err" onclick="setEmailStatusFilter('Error')">⚠ Errores (<span id="count-err">0</span>)</button>
+          <button class="chip active" id="filter-all" onclick="setEmailStatusFilter('all')">
+            Todos (<span id="count-all">0</span>)
+          </button>
+          <button class="chip" id="filter-imported" onclick="setEmailStatusFilter('Importado')">
+            <svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Importados (<span id="count-imported">0</span>)
+          </button>
+          <button class="chip" id="filter-dup" onclick="setEmailStatusFilter('Duplicado Omitido')">
+            <svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Duplicados (<span id="count-dup">0</span>)
+          </button>
+          <button class="chip" id="filter-err" onclick="setEmailStatusFilter('Error')">
+            <svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Errores (<span id="count-err">0</span>)
+          </button>
         </div>
       </div>
 
@@ -962,9 +1117,15 @@ fn get_html_template() -> &'static str {
               </select>
             </div>
             <div class="page-controls">
-              <button id="prevPageBtn" class="page-btn" onclick="prevEmailPage()">◀ Anterior</button>
+              <button id="prevPageBtn" class="page-btn" onclick="prevEmailPage()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                Anterior
+              </button>
               <span id="pageIndicator" style="line-height: 2; padding: 0 4px;">Página 1</span>
-              <button id="nextPageBtn" class="page-btn" onclick="nextEmailPage()">Siguiente ▶</button>
+              <button id="nextPageBtn" class="page-btn" onclick="nextEmailPage()">
+                Siguiente
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
             </div>
           </div>
         </div>
@@ -975,7 +1136,9 @@ fn get_html_template() -> &'static str {
     <section id="tab-logs" class="tab-content">
       <div class="filter-panel">
         <div class="search-group">
-          <span class="search-icon">🔍</span>
+          <span class="search-icon-wrapper">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
           <input type="text" id="logSearch" class="search-input" placeholder="Filtrar eventos y registros del log..." oninput="onLogSearchChange()">
         </div>
         <div class="filter-chips">
@@ -996,7 +1159,7 @@ fn get_html_template() -> &'static str {
         Generado automáticamente por <strong>Outlook Organizer TS</strong> &bull; Edición Rust 2024
       </div>
       <div>
-        &copy; __YEAR__ <strong>Timeless Support</strong> &bull; Soporte & Infraestructura de TI
+        &copy; __YEAR__ <strong>Timeless Support</strong> &bull; Soporte &amp; Infraestructura de TI
       </div>
     </footer>
   </div>
@@ -1023,9 +1186,9 @@ fn get_html_template() -> &'static str {
     }
 
     // Inicializar contadores en badges de navegación
-    document.getElementById("folderTabCount").innerText = folders.length;
-    document.getElementById("emailTabCount").innerText = emails.length;
-    document.getElementById("logTabCount").innerText = logs.length;
+    document.getElementById("folderTabCount").innerText = folders.length.toLocaleString();
+    document.getElementById("emailTabCount").innerText = emails.length.toLocaleString();
+    document.getElementById("logTabCount").innerText = logs.length.toLocaleString();
 
     // Estado de Pestañas
     function switchTab(tabId) {
@@ -1077,14 +1240,19 @@ fn get_html_template() -> &'static str {
         return;
       }
 
+      const folderSvg = `<svg class="cell-svg" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+      const arrowRightSvg = `<svg class="path-arrow" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`;
+      const arrowDestSvg = `<svg class="path-arrow" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>`;
+      const checkSvg = `<svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`;
+
       tbody.innerHTML = filtered.map(f => `
         <tr>
-          <td><span style="color: var(--cyan);">📁</span> <strong>${escapeHtml(f.pst_name)}</strong></td>
-          <td><span style="color: var(--accent);">▸</span> ${escapeHtml(f.source_folder)}</td>
-          <td><span style="color: var(--success);">↳</span> ${escapeHtml(f.dest_folder)}</td>
+          <td>${folderSvg} <strong>${escapeHtml(f.pst_name)}</strong></td>
+          <td>${arrowRightSvg} ${escapeHtml(f.source_folder)}</td>
+          <td>${arrowDestSvg} ${escapeHtml(f.dest_folder)}</td>
           <td><strong>${f.total_items.toLocaleString()}</strong> correos</td>
           <td>${f.size_mb.toFixed(1)} MB</td>
-          <td><span class="badge badge-success">✓ ${escapeHtml(f.status || 'Completado')}</span></td>
+          <td><span class="badge badge-success">${checkSvg} ${escapeHtml(f.status || 'Completado')}</span></td>
         </tr>
       `).join("");
     }
@@ -1177,7 +1345,6 @@ fn get_html_template() -> &'static str {
     }
 
     function renderEmailsTable() {
-      // Conteo general por status
       let countAll = emails.length;
       let countImported = 0;
       let countDup = 0;
@@ -1190,10 +1357,10 @@ fn get_html_template() -> &'static str {
         else if (st === "Error") countErr++;
       }
 
-      document.getElementById("count-all").innerText = countAll;
-      document.getElementById("count-imported").innerText = countImported;
-      document.getElementById("count-dup").innerText = countDup;
-      document.getElementById("count-err").innerText = countErr;
+      document.getElementById("count-all").innerText = countAll.toLocaleString();
+      document.getElementById("count-imported").innerText = countImported.toLocaleString();
+      document.getElementById("count-dup").innerText = countDup.toLocaleString();
+      document.getElementById("count-err").innerText = countErr.toLocaleString();
 
       const q = (document.getElementById("emailSearch").value || "").trim().toLowerCase();
 
@@ -1239,16 +1406,22 @@ fn get_html_template() -> &'static str {
         return;
       }
 
+      const checkSvg = `<svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`;
+      const dupSvg = `<svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+      const errSvg = `<svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+      const arrowRightSvg = `<svg class="path-arrow" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>`;
+      const arrowDestSvg = `<svg class="path-arrow" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>`;
+
       tbody.innerHTML = pageItems.map((item, idx) => {
         const itemNumber = startIndex + idx + 1;
         let badgeClass = "badge-success";
-        let badgeIcon = "✓";
+        let badgeIcon = checkSvg;
         if (item.status === "Duplicado Omitido") {
           badgeClass = "badge-duplicate";
-          badgeIcon = "⧉";
+          badgeIcon = dupSvg;
         } else if (item.status === "Error") {
           badgeClass = "badge-error";
-          badgeIcon = "⚠";
+          badgeIcon = errSvg;
         }
 
         const highlightedSubject = highlightText(item.subject || "(Sin Asunto)", q);
@@ -1261,8 +1434,8 @@ fn get_html_template() -> &'static str {
             <td><strong>${highlightedSubject}</strong></td>
             <td class="muted-cell">${highlightedSender}</td>
             <td class="muted-cell" style="white-space: nowrap;">${escapeHtml(item.date || '-')}</td>
-            <td><span style="color: var(--accent);">▸</span> ${escapeHtml(item.source_folder || '-')}</td>
-            <td><span style="color: var(--success);">↳</span> ${escapeHtml(item.dest_folder || '-')}</td>
+            <td>${arrowRightSvg} ${escapeHtml(item.source_folder || '-')}</td>
+            <td>${arrowDestSvg} ${escapeHtml(item.dest_folder || '-')}</td>
             <td class="muted-cell">${sizeStr}</td>
             <td><span class="badge ${badgeClass}">${badgeIcon} ${escapeHtml(item.status)}</span></td>
           </tr>
@@ -1443,5 +1616,23 @@ mod tests {
         let _ = generate_html_report(&state, Some(preview_path));
 
         let _ = fs::remove_file(test_output);
+    }
+
+    #[test]
+    fn test_deserialize_real_temp_items() {
+        let temp_items = std::env::temp_dir().join("outlook_organizer_items.json");
+        if temp_items.exists() {
+            let content = fs::read_to_string(&temp_items).unwrap();
+            let trimmed = content.trim_start_matches('\u{feff}');
+            match serde_json::from_str::<Vec<crate::app::ProcessedEmailItem>>(trimmed) {
+                Ok(items) => {
+                    println!("SUCCESS: Deserialized {} items!", items.len());
+                    assert!(!items.is_empty());
+                }
+                Err(e) => {
+                    panic!("DESERIALIZATION ERROR: {:?}", e);
+                }
+            }
+        }
     }
 }
