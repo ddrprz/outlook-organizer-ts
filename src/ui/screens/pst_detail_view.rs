@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    app::{AppState, PstDetail, PstDetailModalState, PstFolderItemType},
+    app::{AppState, PstDetail, PstDetailModalState},
     ui::theme::Theme,
 };
 
@@ -171,81 +171,97 @@ fn render_header_card(f: &mut Frame, area: Rect, detail: &PstDetail) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, detail: &PstDetail) {
+fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: &PstDetail) {
     let explorer = &state.pst_folder_explorer;
-    let entries = explorer.current_entries(detail);
-
-    let parent_path_display = explorer
-        .current_parent
-        .as_deref()
-        .map(|p| format!(" [Ruta: \\{}]", p))
-        .unwrap_or_else(|| " [Raíz del PST]".to_string());
+    let visible = explorer.visible_indices();
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(format!(" 📁 Explorador de Carpetas{} ", parent_path_display));
+        .title(" 📁 Jerarquía de Carpetas (Menús Desplegables) ");
 
-    let header_cells = ["Sel", "Carpeta / Directorio", "Correos", "Tamaño"]
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(4),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let header_cells = ["Sel", "Carpeta / Subcarpeta", "Correos", "Tamaño"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)));
     let header = Row::new(header_cells).height(1).bottom_margin(1);
 
-    let rows = entries.iter().enumerate().map(|(idx, entry)| {
-        let is_cursor = idx == explorer.selected_idx;
-        let is_checked = explorer.checked_folder_path.as_deref() == Some(&entry.path);
+    let rows: Vec<Row> = if visible.is_empty() {
+        vec![Row::new(vec![
+            Cell::from(" "),
+            Cell::from("No hay carpetas detectadas en este PST"),
+            Cell::from("-"),
+            Cell::from("-"),
+        ])]
+    } else {
+        visible
+            .iter()
+            .enumerate()
+            .map(|(v_idx, &node_idx)| {
+                let node = &explorer.nodes[node_idx];
+                let is_cursor = v_idx == explorer.selected_idx;
+                let is_checked = explorer.checked_folder_path.as_deref() == Some(&node.path);
 
-        let sel_cell = match entry.item_type {
-            PstFolderItemType::ParentDir => Cell::from(" "),
-            PstFolderItemType::Folder => {
-                if is_checked {
-                    Cell::from("[x]").style(Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
+                let sel_cell = if is_checked {
+                    Cell::from("[x]").style(
+                        Style::default()
+                            .fg(Theme::SUCCESS)
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else {
                     Cell::from("[ ]").style(Style::default().fg(Theme::TEXT_MUTED))
-                }
-            }
-        };
+                };
 
-        let name_text = match entry.item_type {
-            PstFolderItemType::ParentDir => ".. (Subir de nivel)".to_string(),
-            PstFolderItemType::Folder => {
-                if entry.has_children {
-                    format!("📁 {} ▶", entry.name)
+                let indent = "   ".repeat(node.level);
+                let icon_str = if node.has_children {
+                    if node.expanded { "▼ 📁 " } else { "▶ 📁 " }
+                } else if node.level > 0 {
+                    "└─ 📁 "
                 } else {
-                    format!("📁 {}", entry.name)
-                }
-            }
-        };
-        let name_cell = Cell::from(name_text);
+                    "📁 "
+                };
 
-        let count_text = match entry.item_type {
-            PstFolderItemType::ParentDir => "-".to_string(),
-            PstFolderItemType::Folder => format!("{}", entry.count),
-        };
-        let count_cell = Cell::from(count_text);
+                let name_text = format!("{}{}{}", indent, icon_str, node.name);
+                let name_cell = Cell::from(name_text);
 
-        let size_text = match entry.item_type {
-            PstFolderItemType::ParentDir => "-".to_string(),
-            PstFolderItemType::Folder => {
-                if entry.size_mb > 0.0 {
-                    format!("{:.1} MB", entry.size_mb)
-                } else {
+                let count_cell = Cell::from(format!("{}", node.count));
+
+                let size_text = if node.size_mb <= 0.0 {
                     "0 MB".to_string()
-                }
-            }
-        };
-        let size_cell = Cell::from(size_text);
+                } else if node.size_mb >= 1024.0 {
+                    format!("{:.1} GB", node.size_mb / 1024.0)
+                } else {
+                    format!("{:.1} MB", node.size_mb)
+                };
+                let size_cell = Cell::from(size_text);
 
-        let row = Row::new(vec![sel_cell, name_cell, count_cell, size_cell]);
-        if is_cursor {
-            row.style(Style::default().bg(Theme::BG_CARD).fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD))
-        } else if is_checked {
-            row.style(Style::default().fg(Theme::SUCCESS))
-        } else {
-            row
-        }
-    });
+                let row = Row::new(vec![sel_cell, name_cell, count_cell, size_cell]);
+                if is_cursor {
+                    row.style(
+                        Style::default()
+                            .bg(Theme::BG_CARD)
+                            .fg(Theme::TEXT_MAIN)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else if is_checked {
+                    row.style(Style::default().fg(Theme::SUCCESS))
+                } else {
+                    row
+                }
+            })
+            .collect()
+    };
 
     let table = Table::new(
         rows,
@@ -256,10 +272,35 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, detail: &
             Constraint::Length(10),
         ],
     )
-    .header(header)
-    .block(block);
+    .header(header);
 
-    f.render_widget(table, area);
+    f.render_widget(table, chunks[0]);
+
+    // Subtítulo de atajos para el menú desplegable
+    let hint_spans = vec![
+        Span::styled(
+            " [Enter/E/→] ",
+            Style::default()
+                .fg(Theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Desplegar ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled(
+            "• [←] ",
+            Style::default()
+                .fg(Theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Plegar ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled(
+            "• [Espacio] ",
+            Style::default()
+                .fg(Theme::SUCCESS)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("Aislar Métricas", Style::default().fg(Theme::TEXT_MUTED)),
+    ];
+    f.render_widget(Paragraph::new(Line::from(hint_spans)), chunks[1]);
 }
 
 fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &PstDetail) {

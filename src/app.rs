@@ -131,28 +131,23 @@ pub struct PstDetail {
     pub sizes_by_month_mb: std::collections::BTreeMap<String, f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PstFolderItemType {
-    ParentDir,
-    Folder,
-}
-
 #[derive(Debug, Clone, PartialEq)]
-pub struct PstFolderEntry {
+pub struct PstFolderTreeNode {
     pub name: String,
     pub path: String,
     pub parent_path: Option<String>,
     pub count: usize,
     pub size_mb: f64,
+    pub expanded: bool,
+    pub level: usize,
     pub has_children: bool,
-    pub item_type: PstFolderItemType,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct PstFolderExplorerState {
-    pub current_parent: Option<String>, // None = raíz de carpetas del PST
+    pub nodes: Vec<PstFolderTreeNode>,
     pub selected_idx: usize,
-    pub checked_folder_path: Option<String>, // Carpeta seleccionada con Espacio
+    pub checked_folder_path: Option<String>, // Carpeta seleccionada con Espacio para aislar métricas
 }
 
 impl PstFolderExplorerState {
@@ -161,51 +156,128 @@ impl PstFolderExplorerState {
     }
 
     pub fn reset(&mut self) {
-        self.current_parent = None;
+        self.nodes.clear();
         self.selected_idx = 0;
         self.checked_folder_path = None;
     }
 
-    /// Obtiene las entradas a listar en el nivel actual
-    pub fn current_entries(&self, detail: &PstDetail) -> Vec<PstFolderEntry> {
-        let mut entries = Vec::new();
+    /// Construye la jerarquía en árbol para los menús desplegables a partir del detalle del PST
+    pub fn build_from_detail(&mut self, detail: &PstDetail) {
+        self.nodes.clear();
+        self.selected_idx = 0;
+        self.checked_folder_path = None;
 
-        // Si estamos dentro de una subcarpeta, la primera opción es '..' para subir de nivel
-        if let Some(ref parent) = self.current_parent {
-            entries.push(PstFolderEntry {
-                name: ".. (Subir de nivel)".to_string(),
-                path: parent.clone(),
-                parent_path: None,
-                count: 0,
-                size_mb: 0.0,
-                has_children: false,
-                item_type: PstFolderItemType::ParentDir,
-            });
+        if detail.folders.is_empty() {
+            return;
         }
 
-        // Buscar las carpetas cuyo parent_path coincida con current_parent
+        let mut folder_map: std::collections::HashMap<String, PstFolderDetail> = std::collections::HashMap::new();
         for f in &detail.folders {
-            let is_match = match (&self.current_parent, &f.parent_path) {
-                (None, None) => true,
-                (None, Some(p)) if p.is_empty() => true,
-                (Some(curr), Some(p)) => curr == p,
-                _ => false,
-            };
+            let f_path = if f.path.is_empty() { f.name.clone() } else { f.path.clone() };
+            folder_map.insert(f_path, f.clone());
+        }
 
-            if is_match {
-                entries.push(PstFolderEntry {
+        Self::append_nodes_recursive(&folder_map, None, 0, &mut self.nodes);
+
+        // Fallback de seguridad: si alguna carpeta quedó fuera de la jerarquía, agregarla a la raíz
+        for f in &detail.folders {
+            let f_path = if f.path.is_empty() { &f.name } else { &f.path };
+            if !self.nodes.iter().any(|n| &n.path == f_path) {
+                let has_sub = f.has_children || folder_map.values().any(|sub| sub.parent_path.as_deref() == Some(f_path));
+                self.nodes.push(PstFolderTreeNode {
                     name: f.name.clone(),
-                    path: if f.path.is_empty() { f.name.clone() } else { f.path.clone() },
-                    parent_path: f.parent_path.clone(),
+                    path: f_path.clone(),
+                    parent_path: None,
                     count: f.count,
                     size_mb: f.size_mb,
-                    has_children: f.has_children,
-                    item_type: PstFolderItemType::Folder,
+                    expanded: false,
+                    level: 0,
+                    has_children: has_sub,
                 });
             }
         }
+    }
 
-        entries
+    fn append_nodes_recursive(
+        folder_map: &std::collections::HashMap<String, PstFolderDetail>,
+        parent_path: Option<&str>,
+        level: usize,
+        out: &mut Vec<PstFolderTreeNode>,
+    ) {
+        let mut children: Vec<&PstFolderDetail> = folder_map
+            .values()
+            .filter(|f| {
+                match (&f.parent_path, parent_path) {
+                    (None, None) => true,
+                    (Some(p), None) => p.is_empty(),
+                    (Some(p), Some(target)) => p == target,
+                    _ => false,
+                }
+            })
+            .collect();
+
+        // Orden de carpetas canónicas primero (Bandeja de entrada, Elementos enviados, etc.)
+        children.sort_by(|a, b| {
+            fn folder_priority(name: &str) -> usize {
+                let lower = name.to_lowercase();
+                if lower.contains("bandeja de entrada") || lower == "inbox" {
+                    0
+                } else if lower.contains("elementos enviados") || lower.contains("sent") {
+                    1
+                } else if lower.contains("elementos eliminados") || lower.contains("deleted") || lower.contains("trash") {
+                    9
+                } else {
+                    2
+                }
+            }
+            let p_a = folder_priority(&a.name);
+            let p_b = folder_priority(&b.name);
+            if p_a != p_b {
+                p_a.cmp(&p_b)
+            } else {
+                a.name.cmp(&b.name)
+            }
+        });
+
+        for child in children {
+            let f_path = if child.path.is_empty() { child.name.clone() } else { child.path.clone() };
+            let has_sub = child.has_children || folder_map.values().any(|f| f.parent_path.as_deref() == Some(&f_path));
+
+            out.push(PstFolderTreeNode {
+                name: child.name.clone(),
+                path: f_path.clone(),
+                parent_path: parent_path.map(|s| s.to_string()),
+                count: child.count,
+                size_mb: child.size_mb,
+                expanded: false,
+                level,
+                has_children: has_sub,
+            });
+
+            Self::append_nodes_recursive(folder_map, Some(&f_path), level + 1, out);
+        }
+    }
+
+    /// Retorna los índices en `self.nodes` de los nodos visibles (cuyos ancestros están desplegados)
+    pub fn visible_indices(&self) -> Vec<usize> {
+        let mut visible = Vec::new();
+        let mut expanded_paths = std::collections::HashSet::new();
+
+        for (i, node) in self.nodes.iter().enumerate() {
+            let is_visible = match &node.parent_path {
+                None => true,
+                Some(p) if p.is_empty() => true,
+                Some(p) => expanded_paths.contains(p.as_str()),
+            };
+
+            if is_visible {
+                visible.push(i);
+                if node.expanded {
+                    expanded_paths.insert(node.path.as_str());
+                }
+            }
+        }
+        visible
     }
 
     pub fn move_up(&mut self) {
@@ -214,69 +286,87 @@ impl PstFolderExplorerState {
         }
     }
 
-    pub fn move_down(&mut self, max_entries: usize) {
-        if max_entries > 0 && self.selected_idx + 1 < max_entries {
+    pub fn move_down(&mut self) {
+        let vis_len = self.visible_indices().len();
+        if vis_len > 0 && self.selected_idx + 1 < vis_len {
             self.selected_idx += 1;
         }
     }
 
-    pub fn navigate_into(&mut self, detail: &PstDetail) -> bool {
-        let entries = self.current_entries(detail);
-        if let Some(entry) = entries.get(self.selected_idx) {
-            match entry.item_type {
-                PstFolderItemType::ParentDir => {
-                    self.navigate_up(detail);
-                    return true;
-                }
-                PstFolderItemType::Folder => {
-                    if entry.has_children {
-                        self.current_parent = Some(entry.path.clone());
-                        self.selected_idx = 0;
-                        return true;
-                    }
-                }
+    /// Alterna el menú desplegable (expande o pliega las subcarpetas del nodo actual)
+    pub fn toggle_expand(&mut self) {
+        let visible = self.visible_indices();
+        if let Some(&node_idx) = visible.get(self.selected_idx)
+            && let Some(node) = self.nodes.get_mut(node_idx)
+            && node.has_children
+        {
+            node.expanded = !node.expanded;
+        }
+        self.clamp_selection();
+    }
+
+    /// Despliega el menú de subcarpetas
+    pub fn expand(&mut self) {
+        let visible = self.visible_indices();
+        if let Some(&node_idx) = visible.get(self.selected_idx) {
+            if let Some(node) = self.nodes.get_mut(node_idx)
+                && node.has_children && !node.expanded
+            {
+                node.expanded = true;
+                return;
+            }
+            if self.selected_idx + 1 < visible.len() {
+                self.selected_idx += 1;
             }
         }
-        false
     }
 
-    pub fn navigate_up(&mut self, detail: &PstDetail) -> bool {
-        if let Some(ref current) = self.current_parent {
-            // Buscar cuál es el padre del current_parent
-            let parent_of_current = detail
-                .folders
-                .iter()
-                .find(|f| {
-                    let f_path = if f.path.is_empty() { &f.name } else { &f.path };
-                    f_path == current
+    /// Pliega el menú de subcarpetas o salta al nodo padre
+    pub fn collapse(&mut self) {
+        let visible = self.visible_indices();
+        if let Some(&node_idx) = visible.get(self.selected_idx) {
+            if let Some(node) = self.nodes.get_mut(node_idx)
+                && node.has_children && node.expanded
+            {
+                node.expanded = false;
+                self.clamp_selection();
+                return;
+            }
+            // Si ya está plegado o no tiene hijos, intentar moverse al nodo padre
+            if let Some(node) = self.nodes.get(node_idx)
+                && let Some(ref parent_path) = node.parent_path
+                && let Some(parent_pos) = visible.iter().position(|&idx| {
+                    self.nodes.get(idx).map(|n| &n.path == parent_path).unwrap_or(false)
                 })
-                .and_then(|f| f.parent_path.clone())
-                .filter(|p| !p.is_empty());
+            {
+                self.selected_idx = parent_pos;
+            }
+        }
+        self.clamp_selection();
+    }
 
-            self.current_parent = parent_of_current;
-            self.selected_idx = 0;
-            true
-        } else {
-            false
+    fn clamp_selection(&mut self) {
+        let vis = self.visible_indices();
+        if !vis.is_empty() && self.selected_idx >= vis.len() {
+            self.selected_idx = vis.len() - 1;
         }
     }
 
-    /// Alterna la selección con la tecla Espacio
-    pub fn toggle_select(&mut self, detail: &PstDetail) {
-        let entries = self.current_entries(detail);
-        if let Some(entry) = entries.get(self.selected_idx)
-            && entry.item_type == PstFolderItemType::Folder
+    /// Alterna la selección con la tecla Espacio para aislar las métricas de la carpeta enfocada
+    pub fn toggle_select(&mut self) {
+        let visible = self.visible_indices();
+        if let Some(&node_idx) = visible.get(self.selected_idx)
+            && let Some(node) = self.nodes.get(node_idx)
         {
-            if self.checked_folder_path.as_deref() == Some(&entry.path) {
-                // Si ya estaba seleccionada, deseleccionar para volver al resumen general
+            if self.checked_folder_path.as_deref() == Some(&node.path) {
                 self.checked_folder_path = None;
             } else {
-                self.checked_folder_path = Some(entry.path.clone());
+                self.checked_folder_path = Some(node.path.clone());
             }
         }
     }
 
-    /// Obtiene los detalles de la carpeta seleccionada actualmente (si hay una)
+    /// Obtiene los detalles de la carpeta seleccionada actualmente (si hay una aislada)
     pub fn get_selected_folder_stats<'a>(&self, detail: &'a PstDetail) -> Option<&'a PstFolderDetail> {
         if let Some(ref path) = self.checked_folder_path {
             detail.folders.iter().find(|f| {
@@ -1097,6 +1187,7 @@ impl AppState {
         self.pst_folder_explorer.reset();
         self.step = WizardStep::PstDetailView;
         if let Some(cached) = self.pst_details_cache.get(&path) {
+            self.pst_folder_explorer.build_from_detail(cached);
             self.pst_detail_modal = PstDetailModalState::Loaded(Box::new(cached.clone()));
             false
         } else {
@@ -1640,40 +1731,51 @@ mod tests {
         };
 
         let mut explorer = PstFolderExplorerState::new();
+        explorer.build_from_detail(&detail);
 
-        // Nivel raíz: debe listar 2 carpetas principales
-        let root_entries = explorer.current_entries(&detail);
-        assert_eq!(root_entries.len(), 2);
-        assert_eq!(root_entries[0].name, "Bandeja de entrada");
-        assert_eq!(root_entries[1].name, "Elementos enviados");
+        // Nivel inicial (plegado): debe listar 2 carpetas principales visibles
+        let root_indices = explorer.visible_indices();
+        assert_eq!(root_indices.len(), 2);
+        assert_eq!(explorer.nodes[root_indices[0]].name, "Bandeja de entrada");
+        assert_eq!(explorer.nodes[root_indices[1]].name, "Elementos enviados");
 
-        // Seleccionar Bandeja de entrada con Espacio
-        explorer.toggle_select(&detail);
+        // Seleccionar Bandeja de entrada con Espacio para aislar métricas
+        explorer.toggle_select();
         assert_eq!(explorer.checked_folder_path, Some("Bandeja de entrada".to_string()));
         let selected_stats = explorer.get_selected_folder_stats(&detail);
         assert!(selected_stats.is_some());
         assert_eq!(selected_stats.unwrap().count, 300);
 
         // Deseleccionar con Espacio nuevamente
-        explorer.toggle_select(&detail);
+        explorer.toggle_select();
         assert_eq!(explorer.checked_folder_path, None);
         assert!(explorer.get_selected_folder_stats(&detail).is_none());
 
-        // Entrar con 'E' a Bandeja de entrada
-        let entered = explorer.navigate_into(&detail);
-        assert!(entered);
-        assert_eq!(explorer.current_parent, Some("Bandeja de entrada".to_string()));
+        // Desplegar menú de subcarpetas en Bandeja de entrada con toggle_expand
+        explorer.toggle_expand();
+        assert!(explorer.nodes[0].expanded);
 
-        // En subnivel: debe haber ".. (Subir de nivel)" y "Facturas 2024"
-        let sub_entries = explorer.current_entries(&detail);
-        assert_eq!(sub_entries.len(), 2);
-        assert_eq!(sub_entries[0].item_type, PstFolderItemType::ParentDir);
-        assert_eq!(sub_entries[1].name, "Facturas 2024");
+        // Ahora debe haber 3 nodos visibles: Bandeja de entrada, Facturas 2024 (desplegada) y Elementos enviados
+        let expanded_indices = explorer.visible_indices();
+        assert_eq!(expanded_indices.len(), 3);
+        assert_eq!(explorer.nodes[expanded_indices[1]].name, "Facturas 2024");
+        assert_eq!(explorer.nodes[expanded_indices[1]].level, 1);
 
-        // Subir de nivel con navigate_up
-        let went_up = explorer.navigate_up(&detail);
-        assert!(went_up);
-        assert_eq!(explorer.current_parent, None);
+        // Bajar hacia la subcarpeta y aislar sus métricas
+        explorer.move_down();
+        assert_eq!(explorer.selected_idx, 1);
+        explorer.toggle_select();
+        assert_eq!(explorer.checked_folder_path, Some(r"Bandeja de entrada\Facturas 2024".to_string()));
+        let sub_stats = explorer.get_selected_folder_stats(&detail);
+        assert!(sub_stats.is_some());
+        assert_eq!(sub_stats.unwrap().count, 150);
+
+        // Plegar menú con collapse
+        explorer.collapse(); // primero salta al padre
+        assert_eq!(explorer.selected_idx, 0);
+        explorer.collapse(); // pliega el menú
+        assert!(!explorer.nodes[0].expanded);
+        assert_eq!(explorer.visible_indices().len(), 2);
     }
 
     #[test]
