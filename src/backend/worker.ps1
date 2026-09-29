@@ -404,6 +404,9 @@ try {
             item_total   = $totalPstItems
             speed_mps    = 0.0
             eta_seconds  = 0
+            imported     = $totalImported
+            duplicates   = $totalDuplicates
+            errors       = $totalErrors
         }
 
         $pstProcessedCount = 0
@@ -532,45 +535,49 @@ try {
                                 size_kb       = $itemKb
                             })
                         }
-                        continue
-                    }
-
-                    # Transferencia: Copiar (predeterminado) o Mover
-                    $itemKb = 0.0
-                    try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
-
-                    if ($config -and $config.transfer_mode -eq "Move") {
-                        $item.Move($finalDest) | Out-Null
-                        $totalImported++
-                        $pstProcessedCount++
                     } else {
-                        $copy = $item.Copy()
-                        $copy.Move($finalDest) | Out-Null
-                        if ($null -ne $copy) {
-                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                        # Transferencia: Copiar (predeterminado) o Mover
+                        $itemKb = 0.0
+                        try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
+
+                        if ($config -and $config.transfer_mode -eq "Move") {
+                            $item.Move($finalDest) | Out-Null
+                            $totalImported++
+                            $pstProcessedCount++
+                        } else {
+                            $copy = $item.Copy()
+                            $copy.Move($finalDest) | Out-Null
+                            if ($null -ne $copy) {
+                                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                            }
+                            $totalImported++
+                            $pstProcessedCount++
                         }
-                        $totalImported++
-                        $pstProcessedCount++
-                    }
 
-                    if ($processedItemsList.Count -lt 5000) {
-                        $processedItemsList.Add(@{
-                            subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
-                            sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                            date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
-                            source_folder = $cf.RelPath
-                            dest_folder   = $finalDest.Name
-                            pst_name      = $pstName
-                            status        = "Importado"
-                            size_kb       = $itemKb
-                        })
-                    }
+                        if ($processedItemsList.Count -lt 5000) {
+                            $processedItemsList.Add(@{
+                                subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                                date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
+                                source_folder = $cf.RelPath
+                                dest_folder   = $finalDest.Name
+                                pst_name      = $pstName
+                                status        = "Importado"
+                                size_kb       = $itemKb
+                            })
+                        }
 
-                    # Registrar clave para deduplicar futuros correos de la misma sesión
-                    if ($mid -and $mid.Trim() -ne "") {
-                        [void]$folderSet.Add($mid.Trim())
+                        # Registrar clave para deduplicar futuros correos de la misma sesión
+                        if ($mid -and $mid.Trim() -ne "") {
+                            [void]$folderSet.Add($mid.Trim())
+                        }
+                        [void]$folderSet.Add($cKey)
+
+                        # Throttling adaptativo
+                        if ($config -and $config.adaptive_throttling) {
+                            Start-Sleep -Milliseconds 12
+                        }
                     }
-                    [void]$folderSet.Add($cKey)
 
                     # Telemetría en vivo (cada 5 items o cada 250ms)
                     $now = [DateTime]::UtcNow
@@ -589,13 +596,11 @@ try {
                             item_total   = $totalPstItems
                             speed_mps    = $speed
                             eta_seconds  = $eta
+                            imported     = $totalImported
+                            duplicates   = $totalDuplicates
+                            errors       = $totalErrors
                         }
                         $lastTelemetryTime = $now
-                    }
-
-                    # Throttling adaptativo
-                    if ($config -and $config.adaptive_throttling) {
-                        Start-Sleep -Milliseconds 12
                     }
 
                     if ($pstProcessedCount % 50 -eq 0) {
@@ -616,6 +621,30 @@ try {
                             status        = "Error"
                             size_kb       = 0.0
                         })
+                    }
+
+                    # Telemetría en vivo tras error
+                    $now = [DateTime]::UtcNow
+                    if ($pstProcessedCount % 5 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 250 -or $pstProcessedCount -eq $totalPstItems) {
+                        $elapsedSec = ($now - $startTime).TotalSeconds
+                        $speed = if ($elapsedSec -gt 0) { [math]::Round($totalImported / $elapsedSec, 1) } else { 0.0 }
+                        $remaining = [math]::Max(0, $totalPstItems - $pstProcessedCount)
+                        $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
+
+                        Send-Telemetry @{
+                            type         = "progress"
+                            pst_index    = $pIdx + 1
+                            pst_total    = $totalPsts
+                            pst_name     = $pstName
+                            item_current = $pstProcessedCount
+                            item_total   = $totalPstItems
+                            speed_mps    = $speed
+                            eta_seconds  = $eta
+                            imported     = $totalImported
+                            duplicates   = $totalDuplicates
+                            errors       = $totalErrors
+                        }
+                        $lastTelemetryTime = $now
                     }
                 }
                 finally {

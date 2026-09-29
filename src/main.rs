@@ -73,6 +73,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     item_total,
                     speed_mps,
                     eta_seconds,
+                    imported,
+                    duplicates,
+                    errors,
                 } => {
                     state.progress.current_pst_idx = pst_index;
                     state.progress.total_psts = pst_total;
@@ -83,6 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.progress.global_items_total = item_total;
                     state.progress.speed_mps = speed_mps;
                     state.progress.eta_seconds = eta_seconds;
+                    state.progress.imported_count = imported;
+                    state.progress.duplicates_skipped = duplicates;
+                    state.progress.error_count = errors;
                 }
                 BackendMessage::Log { message, .. } => {
                     state.log_event(message);
