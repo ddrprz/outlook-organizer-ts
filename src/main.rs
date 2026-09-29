@@ -1082,7 +1082,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
             ("Esc", "Atrás"),
             ("q", "Salir"),
         ],
-        WizardStep::Execution => vec![("Esc", "Parada Segura")],
+        WizardStep::Execution => vec![("Esc/Q", "Parada Segura")],
         WizardStep::Completion => vec![("H", "Informe HTML"), ("Enter/q", "Salir")],
         WizardStep::PstDetailView => vec![
             ("↑/↓", "Navegar"),
