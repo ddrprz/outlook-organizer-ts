@@ -66,13 +66,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 BackendMessage::Progress {
+                    pst_index,
+                    pst_total,
                     pst_name,
                     item_current,
                     item_total,
                     speed_mps,
                     eta_seconds,
-                    ..
                 } => {
+                    state.progress.current_pst_idx = pst_index;
+                    state.progress.total_psts = pst_total;
                     state.progress.current_pst_name = pst_name;
                     state.progress.current_pst_items = item_current;
                     state.progress.current_pst_total = item_total;
