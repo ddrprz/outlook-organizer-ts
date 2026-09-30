@@ -6,7 +6,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::{app::AppState, ui::theme::Theme};
+use crate::{
+    app::AppState,
+    ui::{format::format_size_mb, theme::Theme},
+};
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let has_warning = state.pst_warning_notice.is_some();
@@ -72,7 +75,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         });
 
         let name_cell = Cell::from(item.name.as_str());
-        let size_cell = Cell::from(format!("{:.1} MB", item.size_mb));
+        let size_cell = Cell::from(format_size_mb(item.size_mb));
         let path_cell = Cell::from(item.path.as_str());
 
         let row = Row::new(vec![sel_cell, name_cell, size_cell, path_cell]);

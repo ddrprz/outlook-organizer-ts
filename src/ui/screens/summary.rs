@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::{AppState, RoutingGranularity, TransferMode},
-    ui::theme::Theme,
+    ui::{format::format_size_mb, theme::Theme},
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -123,7 +123,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Line::from(vec![
             Span::styled("• PSTs de Origen:      ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                format!("{} archivos seleccionados ({:.1} MB / {:.2} GB total)", selected_psts_count, total_size_mb, total_size_mb / 1024.0),
+                format!("{} archivos seleccionados ({})", selected_psts_count, format_size_mb(total_size_mb)),
                 Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
             ),
         ]),

@@ -8,7 +8,10 @@ use ratatui::{
 
 use crate::{
     app::{AppState, RoutingGranularity, TransferMode},
-    ui::theme::Theme,
+    ui::{
+        format::{format_duration_compact, format_duration_verbose},
+        theme::Theme,
+    },
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -140,12 +143,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let bottom_area = if is_single_pst {
         // --- CASO 1: UN SOLO PST -> UNA SOLA BARRA MODERNA Y COMPLETA ---
         let label = format!(
-            " {}%  •  {}/{} correos  •  Velocidad: {:.1} msgs/s  •  ETA: ~{}s ",
+            " {}%  •  {}/{} correos  •  Velocidad: {:.1} msgs/s  •  ETA: ~{} ",
             pst_percent,
             progress.current_pst_items,
             progress.current_pst_total,
             progress.speed_mps,
-            progress.eta_seconds
+            format_duration_compact(progress.eta_seconds)
         );
 
         let single_gauge = Gauge::default()
@@ -201,12 +204,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             0
         };
         let global_label = format!(
-            " {}%  •  Total Global: {}/{} correos  •  Vel: {:.1} msgs/s  •  ETA: ~{}s ",
+            " {}%  •  Total Global: {}/{} correos  •  Vel: {:.1} msgs/s  •  ETA: ~{} ",
             global_percent,
             progress.global_items_processed,
             progress.global_items_total,
             progress.speed_mps,
-            progress.eta_seconds
+            format_duration_compact(progress.eta_seconds)
         );
         let global_gauge = Gauge::default()
             .block(
@@ -287,7 +290,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Line::from(vec![
             Span::styled("◷ Tiempo Estimado:   ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                format!("~{} segundos", progress.eta_seconds),
+                format!("~{}", format_duration_verbose(progress.eta_seconds)),
                 Style::default().fg(Theme::ACCENT_PRIMARY),
             ),
         ]),

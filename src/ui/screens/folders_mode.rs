@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::{AppState, CheckboxState, TransferMode},
-    ui::theme::Theme,
+    ui::{format::format_size_mb, theme::Theme},
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -96,13 +96,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     };
 
                     let count_str = format!("{}", node.count);
-                    let size_str = if node.size_mb <= 0.0 {
-                        "0 MB".to_string()
-                    } else if node.size_mb >= 1024.0 {
-                        format!("{:.1} GB", node.size_mb / 1024.0)
-                    } else {
-                        format!("{:.1} MB", node.size_mb)
-                    };
+                    let size_str = format_size_mb(node.size_mb);
 
                     // Anchos de columnas derechas
                     let right_count = format!("{:>7}", count_str);

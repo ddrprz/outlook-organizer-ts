@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::{AppState, RoutingGranularity, TransferMode},
-    ui::theme::Theme,
+    ui::{format::format_size_mb, theme::Theme},
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -421,7 +421,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(
-                format!("{} archivo(s) ({:.1} MB)", selected_psts_count, total_size_mb),
+                format!("{} archivo(s) ({})", selected_psts_count, format_size_mb(total_size_mb)),
                 Style::default().fg(Theme::BRAND_PRIMARY),
             ),
         ]),

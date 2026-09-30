@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::{AppState, PstDetail, PstDetailModalState},
-    ui::theme::Theme,
+    ui::{format::format_size_mb, theme::Theme},
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -157,7 +157,7 @@ fn render_header_card(f: &mut Frame, area: Rect, detail: &PstDetail) {
             Span::styled("Ruta: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format!("📁 {} ", detail.file_path), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(" | Peso Total: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled(format!("{:.1} MB", detail.size_mb), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(format_size_mb(detail.size_mb), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
             Span::styled(" | Total de Correos: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format!("{} correos", detail.total_items), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
         ]),
@@ -237,14 +237,7 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: 
 
                 let count_cell = Cell::from(format!("{}", node.count));
 
-                let size_text = if node.size_mb <= 0.0 {
-                    "0 MB".to_string()
-                } else if node.size_mb >= 1024.0 {
-                    format!("{:.1} GB", node.size_mb / 1024.0)
-                } else {
-                    format!("{:.1} MB", node.size_mb)
-                };
-                let size_cell = Cell::from(size_text);
+                let size_cell = Cell::from(format_size_mb(node.size_mb));
 
                 let row = Row::new(vec![sel_cell, name_cell, count_cell, size_cell]);
                 if is_cursor {
@@ -345,7 +338,7 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
                 Span::styled("Total Correos: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{} ", folder.count), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled("| Tamaño Estimado: ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled(format!("{:.2} MB ", folder.size_mb), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{} ", format_size_mb(folder.size_mb)), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::styled(format!("| Meses con Actividad: {}", month_count), Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(vec![
@@ -394,7 +387,7 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
                 Span::styled("Total Correos PST: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{} ", detail.total_items), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled("| Peso en Disco: ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled(format!("{:.1} MB ", detail.size_mb), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{} ", format_size_mb(detail.size_mb)), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::styled(format!("| Total de Meses: {}", month_count), Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(vec![
@@ -452,7 +445,7 @@ fn render_breakdown_tables(
         Row::new(vec![
             Cell::from(year.as_str()).style(Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Cell::from(format!("{}", count)).style(Style::default().fg(Theme::TEXT_MAIN)),
-            Cell::from(format!("{:.1} MB", size_mb)).style(Style::default().fg(Theme::SUCCESS)),
+            Cell::from(format_size_mb(size_mb)).style(Style::default().fg(Theme::SUCCESS)),
             Cell::from(format!("{:.1}%", pct)).style(Style::default().fg(Theme::BRAND_PRIMARY)),
         ])
     });
@@ -462,7 +455,7 @@ fn render_breakdown_tables(
         [
             Constraint::Length(8),
             Constraint::Length(10),
-            Constraint::Length(11),
+            Constraint::Length(12),
             Constraint::Min(8),
         ],
     )
@@ -477,7 +470,7 @@ fn render_breakdown_tables(
     f.render_widget(year_table, split[0]);
 
     // 2. Tabla de Meses
-    let month_header_cells = ["Mes", "Correos", "Tamaño (MB)"]
+    let month_header_cells = ["Mes", "Correos", "Tamaño"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(Theme::ACCENT_SECONDARY).add_modifier(Modifier::BOLD)));
     let month_header = Row::new(month_header_cells).height(1).bottom_margin(1);
@@ -487,7 +480,7 @@ fn render_breakdown_tables(
         Row::new(vec![
             Cell::from(month.as_str()).style(Style::default().fg(Theme::TEXT_MAIN)),
             Cell::from(format!("{}", count)).style(Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-            Cell::from(format!("{:.2} MB", size_mb)).style(Style::default().fg(Theme::SUCCESS)),
+            Cell::from(format_size_mb(size_mb)).style(Style::default().fg(Theme::SUCCESS)),
         ])
     });
 
