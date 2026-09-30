@@ -102,6 +102,16 @@ function Get-DestFolderByPath($destStore, [string]$relPath, [string]$folderType)
     return $currentDest
 }
 
+function Get-CachedDestBaseFolder($destStore, [string]$relPath, [string]$folderType) {
+    $cacheKey = "$relPath|$folderType"
+    if ($script:destFolderCache.ContainsKey($cacheKey)) {
+        return $script:destFolderCache[$cacheKey]
+    }
+    $f = Get-DestFolderByPath $destStore $relPath $folderType
+    $script:destFolderCache[$cacheKey] = $f
+    return $f
+}
+
 function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collections.Generic.List[hashtable]]$collector, $selectedPathsSet, [bool]$hasSubpaths, $config) {
     foreach ($sub in $folder.Folders) {
         $subName = $sub.Name
@@ -154,31 +164,77 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
 
 function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.HashSet[string]]$seenSet, [bool]$deepScan) {
     try {
-        $items = $targetFolder.Items
-        $count = $items.Count
-        for ($k = 1; $k -le $count; $k++) {
-            $existing = $null
-            try {
-                $existing = $items.Item($k)
-                $mid = $null
+        $indexedWithTable = $false
+        $tbl = $null
+        try {
+            $tbl = $targetFolder.GetTable()
+            if ($tbl) {
+                try { $tbl.Columns.RemoveAll() } catch {}
+                try { $tbl.Columns.Add("Subject") | Out-Null } catch {}
+                try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null } catch {}
+                try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
+                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null } catch {}
+
+                $batchSize = 5000
+                while (-not $tbl.EndOfTable) {
+                    $arr = $tbl.GetArray($batchSize)
+                    $rowsInBatch = $arr.GetLength(0)
+                    if ($rowsInBatch -eq 0) { break }
+
+                    for ($i = 0; $i -lt $rowsInBatch; $i++) {
+                        $s = $arr[$i, 0]
+                        $snd = $arr[$i, 1]
+                        $dt = $arr[$i, 2]
+                        $mid = $arr[$i, 3]
+
+                        if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
+                            [void]$seenSet.Add($mid.Trim())
+                        }
+                        if ($s -or $snd -or $dt) {
+                            $dtStr = if ($dt -and ($dt -is [DateTime])) { $dt.ToString('yyyyMMddHHmmss') } else { "" }
+                            $cKey = "$s|$snd|$dtStr"
+                            [void]$seenSet.Add($cKey)
+                        }
+                    }
+                }
+                $indexedWithTable = $true
+            }
+        } catch {
+            $indexedWithTable = $false
+        } finally {
+            if ($null -ne $tbl) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tbl) | Out-Null } catch {}
+            }
+        }
+
+        # Fallback a iteración clásica únicamente si GetTable no estuvo disponible
+        if (-not $indexedWithTable) {
+            $items = $targetFolder.Items
+            $count = $items.Count
+            for ($k = 1; $k -le $count; $k++) {
+                $existing = $null
                 try {
-                    $mid = $existing.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                    $existing = $items.Item($k)
+                    $mid = $null
+                    try {
+                        $mid = $existing.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                    } catch {}
+                    if ($mid -and $mid.Trim() -ne "") {
+                        [void]$seenSet.Add($mid.Trim())
+                    }
+                    $subj = $existing.Subject
+                    $sender = $existing.SenderEmailAddress
+                    $t = $null
+                    try { $t = $existing.ReceivedTime } catch {}
+                    if ($null -ne $t) {
+                        $cKey = "$subj|$sender|$($t.ToString('yyyyMMddHHmmss'))"
+                        [void]$seenSet.Add($cKey)
+                    }
                 } catch {}
-                if ($mid -and $mid.Trim() -ne "") {
-                    [void]$seenSet.Add($mid.Trim())
-                }
-                $subj = $existing.Subject
-                $sender = $existing.SenderEmailAddress
-                $t = $null
-                try { $t = $existing.ReceivedTime } catch {}
-                if ($null -ne $t) {
-                    $cKey = "$subj|$sender|$($t.ToString('yyyyMMddHHmmss'))"
-                    [void]$seenSet.Add($cKey)
-                }
-            } catch {}
-            finally {
-                if ($null -ne $existing) {
-                    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null
+                finally {
+                    if ($null -ne $existing) {
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null } catch {}
+                    }
                 }
             }
         }
@@ -230,8 +286,10 @@ $isAborted = $false
 $globalProcessedItems = 0
 $globalTotalItems = 0
 $startTime = [DateTime]::UtcNow
-$lastTelemetryTime = [DateTime]::MinValue
 $targetSets = @{}
+$destFolderCache = @{}
+$dateFolderCache = @{}
+$consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 
 try {
@@ -428,6 +486,11 @@ try {
 
             Log-Message "Procesando carpeta '$($cf.RelPath)' ($itemCount correos)..."
 
+            # Pre-resolver carpeta base de destino una sola vez para toda la carpeta de origen
+            $baseDest = Get-CachedDestBaseFolder $destStore $cf.RelPath $cf.Type
+            $baseDestId = $null
+            try { $baseDestId = $baseDest.EntryID } catch {}
+
             # Iterar elementos en orden inverso (seguro para Copy y Move)
             for ($idx = $itemCount; $idx -ge 1; $idx--) {
                 # Comprobar protocolo de parada segura
@@ -474,26 +537,32 @@ try {
                         continue
                     }
 
-                    # Determinar carpeta de destino base
-                    $baseDest = Get-DestFolderByPath $destStore $cf.RelPath $cf.Type
+                    # Determinar carpeta de destino final con enrutamiento y caché O(1)
                     $finalDest = $baseDest
-
-                    # Enrutamiento jerárquico por fecha (solo cuando no es Espejo)
                     if ($config -and $config.routing_enabled) {
-                        if ($config.routing_granularity -eq "YearsAndMonths") {
-                            $yearName = "$($rcvd.Year)"
-                            $yearFolder = Get-OrCreateFolder $baseDest $yearName
-                            $mName = if ($monthNames.ContainsKey($rcvd.Month)) { $monthNames[$rcvd.Month] } else { "{0:D2}" -f $rcvd.Month }
-                            $finalDest = Get-OrCreateFolder $yearFolder $mName
-                        } elseif ($config.routing_granularity -eq "Years") {
-                            $yearName = "$($rcvd.Year)"
-                            $yearFolder = Get-OrCreateFolder $baseDest $yearName
-                            $finalDest = $yearFolder
+                        $granularity = if ($config.routing_granularity) { $config.routing_granularity } else { "Mirror" }
+                        if ($granularity -ne "Mirror") {
+                            $y = $rcvd.Year
+                            $m = $rcvd.Month
+                            $dateKey = "$baseDestId|$granularity|$y|$m"
+                            if ($script:dateFolderCache.ContainsKey($dateKey)) {
+                                $finalDest = $script:dateFolderCache[$dateKey]
+                            } else {
+                                if ($granularity -eq "YearsAndMonths") {
+                                    $yearName = "$y"
+                                    $yearFolder = Get-OrCreateFolder $baseDest $yearName
+                                    $mName = if ($monthNames.ContainsKey($m)) { $monthNames[$m] } else { "{0:D2}" -f $m }
+                                    $finalDest = Get-OrCreateFolder $yearFolder $mName
+                                } elseif ($granularity -eq "Years") {
+                                    $yearName = "$y"
+                                    $finalDest = Get-OrCreateFolder $baseDest $yearName
+                                }
+                                $script:dateFolderCache[$dateKey] = $finalDest
+                            }
                         }
-                        # Si es "Mirror", $finalDest permanece como $baseDest (estructura original espejo sin agrupar por fecha)
                     }
 
-                    # Deduplicación inteligente
+                    # Deduplicación inteligente con MAPI Table
                     $destId = $finalDest.EntryID
                     if (-not $targetSets.ContainsKey($destId)) {
                         $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -503,18 +572,24 @@ try {
                     }
                     $folderSet = $targetSets[$destId]
 
-                    $mid = $null
-                    try {
-                        $mid = $item.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
-                    } catch {}
                     $subj = $item.Subject
                     $sender = $item.SenderEmailAddress
                     $cKey = "$subj|$sender|$($rcvd.ToString('yyyyMMddHHmmss'))"
 
                     $isDuplicate = $false
+                    $mid = $null
                     if ($config -and $config.deduplication_enabled) {
-                        if (($mid -and $folderSet.Contains($mid.Trim())) -or $folderSet.Contains($cKey)) {
+                        # 1. Comprobar clave compuesta primero (instantáneo en RAM, 0 llamadas COM)
+                        if ($folderSet.Contains($cKey)) {
                             $isDuplicate = $true
+                        } else {
+                            # 2. Solo si no coincide la clave compuesta, consultar Message-ID MAPI
+                            try {
+                                $mid = $item.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                            } catch {}
+                            if ($mid -and ($mid -is [string]) -and $folderSet.Contains($mid.Trim())) {
+                                $isDuplicate = $true
+                            }
                         }
                     }
 
@@ -567,21 +642,26 @@ try {
                             })
                         }
 
-                        # Registrar clave para deduplicar futuros correos de la misma sesión
-                        if ($mid -and $mid.Trim() -ne "") {
+                        # Registrar claves para deduplicar futuros correos de la misma sesión
+                        [void]$folderSet.Add($cKey)
+                        if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
                             [void]$folderSet.Add($mid.Trim())
                         }
-                        [void]$folderSet.Add($cKey)
 
-                        # Throttling adaptativo
+                        # Throttling adaptativo inteligente (dynamic backoff)
                         if ($config -and $config.adaptive_throttling) {
-                            Start-Sleep -Milliseconds 12
+                            if ($consecutiveThrottles -gt 0) {
+                                Start-Sleep -Milliseconds ([math]::Min(500, 20 * $consecutiveThrottles))
+                                $consecutiveThrottles--
+                            } elseif ($pstProcessedCount % 100 -eq 0) {
+                                Start-Sleep -Milliseconds 10
+                            }
                         }
                     }
 
-                    # Telemetría en vivo (cada 5 items o cada 250ms)
+                    # Telemetría en vivo (cada 15 items o cada 200ms)
                     $now = [DateTime]::UtcNow
-                    if ($pstProcessedCount % 5 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 250 -or $pstProcessedCount -eq $totalPstItems) {
+                    if ($pstProcessedCount % 15 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 200 -or $pstProcessedCount -eq $totalPstItems) {
                         $elapsedSec = ($now - $startTime).TotalSeconds
                         $speed = if ($elapsedSec -gt 0) { [math]::Round($totalImported / $elapsedSec, 1) } else { 0.0 }
                         $remaining = [math]::Max(0, $totalPstItems - $pstProcessedCount)
@@ -603,13 +683,14 @@ try {
                         $lastTelemetryTime = $now
                     }
 
-                    if ($pstProcessedCount % 50 -eq 0) {
+                    if ($pstProcessedCount % 250 -eq 0) {
                         [System.GC]::Collect()
                     }
                 }
                 catch {
                     $totalErrors++
                     $pstProcessedCount++
+                    $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 2)
                     if ($processedItemsList.Count -lt 5000) {
                         $processedItemsList.Add(@{
                             subject       = "(Error al leer correo)"
@@ -623,9 +704,9 @@ try {
                         })
                     }
 
-                    # Telemetría en vivo tras error
+                    # Telemetría en vivo tras error (cada 15 items o cada 200ms)
                     $now = [DateTime]::UtcNow
-                    if ($pstProcessedCount % 5 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 250 -or $pstProcessedCount -eq $totalPstItems) {
+                    if ($pstProcessedCount % 15 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 200 -or $pstProcessedCount -eq $totalPstItems) {
                         $elapsedSec = ($now - $startTime).TotalSeconds
                         $speed = if ($elapsedSec -gt 0) { [math]::Round($totalImported / $elapsedSec, 1) } else { 0.0 }
                         $remaining = [math]::Max(0, $totalPstItems - $pstProcessedCount)
