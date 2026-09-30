@@ -30,6 +30,41 @@ function Log-Message([string]$msg, [string]$level = "INFO") {
     }
 }
 
+function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime) {
+    try {
+        $now = [DateTime]::UtcNow
+        $elapsedSec = ($now - $startTime).TotalSeconds
+        $speed = if ($elapsedSec -gt 0) { [math]::Round($script:totalImported / $elapsedSec, 1) } else { 0.0 }
+        $remaining = [math]::Max(0, $totalItems - $currentItems)
+        $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
+
+        Send-Telemetry @{
+            type         = "progress"
+            pst_index    = $currentPstIdx
+            pst_total    = $totalPsts
+            pst_name     = $pstName
+            item_current = $currentItems
+            item_total   = $totalItems
+            speed_mps    = $speed
+            eta_seconds  = $eta
+            imported     = $script:totalImported
+            duplicates   = $script:totalDuplicates
+            errors       = $script:totalErrors
+        }
+        $script:lastTelemetryTime = $now
+    } catch {}
+}
+
+function Check-And-Emit-Progress([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime, [bool]$force = $false) {
+    try {
+        $now = [DateTime]::UtcNow
+        $shouldEmit = $force -or ($currentItems % 15 -eq 0) -or ($null -eq $script:lastTelemetryTime) -or (($now - $script:lastTelemetryTime).TotalMilliseconds -gt 200) -or ($currentItems -eq $totalItems)
+        if ($shouldEmit) {
+            Emit-ProgressTelemetry $currentPstIdx $totalPsts $pstName $currentItems $totalItems $startTime
+        }
+    } catch {}
+}
+
 function Get-OrCreateFolder($parentFolder, [string]$subfolderName) {
     try {
         return $parentFolder.Folders.Item($subfolderName)
@@ -286,6 +321,7 @@ $isAborted = $false
 $globalProcessedItems = 0
 $globalTotalItems = 0
 $startTime = [DateTime]::UtcNow
+$lastTelemetryTime = [DateTime]::UtcNow
 $targetSets = @{}
 $destFolderCache = @{}
 $dateFolderCache = @{}
@@ -468,6 +504,7 @@ try {
         }
 
         $pstProcessedCount = 0
+        $lastTelemetryTime = [DateTime]::UtcNow
 
         # 8. Procesar cada carpeta seleccionada
         foreach ($cf in $candidateFolders) {
@@ -501,6 +538,7 @@ try {
                 }
 
                 $item = $null
+                $copy = $null
                 try {
                     $item = $folderItems.Item($idx)
                 } catch {
@@ -659,29 +697,7 @@ try {
                         }
                     }
 
-                    # Telemetría en vivo (cada 15 items o cada 200ms)
-                    $now = [DateTime]::UtcNow
-                    if ($pstProcessedCount % 15 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 200 -or $pstProcessedCount -eq $totalPstItems) {
-                        $elapsedSec = ($now - $startTime).TotalSeconds
-                        $speed = if ($elapsedSec -gt 0) { [math]::Round($totalImported / $elapsedSec, 1) } else { 0.0 }
-                        $remaining = [math]::Max(0, $totalPstItems - $pstProcessedCount)
-                        $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
-
-                        Send-Telemetry @{
-                            type         = "progress"
-                            pst_index    = $pIdx + 1
-                            pst_total    = $totalPsts
-                            pst_name     = $pstName
-                            item_current = $pstProcessedCount
-                            item_total   = $totalPstItems
-                            speed_mps    = $speed
-                            eta_seconds  = $eta
-                            imported     = $totalImported
-                            duplicates   = $totalDuplicates
-                            errors       = $totalErrors
-                        }
-                        $lastTelemetryTime = $now
-                    }
+                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
                     if ($pstProcessedCount % 250 -eq 0) {
                         [System.GC]::Collect()
@@ -691,9 +707,10 @@ try {
                     $totalErrors++
                     $pstProcessedCount++
                     $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 2)
+                    Log-Message "Aviso al procesar correo #$idx de carpeta '$($cf.RelPath)': $_" "WARN"
                     if ($processedItemsList.Count -lt 5000) {
                         $processedItemsList.Add(@{
-                            subject       = "(Error al leer correo)"
+                            subject       = "(Error al leer correo: $($_.Exception.Message))"
                             sender        = "-"
                             date          = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
                             source_folder = $cf.RelPath
@@ -704,31 +721,12 @@ try {
                         })
                     }
 
-                    # Telemetría en vivo tras error (cada 15 items o cada 200ms)
-                    $now = [DateTime]::UtcNow
-                    if ($pstProcessedCount % 15 -eq 0 -or ($now - $lastTelemetryTime).TotalMilliseconds -gt 200 -or $pstProcessedCount -eq $totalPstItems) {
-                        $elapsedSec = ($now - $startTime).TotalSeconds
-                        $speed = if ($elapsedSec -gt 0) { [math]::Round($totalImported / $elapsedSec, 1) } else { 0.0 }
-                        $remaining = [math]::Max(0, $totalPstItems - $pstProcessedCount)
-                        $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
-
-                        Send-Telemetry @{
-                            type         = "progress"
-                            pst_index    = $pIdx + 1
-                            pst_total    = $totalPsts
-                            pst_name     = $pstName
-                            item_current = $pstProcessedCount
-                            item_total   = $totalPstItems
-                            speed_mps    = $speed
-                            eta_seconds  = $eta
-                            imported     = $totalImported
-                            duplicates   = $totalDuplicates
-                            errors       = $totalErrors
-                        }
-                        $lastTelemetryTime = $now
-                    }
+                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                 }
                 finally {
+                    if ($null -ne $copy) {
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                    }
                     if ($null -ne $item) {
                         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
                     }
