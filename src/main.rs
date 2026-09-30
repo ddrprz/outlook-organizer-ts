@@ -1138,8 +1138,8 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
                 vec![
                     ("←/→/Tab", "Elegir"),
                     ("Enter", "Confirmar"),
-                    ("S", "Sí, Detener"),
-                    ("N/Esc", "Continuar"),
+                    ("S", "Sí"),
+                    ("N/Esc", "No"),
                 ]
             } else if state.progress.graceful_cancelling {
                 vec![("Espere...", "Desmontando PST con seguridad")]

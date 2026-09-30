@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph},
@@ -375,8 +375,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState) {
-    let modal_width = 74.min(area.width.saturating_sub(4));
-    let modal_height = 14.min(area.height.saturating_sub(2));
+    let modal_width = 62.min(area.width.saturating_sub(4));
+    let modal_height = 9.min(area.height.saturating_sub(2));
 
     let x = area.x + (area.width.saturating_sub(modal_width)) / 2;
     let y = area.y + (area.height.saturating_sub(modal_height)) / 2;
@@ -389,95 +389,79 @@ fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Theme::WARNING))
-        .title(" ⚠ Confirmación de Parada Segura ⚠ ");
+        .title(" ⚠ Parada Segura ⚠ ");
     let inner = modal_block.inner(modal_rect);
     f.render_widget(modal_block, modal_rect);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2), // 1. Título de advertencia
-            Constraint::Length(4), // 2. Puntos clave de seguridad e integridad
-            Constraint::Length(3), // 3. Botones interactivos de acción
-            Constraint::Length(1), // 4. Ayuda de atajos
+            Constraint::Length(2), // 1. Pregunta directa
+            Constraint::Length(2), // 2. Botones Sí / No
+            Constraint::Length(1), // 3. Guía de atajos
         ])
         .split(inner);
 
-    // 1. Título
-    let title_paragraph = Paragraph::new(vec![
-        Line::from(Span::styled(
-            "¿Está seguro de que desea cancelar la importación en curso?",
-            Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "La operación se detendrá ordenadamente sin corromper sus archivos PST.",
-            Style::default().fg(Theme::TEXT_MUTED),
-        )),
-    ]);
-    f.render_widget(title_paragraph, chunks[0]);
+    // 1. Pregunta principal
+    let question_line = Line::from(Span::styled(
+        "¿Está seguro de que desea cancelar de forma segura?",
+        Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD),
+    ));
+    f.render_widget(
+        Paragraph::new(vec![Line::from(""), question_line]).alignment(Alignment::Center),
+        chunks[0],
+    );
 
-    // 2. Información de integridad y seguridad
-    let info_paragraph = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("  ✔ ", Style::default().fg(Theme::SUCCESS)),
-            Span::styled("El correo actual completará su transferencia para evitar inconsistencias.", Style::default().fg(Theme::TEXT_MAIN)),
-        ]),
-        Line::from(vec![
-            Span::styled("  ✔ ", Style::default().fg(Theme::SUCCESS)),
-            Span::styled("El archivo PST se desmontará limpiamente de la sesión MAPI (RemoveStore).", Style::default().fg(Theme::TEXT_MAIN)),
-        ]),
-        Line::from(vec![
-            Span::styled("  ✔ ", Style::default().fg(Theme::SUCCESS)),
-            Span::styled("Los correos ya transferidos permanecerán intactos en el buzón destino.", Style::default().fg(Theme::TEXT_MAIN)),
-        ]),
-    ]);
-    f.render_widget(info_paragraph, chunks[1]);
-
-    // 3. Botones de acción interactivos
-    let (btn_continue_style, btn_cancel_style) = if state.cancel_modal_selected_yes {
+    // 2. Botones Sí / No
+    let (btn_yes_style, btn_no_style) = if state.cancel_modal_selected_yes {
         (
-            Style::default().fg(Theme::TEXT_MUTED),
             Style::default().bg(Theme::DANGER).fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default().fg(Theme::TEXT_MUTED),
         )
     } else {
         (
-            Style::default().bg(Theme::SUCCESS).fg(Color::Black).add_modifier(Modifier::BOLD),
             Style::default().fg(Theme::TEXT_MUTED),
+            Style::default().bg(Theme::SUCCESS).fg(Color::Black).add_modifier(Modifier::BOLD),
         )
     };
 
-    let btn_continue_text = if !state.cancel_modal_selected_yes {
-        " ▶ [ Continuar Importación ] ◀ "
+    let btn_yes_text = if state.cancel_modal_selected_yes {
+        " ▶ [ Sí ] ◀ "
     } else {
-        "   [ Continuar Importación ]   "
+        "   [ Sí ]   "
     };
 
-    let btn_cancel_text = if state.cancel_modal_selected_yes {
-        " ▶ [ Sí, Detener con Seguridad ] ◀ "
+    let btn_no_text = if !state.cancel_modal_selected_yes {
+        " ▶ [ No ] ◀ "
     } else {
-        "   [ Sí, Detener con Seguridad ]   "
+        "   [ No ]   "
     };
 
     let buttons_line = Line::from(vec![
-        Span::raw("   "),
-        Span::styled(btn_continue_text, btn_continue_style),
-        Span::raw("     "),
-        Span::styled(btn_cancel_text, btn_cancel_style),
+        Span::styled(btn_yes_text, btn_yes_style),
+        Span::raw("        "),
+        Span::styled(btn_no_text, btn_no_style),
     ]);
-    f.render_widget(Paragraph::new(vec![Line::from(""), buttons_line]), chunks[2]);
+    f.render_widget(
+        Paragraph::new(buttons_line).alignment(Alignment::Center),
+        chunks[1],
+    );
 
-    // 4. Guía de atajos
+    // 3. Guía de atajos
     let shortcuts_line = Line::from(vec![
-        Span::styled("← / → / Tab", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("←/→/Tab", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled(" Elegir  •  ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("Enter", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled(" Confirmar  •  ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("S", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-        Span::styled(" Detener  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled(" Sí  •  ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("N / Esc", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled(" Continuar", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled(" No", Style::default().fg(Theme::TEXT_MUTED)),
     ]);
-    f.render_widget(Paragraph::new(shortcuts_line), chunks[3]);
+    f.render_widget(
+        Paragraph::new(shortcuts_line).alignment(Alignment::Center),
+        chunks[2],
+    );
 }
 
 #[cfg(test)]
