@@ -110,6 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Auditoría JSON automática (solo si es .exe de producción)
                     if let Ok(Some(path)) = generate_audit_json(&state, &status) {
+                        state.json_audit_path = Some(path.clone());
                         state
                             .log_event(format!("[AUDITORÍA] JSON guardado en: {}", path.display()));
                     }
@@ -1101,7 +1102,13 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
             ("q", "Salir"),
         ],
         WizardStep::Execution => vec![("Esc/Q", "Parada Segura")],
-        WizardStep::Completion => vec![("H", "Informe HTML"), ("Enter/q", "Salir")],
+        WizardStep::Completion => {
+            if state.html_report_path.is_some() {
+                vec![("O", "Abrir HTML"), ("H", "Regenerar HTML"), ("Enter/q", "Salir")]
+            } else {
+                vec![("H", "Informe HTML"), ("Enter/q", "Salir")]
+            }
+        }
         WizardStep::PstDetailView => vec![
             ("↑/↓", "Navegar"),
             ("Enter/E/→", "Desplegar"),
