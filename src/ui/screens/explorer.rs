@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     app::{AppState, ExplorerItemType},
-    ui::theme::Theme,
+    ui::{format::format_size_mb, theme::Theme},
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -102,7 +102,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ),
             ExplorerItemType::PstFile => {
                 let cb = if entry.selected { "[x]" } else { "[ ]" };
-                let sz = entry.size_mb.map(|s| format!("{:.1} MB", s)).unwrap_or_else(|| "-".to_string());
+                let sz = entry.size_mb.map(format_size_mb).unwrap_or_else(|| "-".to_string());
                 (
                     "✉",
                     "[PST]  ",

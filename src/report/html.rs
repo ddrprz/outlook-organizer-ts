@@ -101,8 +101,8 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
         .filter(|p| p.selected)
         .map(|p| {
             format!(
-                r#"<tr><td><svg class="cell-svg" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> <strong>{}</strong></td><td class="muted-cell">{}</td><td>{:.1} MB</td><td><span class="badge badge-success"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Procesado</span></td></tr>"#,
-                p.name, p.path, p.size_mb
+                r#"<tr><td><svg class="cell-svg" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> <strong>{}</strong></td><td class="muted-cell">{}</td><td>{}</td><td><span class="badge badge-success"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Procesado</span></td></tr>"#,
+                p.name, p.path, crate::ui::format::format_size_mb(p.size_mb)
             )
         })
         .collect();
@@ -1038,7 +1038,7 @@ fn get_html_template() -> &'static str {
                 <th class="sortable" onclick="sortFolders('source_folder')">Carpeta Origen (PST) ⇅</th>
                 <th class="sortable" onclick="sortFolders('dest_folder')">Destino (Outlook MAPI) ⇅</th>
                 <th class="sortable" onclick="sortFolders('total_items')">Correos Procesados ⇅</th>
-                <th class="sortable" onclick="sortFolders('size_mb')">Tamaño (MB) ⇅</th>
+                <th class="sortable" onclick="sortFolders('size_mb')">Tamaño ⇅</th>
                 <th>Estado</th>
               </tr>
             </thead>
@@ -1206,6 +1206,25 @@ fn get_html_template() -> &'static str {
       if (activeBtn) activeBtn.classList.add("active");
     }
 
+    // Funciones dinámicas de formateo de almacenamiento
+    function formatSizeMb(mb) {
+      if (mb === undefined || mb === null || mb <= 0) return "0 MB";
+      if (mb >= 1000000) return (mb / 1048576).toFixed(2) + " TB";
+      if (mb >= 1000) return (mb / 1024).toFixed(2) + " GB";
+      if (mb >= 1) return mb >= 100 ? mb.toFixed(1) + " MB" : mb.toFixed(2) + " MB";
+      const kb = mb * 1024;
+      return kb >= 1 ? (kb >= 100 ? kb.toFixed(0) + " KB" : kb.toFixed(1) + " KB") : (kb * 1024).toFixed(0) + " B";
+    }
+
+    function formatSizeKb(kb) {
+      if (kb === undefined || kb === null || kb <= 0) return "-";
+      if (kb >= 1024 * 1000000) return (kb / (1024 * 1048576)).toFixed(2) + " TB";
+      if (kb >= 1024 * 1000) return (kb / (1024 * 1024)).toFixed(2) + " GB";
+      if (kb >= 1000) return (kb / 1024).toFixed(2) + " MB";
+      if (kb < 1) return (kb * 1024).toFixed(0) + " B";
+      return kb >= 100 ? kb.toFixed(0) + " KB" : kb.toFixed(1) + " KB";
+    }
+
     // ==========================================
     // TAB 2: Lógica de Carpetas
     // ==========================================
@@ -1251,7 +1270,7 @@ fn get_html_template() -> &'static str {
           <td>${arrowRightSvg} ${escapeHtml(f.source_folder)}</td>
           <td>${arrowDestSvg} ${escapeHtml(f.dest_folder)}</td>
           <td><strong>${f.total_items.toLocaleString()}</strong> correos</td>
-          <td>${f.size_mb.toFixed(1)} MB</td>
+          <td>${formatSizeMb(f.size_mb)}</td>
           <td><span class="badge badge-success">${checkSvg} ${escapeHtml(f.status || 'Completado')}</span></td>
         </tr>
       `).join("");
@@ -1426,7 +1445,7 @@ fn get_html_template() -> &'static str {
 
         const highlightedSubject = highlightText(item.subject || "(Sin Asunto)", q);
         const highlightedSender = highlightText(item.sender || "-", q);
-        const sizeStr = item.size_kb ? `${item.size_kb.toFixed(1)} KB` : "-";
+        const sizeStr = item.size_kb ? formatSizeKb(item.size_kb) : "-";
 
         return `
           <tr>
