@@ -1103,6 +1103,10 @@ pub struct AppState {
     pub progress: ProgressState,
     pub activity_log: VecDeque<String>, // Buffer circular limitado (max 300)
 
+    // Modal de confirmación de parada segura (Paso de Ejecución)
+    pub show_cancel_modal: bool,
+    pub cancel_modal_selected_yes: bool,
+
     // Modal y vista completa de detalle de PST
     pub previous_step_before_detail: WizardStep,
     pub pst_folder_explorer: PstFolderExplorerState,
@@ -1177,6 +1181,8 @@ impl AppState {
             explorer,
             progress: ProgressState::default(),
             activity_log: VecDeque::with_capacity(300),
+            show_cancel_modal: false,
+            cancel_modal_selected_yes: false,
             previous_step_before_detail: WizardStep::PstSource,
             pst_folder_explorer: PstFolderExplorerState::new(),
             pst_detail_modal: PstDetailModalState::Closed,
@@ -1226,6 +1232,16 @@ impl AppState {
             self.activity_log.pop_front();
         }
         self.activity_log.push_back(event);
+    }
+
+    pub fn open_cancel_modal(&mut self) {
+        self.show_cancel_modal = true;
+        self.cancel_modal_selected_yes = false;
+    }
+
+    pub fn close_cancel_modal(&mut self) {
+        self.show_cancel_modal = false;
+        self.cancel_modal_selected_yes = false;
     }
 
     pub fn open_pst_detail(&mut self, path: String, name: String) -> bool {
@@ -2074,6 +2090,24 @@ mod tests {
         assert!(tree.nodes[2].selected);
         assert_eq!(tree.selected_paths().len(), 3);
         assert_eq!(tree.checkbox_state(0), CheckboxState::Checked);
+    }
+
+    #[test]
+    fn test_cancel_confirmation_modal_toggle_and_reset() {
+        let mut state = AppState::new();
+        assert!(!state.show_cancel_modal);
+        assert!(!state.cancel_modal_selected_yes);
+
+        state.open_cancel_modal();
+        assert!(state.show_cancel_modal);
+        assert!(!state.cancel_modal_selected_yes);
+
+        state.cancel_modal_selected_yes = true;
+        assert!(state.cancel_modal_selected_yes);
+
+        state.close_cancel_modal();
+        assert!(!state.show_cancel_modal);
+        assert!(!state.cancel_modal_selected_yes);
     }
 }
 
