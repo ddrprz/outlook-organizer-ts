@@ -7,6 +7,10 @@ param (
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Stop"
 
+try {
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+} catch {}
+
 $outlook = $null
 $namespace = $null
 $weStartedOutlook = $false
@@ -150,12 +154,20 @@ catch {
     Write-Output "[]"
 }
 finally {
+    if ($weStartedOutlook -and $null -ne $outlook) {
+        try { $outlook.Quit() } catch {}
+    }
     if ($null -ne $namespace) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null } catch {}
+        $namespace = $null
     }
     if ($null -ne $outlook) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null } catch {}
+        $outlook = $null
     }
     [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
 }
 

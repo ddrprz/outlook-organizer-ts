@@ -35,6 +35,16 @@ pub struct WorkerConfig {
 /// Ejecuta el worker de PowerShell de forma completamente asíncrona sin bloquear la UI
 pub struct BackendRunner;
 
+#[cfg(windows)]
+fn configure_low_overhead_command(cmd: &mut Command) {
+    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    cmd.creation_flags(BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn configure_low_overhead_command(_cmd: &mut Command) {}
+
 impl BackendRunner {
     pub fn spawn_worker(
         config: &WorkerConfig,
@@ -62,7 +72,9 @@ impl BackendRunner {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         fs::write(&config_path, config_json)?;
 
-        let mut child = Command::new("powershell")
+        let mut cmd = Command::new("powershell");
+        configure_low_overhead_command(&mut cmd);
+        let mut child = cmd
             .arg("-Sta")
             .arg("-NoProfile")
             .arg("-ExecutionPolicy")
@@ -148,6 +160,7 @@ impl BackendRunner {
         let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
 
         let mut cmd = Command::new("powershell");
+        configure_low_overhead_command(&mut cmd);
         cmd.arg("-Sta")
             .arg("-NoProfile")
             .arg("-ExecutionPolicy")
@@ -230,6 +243,7 @@ impl BackendRunner {
         let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
 
         let mut cmd = Command::new("powershell");
+        configure_low_overhead_command(&mut cmd);
         cmd.arg("-Sta")
             .arg("-NoProfile")
             .arg("-ExecutionPolicy")

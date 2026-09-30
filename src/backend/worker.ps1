@@ -14,6 +14,10 @@ param (
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Stop"
 
+try {
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+} catch {}
+
 function Send-Telemetry([hashtable]$Payload) {
     $json = $Payload | ConvertTo-Json -Compress
     [Console]::Out.WriteLine($json)
@@ -147,6 +151,27 @@ function Get-CachedDestBaseFolder($destStore, [string]$relPath, [string]$folderT
     return $f
 }
 
+function Clear-FolderCaches {
+    if ($script:destFolderCache) {
+        foreach ($k in @($script:destFolderCache.Keys)) {
+            $f = $script:destFolderCache[$k]
+            if ($null -ne $f) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($f) | Out-Null } catch {}
+            }
+        }
+        $script:destFolderCache.Clear()
+    }
+    if ($script:dateFolderCache) {
+        foreach ($k in @($script:dateFolderCache.Keys)) {
+            $f = $script:dateFolderCache[$k]
+            if ($null -ne $f) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($f) | Out-Null } catch {}
+            }
+        }
+        $script:dateFolderCache.Clear()
+    }
+}
+
 function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collections.Generic.List[hashtable]]$collector, $selectedPathsSet, [bool]$hasSubpaths, $config) {
     foreach ($sub in $folder.Folders) {
         $subName = $sub.Name
@@ -275,8 +300,18 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
         }
 
         if ($deepScan) {
-            foreach ($sub in $targetFolder.Folders) {
-                Index-TargetFolderItems $sub $seenSet $deepScan
+            $subFolders = $null
+            try {
+                $subFolders = $targetFolder.Folders
+                foreach ($sub in $subFolders) {
+                    Index-TargetFolderItems $sub $seenSet $deepScan
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sub) | Out-Null } catch {}
+                }
+            } catch {}
+            finally {
+                if ($null -ne $subFolders) {
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($subFolders) | Out-Null } catch {}
+                }
             }
         }
     } catch {}
@@ -328,6 +363,7 @@ $dateFolderCache = @{}
 $consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 
+$weStartedOutlook = $false
 try {
     # 2. Conectar a Outlook COM en modo STA
     try {
@@ -335,7 +371,8 @@ try {
         Log-Message "Enlace establecido con instancia activa de Outlook."
     } catch {
         $outlook = New-Object -ComObject Outlook.Application
-        Log-Message "Nueva instancia de Outlook COM iniciada."
+        $weStartedOutlook = $true
+        Log-Message "Nueva instancia de Outlook COM iniciada en segundo plano."
     }
 
     $namespace = $outlook.GetNamespace("MAPI")
@@ -686,21 +723,29 @@ try {
                             [void]$folderSet.Add($mid.Trim())
                         }
 
-                        # Throttling adaptativo inteligente (dynamic backoff)
+                        # Throttling adaptativo inteligente (dynamic backoff) y micro-pausa cooperativa
                         if ($config -and $config.adaptive_throttling) {
                             if ($consecutiveThrottles -gt 0) {
-                                Start-Sleep -Milliseconds ([math]::Min(500, 20 * $consecutiveThrottles))
+                                Start-Sleep -Milliseconds ([math]::Min(500, 25 * $consecutiveThrottles))
                                 $consecutiveThrottles--
-                            } elseif ($pstProcessedCount % 100 -eq 0) {
-                                Start-Sleep -Milliseconds 10
+                            } elseif ($pstProcessedCount % 10 -eq 0) {
+                                [System.Threading.Thread]::Sleep(2)
                             }
+                        } elseif ($pstProcessedCount % 5 -eq 0) {
+                            [System.Threading.Thread]::Sleep(1)
                         }
+                    }
+
+                    # Pausa periódica cooperativa cada 10 correos para ceder CPU y no saturar Windows Explorer
+                    if ($pstProcessedCount % 10 -eq 0) {
+                        [System.Threading.Thread]::Sleep(1)
                     }
 
                     Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
-                    if ($pstProcessedCount % 250 -eq 0) {
+                    if ($pstProcessedCount % 100 -eq 0) {
                         [System.GC]::Collect()
+                        [System.GC]::WaitForPendingFinalizers()
                     }
                 }
                 catch {
@@ -732,18 +777,57 @@ try {
                     }
                 }
             }
+
+            # Liberar colección de elementos y carpeta de origen al concluir la carpeta
+            if ($null -ne $folderItems) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($folderItems) | Out-Null } catch {}
+                $folderItems = $null
+            }
+            if ($null -ne $srcFolder) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($srcFolder) | Out-Null } catch {}
+                $srcFolder = $null
+            }
         }
 
-        # Desmontar PST si fue montado en esta ejecución
+        # 1. Liberar todas las referencias COM de las carpetas candidatas del PST
+        if ($candidateFolders) {
+            foreach ($cf in $candidateFolders) {
+                if ($cf -and $cf.Folder) {
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($cf.Folder) | Out-Null } catch {}
+                    $cf.Folder = $null
+                }
+            }
+        }
+        $candidateFolders = $null
+
+        # 2. Liberar raíz del PST
+        if ($null -ne $pstRoot) {
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstRoot) | Out-Null } catch {}
+            $pstRoot = $null
+        }
+
+        # 3. Forzar limpieza de punteros COM para que MAPI no mantenga bloqueos en el archivo PST
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+
+        # 4. Desmontar PST si fue montado en esta ejecución
         if ($wasMountedByUs -and -not $isAborted) {
             try {
                 $rootF = $pstStore.GetRootFolder()
                 $namespace.RemoveStore($rootF)
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
                 $storesToUnmount = $storesToUnmount | Where-Object { $_ -ne $pstStore }
                 Log-Message "PST '$pstName' desmontado limpiamente."
             } catch {
                 Log-Message "Aviso al desmontar PST: $_" "WARN"
             }
+        }
+
+        if ($null -ne $pstStore) {
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstStore) | Out-Null } catch {}
+            $pstStore = $null
         }
 
         if ($isAborted) { break }
@@ -782,24 +866,56 @@ catch {
 finally {
     Log-Message "Ejecutando limpieza y liberación de punteros COM/MAPI..."
 
-    # Garantizar desmontaje de almacenes montados
+    # 1. Limpiar cachés de carpetas
+    Clear-FolderCaches
+
+    # 2. Liberar carpetas candidatas residuales
+    if ($candidateFolders) {
+        foreach ($cf in $candidateFolders) {
+            if ($cf -and $cf.Folder) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($cf.Folder) | Out-Null } catch {}
+            }
+        }
+        $candidateFolders = $null
+    }
+
+    # 3. Garantizar desmontaje de almacenes montados
     if ($storesToUnmount -and $storesToUnmount.Count -gt 0) {
         foreach ($st in $storesToUnmount) {
             try {
                 $rootF = $st.GetRootFolder()
                 Log-Message "Desmontando PST residual: $($rootF.Name)..."
                 $namespace.RemoveStore($rootF)
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($st) | Out-Null } catch {}
             } catch {}
         }
+        $storesToUnmount = @()
+    }
+
+    if ($null -ne $destStore) {
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($destStore) | Out-Null } catch {}
+        $destStore = $null
+    }
+
+    if ($weStartedOutlook -and $null -ne $outlook) {
+        try {
+            Log-Message "Cerrando instancia secundaria de Outlook iniciada para la migración..."
+            $outlook.Quit()
+        } catch {}
     }
 
     if ($null -ne $namespace) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null } catch {}
+        $namespace = $null
     }
     if ($null -ne $outlook) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null } catch {}
+        $outlook = $null
     }
 
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
 
@@ -807,5 +923,5 @@ finally {
         try { Remove-Item -Path $AbortFile -Force -ErrorAction SilentlyContinue } catch {}
     }
 
-    Log-Message "Punteros COM liberados y recursos finalizados con seguridad."
+    Log-Message "Punteros COM liberados, procesos desacoplados y recursos finalizados con seguridad."
 }
