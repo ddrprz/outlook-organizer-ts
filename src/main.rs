@@ -188,16 +188,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Captura universal de Ctrl+C para parada segura o salida
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 if state.step == WizardStep::Execution {
-                    state.progress.graceful_cancelling = true;
-                    state.log_event("[SISTEMA] Ctrl+C capturado. Desmontando PST de forma segura con RemoveStore...".to_string());
-                    if let Some(ref path) = worker_abort_file {
-                        let _ = std::fs::File::create(path);
-                    }
-                    if let Some(ref mut child) = worker_child
-                        && let Some(ref mut stdin) = child.stdin
-                    {
-                        use tokio::io::AsyncWriteExt;
-                        let _ = stdin.write_all(b"abort\n").await;
+                    if !state.progress.graceful_cancelling {
+                        state.open_cancel_modal();
                     }
                 } else {
                     state.should_quit = true;
@@ -900,22 +892,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Char('q') | KeyCode::Char('Q') => state.should_quit = true,
                     _ => {}
                 },
-                WizardStep::Execution => match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => {
-                        state.progress.graceful_cancelling = true;
-                        state.log_event("[SISTEMA] Solicitud de parada segura recibida. Notificando a PowerShell...".to_string());
-                        if let Some(ref path) = worker_abort_file {
-                            let _ = std::fs::File::create(path);
+                WizardStep::Execution => {
+                    if state.show_cancel_modal {
+                        match key.code {
+                            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                                state.cancel_modal_selected_yes = !state.cancel_modal_selected_yes;
+                            }
+                            KeyCode::Char('s') | KeyCode::Char('S') => {
+                                state.close_cancel_modal();
+                                state.progress.graceful_cancelling = true;
+                                state.log_event("[SISTEMA] Parada segura confirmada por el usuario. Desmontando PST con RemoveStore...".to_string());
+                                if let Some(ref path) = worker_abort_file {
+                                    let _ = std::fs::File::create(path);
+                                }
+                                if let Some(ref mut child) = worker_child
+                                    && let Some(ref mut stdin) = child.stdin
+                                {
+                                    use tokio::io::AsyncWriteExt;
+                                    let _ = stdin.write_all(b"abort\n").await;
+                                }
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                state.close_cancel_modal();
+                                state.log_event("[SISTEMA] Parada segura descartada. Continuando importación...".to_string());
+                            }
+                            KeyCode::Enter => {
+                                if state.cancel_modal_selected_yes {
+                                    state.close_cancel_modal();
+                                    state.progress.graceful_cancelling = true;
+                                    state.log_event("[SISTEMA] Parada segura confirmada por el usuario. Desmontando PST con RemoveStore...".to_string());
+                                    if let Some(ref path) = worker_abort_file {
+                                        let _ = std::fs::File::create(path);
+                                    }
+                                    if let Some(ref mut child) = worker_child
+                                        && let Some(ref mut stdin) = child.stdin
+                                    {
+                                        use tokio::io::AsyncWriteExt;
+                                        let _ = stdin.write_all(b"abort\n").await;
+                                    }
+                                } else {
+                                    state.close_cancel_modal();
+                                    state.log_event("[SISTEMA] Parada segura descartada. Continuando importación...".to_string());
+                                }
+                            }
+                            _ => {}
                         }
-                        if let Some(ref mut child) = worker_child
-                            && let Some(ref mut stdin) = child.stdin
-                        {
-                            use tokio::io::AsyncWriteExt;
-                            let _ = stdin.write_all(b"abort\n").await;
+                    } else {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
+                                if !state.progress.graceful_cancelling =>
+                            {
+                                state.open_cancel_modal();
+                            }
+                            _ => {}
                         }
                     }
-                    _ => {}
-                },
+                }
                 WizardStep::Completion => match key.code {
                     KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
                         state.should_quit = true;
@@ -1101,7 +1133,20 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
             ("Esc", "Atrás"),
             ("q", "Salir"),
         ],
-        WizardStep::Execution => vec![("Esc/Q", "Parada Segura")],
+        WizardStep::Execution => {
+            if state.show_cancel_modal {
+                vec![
+                    ("←/→/Tab", "Elegir"),
+                    ("Enter", "Confirmar"),
+                    ("S", "Sí, Detener"),
+                    ("N/Esc", "Continuar"),
+                ]
+            } else if state.progress.graceful_cancelling {
+                vec![("Espere...", "Desmontando PST con seguridad")]
+            } else {
+                vec![("Esc/Q", "Parada Segura")]
+            }
+        }
         WizardStep::Completion => {
             if state.html_report_path.is_some() {
                 vec![("O", "Abrir HTML"), ("H", "Regenerar HTML"), ("Enter/q", "Salir")]

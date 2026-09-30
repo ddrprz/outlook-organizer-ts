@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Gauge, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Gauge, Paragraph},
     Frame,
 };
 
@@ -367,6 +367,117 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     f.render_widget(Paragraph::new(log_lines), log_inner);
+
+    // 4. Modal de Confirmación de Parada Segura (si el usuario presionó Parada Segura)
+    if state.show_cancel_modal {
+        render_cancel_confirmation_modal(f, area, state);
+    }
+}
+
+fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState) {
+    let modal_width = 74.min(area.width.saturating_sub(4));
+    let modal_height = 14.min(area.height.saturating_sub(2));
+
+    let x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+    let modal_rect = Rect::new(x, y, modal_width, modal_height);
+
+    // Limpiar el fondo debajo de la ventana emergente para aislar la vista
+    f.render_widget(Clear, modal_rect);
+
+    let modal_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(Theme::WARNING))
+        .title(" ⚠ Confirmación de Parada Segura ⚠ ");
+    let inner = modal_block.inner(modal_rect);
+    f.render_widget(modal_block, modal_rect);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // 1. Título de advertencia
+            Constraint::Length(4), // 2. Puntos clave de seguridad e integridad
+            Constraint::Length(3), // 3. Botones interactivos de acción
+            Constraint::Length(1), // 4. Ayuda de atajos
+        ])
+        .split(inner);
+
+    // 1. Título
+    let title_paragraph = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "¿Está seguro de que desea cancelar la importación en curso?",
+            Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "La operación se detendrá ordenadamente sin corromper sus archivos PST.",
+            Style::default().fg(Theme::TEXT_MUTED),
+        )),
+    ]);
+    f.render_widget(title_paragraph, chunks[0]);
+
+    // 2. Información de integridad y seguridad
+    let info_paragraph = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("  ✔ ", Style::default().fg(Theme::SUCCESS)),
+            Span::styled("El correo actual completará su transferencia para evitar inconsistencias.", Style::default().fg(Theme::TEXT_MAIN)),
+        ]),
+        Line::from(vec![
+            Span::styled("  ✔ ", Style::default().fg(Theme::SUCCESS)),
+            Span::styled("El archivo PST se desmontará limpiamente de la sesión MAPI (RemoveStore).", Style::default().fg(Theme::TEXT_MAIN)),
+        ]),
+        Line::from(vec![
+            Span::styled("  ✔ ", Style::default().fg(Theme::SUCCESS)),
+            Span::styled("Los correos ya transferidos permanecerán intactos en el buzón destino.", Style::default().fg(Theme::TEXT_MAIN)),
+        ]),
+    ]);
+    f.render_widget(info_paragraph, chunks[1]);
+
+    // 3. Botones de acción interactivos
+    let (btn_continue_style, btn_cancel_style) = if state.cancel_modal_selected_yes {
+        (
+            Style::default().fg(Theme::TEXT_MUTED),
+            Style::default().bg(Theme::DANGER).fg(Color::White).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        (
+            Style::default().bg(Theme::SUCCESS).fg(Color::Black).add_modifier(Modifier::BOLD),
+            Style::default().fg(Theme::TEXT_MUTED),
+        )
+    };
+
+    let btn_continue_text = if !state.cancel_modal_selected_yes {
+        " ▶ [ Continuar Importación ] ◀ "
+    } else {
+        "   [ Continuar Importación ]   "
+    };
+
+    let btn_cancel_text = if state.cancel_modal_selected_yes {
+        " ▶ [ Sí, Detener con Seguridad ] ◀ "
+    } else {
+        "   [ Sí, Detener con Seguridad ]   "
+    };
+
+    let buttons_line = Line::from(vec![
+        Span::raw("   "),
+        Span::styled(btn_continue_text, btn_continue_style),
+        Span::raw("     "),
+        Span::styled(btn_cancel_text, btn_cancel_style),
+    ]);
+    f.render_widget(Paragraph::new(vec![Line::from(""), buttons_line]), chunks[2]);
+
+    // 4. Guía de atajos
+    let shortcuts_line = Line::from(vec![
+        Span::styled("← / → / Tab", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(" Elegir  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Enter", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(" Confirmar  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("S", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+        Span::styled(" Detener  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("N / Esc", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+        Span::styled(" Continuar", Style::default().fg(Theme::TEXT_MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(shortcuts_line), chunks[3]);
 }
 
 #[cfg(test)]
@@ -440,6 +551,32 @@ mod tests {
         let mut state = AppState::new();
         state.progress.graceful_cancelling = true;
         state.log_event("[SISTEMA] Solicitud de parada segura recibida".to_string());
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| {
+            render(f, f.area(), &state);
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_render_execution_cancel_modal_continue_selected() {
+        let mut state = AppState::new();
+        state.show_cancel_modal = true;
+        state.cancel_modal_selected_yes = false;
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| {
+            render(f, f.area(), &state);
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_render_execution_cancel_modal_cancel_selected() {
+        let mut state = AppState::new();
+        state.show_cancel_modal = true;
+        state.cancel_modal_selected_yes = true;
 
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
