@@ -8,6 +8,10 @@ param (
 $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Stop"
 
+try {
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+} catch {}
+
 if (-not $PstPath -or -not (Test-Path $PstPath)) {
     $errObj = @{
         error = "El archivo PST no existe en la ruta especificada: '$PstPath'"
@@ -36,11 +40,13 @@ $globalSizesByMonth = @{}
 $minDate = [DateTime]::MaxValue
 $maxDate = [DateTime]::MinValue
 
+$weStartedOutlook = $false
 try {
     try {
         $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")
     } catch {
         $outlook = New-Object -ComObject Outlook.Application
+        $weStartedOutlook = $true
     }
 
     $namespace = $outlook.GetNamespace("MAPI")
@@ -275,16 +281,29 @@ finally {
         try {
             $rootF = $pstStore.GetRootFolder()
             $namespace.RemoveStore($rootF)
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
         } catch {}
+    }
+    if ($null -ne $pstStore) {
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstStore) | Out-Null } catch {}
+        $pstStore = $null
+    }
+
+    if ($weStartedOutlook -and $null -ne $outlook) {
+        try { $outlook.Quit() } catch {}
     }
 
     if ($null -ne $namespace) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null } catch {}
+        $namespace = $null
     }
     if ($null -ne $outlook) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($outlook) | Out-Null } catch {}
+        $outlook = $null
     }
 
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
     [System.GC]::Collect()
     [System.GC]::WaitForPendingFinalizers()
 }
