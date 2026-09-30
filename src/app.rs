@@ -1113,6 +1113,7 @@ pub struct AppState {
     // Historial de correos procesados y ruta de reporte
     pub processed_items: Vec<ProcessedEmailItem>,
     pub html_report_path: Option<PathBuf>,
+    pub json_audit_path: Option<PathBuf>,
 }
 
 pub fn default_fallback_mailboxes() -> Vec<MailboxItem> {
@@ -1183,6 +1184,7 @@ impl AppState {
             inspecting_psts: std::collections::HashSet::new(),
             processed_items: Vec::new(),
             html_report_path: None,
+            json_audit_path: None,
         }
     }
 
