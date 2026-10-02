@@ -997,9 +997,11 @@ pub enum RoutingModal {
     None,
     #[allow(dead_code)]
     Criterion,     // Criterio de Enrutamiento (Modal clásico alternativo)
-    YearScope,     // Alcance de años (Todos los años vs Año específico)
+    YearScope,     // Alcance de años (Todos los años vs Selección múltiple dinámica)
+    #[allow(dead_code)]
     SpecificYear,  // Año específico (Input numérico)
-    MonthScope,    // Alcance de meses (Todos los meses [contextual] vs Mes específico)
+    MonthScope,    // Alcance de meses (Todos los meses, H1, H2, Selección múltiple)
+    #[allow(dead_code)]
     SpecificMonth, // Mes específico (Selector horizontal)
 }
 
@@ -1078,6 +1080,8 @@ pub struct AppState {
     // Configuración Paso 5: Enrutamiento
     pub routing_enabled: bool,
     pub routing_granularity: RoutingGranularity,
+    pub selected_years: std::collections::BTreeSet<u32>,
+    pub selected_months: std::collections::BTreeSet<u32>,
     pub specific_year: Option<u32>,
     pub specific_month: Option<u32>,
     pub routing_all_years: bool,
@@ -1086,6 +1090,8 @@ pub struct AppState {
     pub routing_modal_criterion_idx: usize,
     pub routing_modal_year_scope_idx: usize,
     pub routing_modal_month_scope_idx: usize,
+    pub routing_modal_year_cursor: usize,
+    pub routing_modal_month_cursor: usize,
     pub routing_input_year: String,
     pub routing_input_month: u32,
 
@@ -1165,6 +1171,8 @@ impl AppState {
             folder_tree: FolderTreeState::new(),
             routing_enabled: true,
             routing_granularity: RoutingGranularity::Mirror,
+            selected_years: std::collections::BTreeSet::new(),
+            selected_months: std::collections::BTreeSet::new(),
             specific_year: None,
             specific_month: None,
             routing_all_years: true,
@@ -1173,6 +1181,8 @@ impl AppState {
             routing_modal_criterion_idx: 0,
             routing_modal_year_scope_idx: 0,
             routing_modal_month_scope_idx: 0,
+            routing_modal_year_cursor: 0,
+            routing_modal_month_cursor: 0,
             routing_input_year: "2024".to_string(),
             routing_input_month: 1,
             deduplication_enabled: true,
@@ -1191,6 +1201,206 @@ impl AppState {
             processed_items: Vec::new(),
             html_report_path: None,
             json_audit_path: None,
+        }
+    }
+
+    pub fn available_years_from_psts(&self) -> Vec<u32> {
+        let mut years_set = std::collections::BTreeSet::new();
+        for pst in self.discovered_psts.iter().filter(|p| p.selected) {
+            if let Some(detail) = self.pst_details_cache.get(&pst.path) {
+                for &y in &detail.years {
+                    years_set.insert(y);
+                }
+            }
+        }
+        if years_set.is_empty() {
+            for detail in self.pst_details_cache.values() {
+                for &y in &detail.years {
+                    years_set.insert(y);
+                }
+            }
+        }
+        if years_set.is_empty() {
+            let current_year = chrono::Utc::now().format("%Y").to_string().parse::<u32>().unwrap_or(2026);
+            for y in (current_year.saturating_sub(4))..=current_year {
+                years_set.insert(y);
+            }
+        }
+        years_set.into_iter().collect()
+    }
+
+    pub fn available_months_from_psts(&self) -> Vec<u32> {
+        let mut months_set = std::collections::BTreeSet::new();
+        let selected_years = &self.selected_years;
+
+        for pst in self.discovered_psts.iter().filter(|p| p.selected) {
+            if let Some(detail) = self.pst_details_cache.get(&pst.path) {
+                if !self.routing_all_years && !selected_years.is_empty() {
+                    for y in selected_years {
+                        let y_str = y.to_string();
+                        if let Some(m_list) = detail.year_months.get(&y_str) {
+                            for &m in m_list {
+                                months_set.insert(m);
+                            }
+                        }
+                    }
+                } else {
+                    for m_list in detail.year_months.values() {
+                        for &m in m_list {
+                            months_set.insert(m);
+                        }
+                    }
+                }
+            }
+        }
+
+        if months_set.is_empty() {
+            for detail in self.pst_details_cache.values() {
+                for m_list in detail.year_months.values() {
+                    for &m in m_list {
+                        months_set.insert(m);
+                    }
+                }
+            }
+        }
+
+        if months_set.is_empty() {
+            (1..=12).collect()
+        } else {
+            months_set.into_iter().collect()
+        }
+    }
+
+    pub fn sync_specific_dates(&mut self) {
+        if self.routing_all_years || self.selected_years.is_empty() {
+            self.specific_year = None;
+        } else {
+            self.specific_year = self.selected_years.iter().next().copied();
+        }
+
+        if self.routing_all_months || self.selected_months.is_empty() {
+            self.specific_month = None;
+        } else {
+            self.specific_month = self.selected_months.iter().next().copied();
+        }
+    }
+
+    pub fn set_all_years(&mut self) {
+        self.routing_all_years = true;
+        self.selected_years.clear();
+        self.sync_specific_dates();
+    }
+
+    pub fn toggle_year(&mut self, year: u32) {
+        if self.routing_all_years {
+            self.routing_all_years = false;
+            self.selected_years.clear();
+            self.selected_years.insert(year);
+        } else if self.selected_years.contains(&year) {
+            self.selected_years.remove(&year);
+            if self.selected_years.is_empty() {
+                self.routing_all_years = true;
+            }
+        } else {
+            self.selected_years.insert(year);
+        }
+        self.sync_specific_dates();
+    }
+
+    pub fn set_all_months(&mut self) {
+        self.routing_all_months = true;
+        self.selected_months.clear();
+        self.sync_specific_dates();
+    }
+
+    pub fn set_first_half_months(&mut self) {
+        self.routing_all_months = false;
+        let available = self.available_months_from_psts();
+        let h1: std::collections::BTreeSet<u32> = available.into_iter().filter(|&m| m <= 6).collect();
+        if h1.is_empty() {
+            self.selected_months = (1..=6).collect();
+        } else {
+            self.selected_months = h1;
+        }
+        self.sync_specific_dates();
+    }
+
+    pub fn set_second_half_months(&mut self) {
+        self.routing_all_months = false;
+        let available = self.available_months_from_psts();
+        let h2: std::collections::BTreeSet<u32> = available.into_iter().filter(|&m| m >= 7).collect();
+        if h2.is_empty() {
+            self.selected_months = (7..=12).collect();
+        } else {
+            self.selected_months = h2;
+        }
+        self.sync_specific_dates();
+    }
+
+    pub fn is_first_half_selected(&self) -> bool {
+        if self.routing_all_months || self.selected_months.is_empty() {
+            return false;
+        }
+        self.selected_months.iter().all(|&m| m <= 6) && self.selected_months.len() == 6
+    }
+
+    pub fn is_second_half_selected(&self) -> bool {
+        if self.routing_all_months || self.selected_months.is_empty() {
+            return false;
+        }
+        self.selected_months.iter().all(|&m| m >= 7) && self.selected_months.len() == 6
+    }
+
+    pub fn toggle_month(&mut self, month: u32) {
+        if self.routing_all_months {
+            self.routing_all_months = false;
+            self.selected_months.clear();
+            self.selected_months.insert(month);
+        } else if self.selected_months.contains(&month) {
+            self.selected_months.remove(&month);
+            if self.selected_months.is_empty() {
+                self.routing_all_months = true;
+            }
+        } else {
+            self.selected_months.insert(month);
+        }
+        self.sync_specific_dates();
+    }
+
+    pub fn format_years_filter_display(&self) -> String {
+        if self.routing_all_years || self.selected_years.is_empty() {
+            "Todos los años".to_string()
+        } else if self.selected_years.len() == 1 {
+            format!("Año {}", self.selected_years.iter().next().unwrap())
+        } else {
+            let list = self.selected_years.iter().map(|y| y.to_string()).collect::<Vec<_>>().join(", ");
+            format!("Años: {}", list)
+        }
+    }
+
+    pub fn format_months_filter_display(&self) -> String {
+        const MONTH_NAMES_SHORT: [&str; 12] = [
+            "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+            "Jul", "Ago", "Set", "Oct", "Nov", "Dic"
+        ];
+        if self.routing_all_months || self.selected_months.is_empty() {
+            "Todos los meses".to_string()
+        } else if self.is_first_half_selected() {
+            "1ª Mitad (Ene - Jun / H1)".to_string()
+        } else if self.is_second_half_selected() {
+            "2ª Mitad (Jul - Dic / H2)".to_string()
+        } else if self.selected_months.len() == 1 {
+            let m = *self.selected_months.iter().next().unwrap();
+            let name = MONTH_NAMES_SHORT.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes");
+            format!("Mes {:02} ({})", m, name)
+        } else if self.selected_months.len() <= 4 {
+            let list = self.selected_months.iter()
+                .map(|&m| MONTH_NAMES_SHORT.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes").to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("Meses: {}", list)
+        } else {
+            format!("{} meses seleccionados", self.selected_months.len())
         }
     }
 
@@ -2108,6 +2318,146 @@ mod tests {
         state.close_cancel_modal();
         assert!(!state.show_cancel_modal);
         assert!(!state.cancel_modal_selected_yes);
+    }
+
+    #[test]
+    fn test_multi_year_selection_and_toggling() {
+        let mut state = AppState::new();
+        assert!(state.routing_all_years);
+        assert!(state.selected_years.is_empty());
+
+        // Toggle año 2023
+        state.toggle_year(2023);
+        assert!(!state.routing_all_years);
+        assert_eq!(state.selected_years.len(), 1);
+        assert!(state.selected_years.contains(&2023));
+        assert_eq!(state.specific_year, Some(2023));
+
+        // Agregar año 2024
+        state.toggle_year(2024);
+        assert_eq!(state.selected_years.len(), 2);
+        assert!(state.selected_years.contains(&2023));
+        assert!(state.selected_years.contains(&2024));
+
+        // Deseleccionar 2023
+        state.toggle_year(2023);
+        assert_eq!(state.selected_years.len(), 1);
+        assert!(!state.selected_years.contains(&2023));
+        assert!(state.selected_years.contains(&2024));
+
+        // Deseleccionar el último año (2024) -> vuelve a 'todos los años'
+        state.toggle_year(2024);
+        assert!(state.routing_all_years);
+        assert!(state.selected_years.is_empty());
+        assert_eq!(state.specific_year, None);
+
+        // Reactivar y luego set_all_years()
+        state.toggle_year(2022);
+        assert!(!state.routing_all_years);
+        state.set_all_years();
+        assert!(state.routing_all_years);
+        assert!(state.selected_years.is_empty());
+    }
+
+    #[test]
+    fn test_multi_month_selection_first_and_second_half_presets() {
+        let mut state = AppState::new();
+        assert!(state.routing_all_months);
+        assert!(state.selected_months.is_empty());
+
+        // Presets: Primera Mitad (H1: 1..=6)
+        state.set_first_half_months();
+        assert!(!state.routing_all_months);
+        assert!(state.is_first_half_selected());
+        assert!(!state.is_second_half_selected());
+        assert_eq!(state.selected_months.len(), 6);
+        for m in 1..=6 {
+            assert!(state.selected_months.contains(&m));
+        }
+
+        // Presets: Segunda Mitad (H2: 7..=12)
+        state.set_second_half_months();
+        assert!(!state.routing_all_months);
+        assert!(!state.is_first_half_selected());
+        assert!(state.is_second_half_selected());
+        assert_eq!(state.selected_months.len(), 6);
+        for m in 7..=12 {
+            assert!(state.selected_months.contains(&m));
+        }
+
+        // Toggle individual
+        state.toggle_month(7);
+        assert!(!state.is_second_half_selected());
+        assert!(!state.selected_months.contains(&7));
+
+        // Reset a todos
+        state.set_all_months();
+        assert!(state.routing_all_months);
+        assert!(state.selected_months.is_empty());
+        assert_eq!(state.specific_month, None);
+    }
+
+    #[test]
+    fn test_dynamic_available_years_and_months_from_cached_detail() {
+        let mut state = AppState::new();
+
+        // Sin detalles en cache -> fallback a 5 años y 12 meses
+        let default_years = state.available_years_from_psts();
+        assert_eq!(default_years.len(), 5);
+        let default_months = state.available_months_from_psts();
+        assert_eq!(default_months.len(), 12);
+
+        // Agregamos un PST seleccionado y su detalle en cache
+        let pst_path = "C:\\Correo\\test.pst".to_string();
+        state.discovered_psts.push(PstItem {
+            path: pst_path.clone(),
+            name: "test.pst".to_string(),
+            size_mb: 1.5,
+            selected: true,
+        });
+
+        let mut year_months = std::collections::BTreeMap::new();
+        year_months.insert("2021".to_string(), vec![3, 4, 11]);
+        year_months.insert("2024".to_string(), vec![1, 2]);
+
+        state.pst_details_cache.insert(pst_path, PstDetail {
+            years: vec![2021, 2024],
+            year_months,
+            ..Default::default()
+        });
+
+        // Ahora debe retornar exactamente los años y meses detectados dinámicamente
+        let dyn_years = state.available_years_from_psts();
+        assert_eq!(dyn_years, vec![2021, 2024]);
+
+        let dyn_months = state.available_months_from_psts();
+        assert_eq!(dyn_months, vec![1, 2, 3, 4, 11]);
+    }
+
+    #[test]
+    fn test_format_filter_display_strings() {
+        let mut state = AppState::new();
+
+        // Años
+        assert_eq!(state.format_years_filter_display(), "Todos los años");
+        state.toggle_year(2024);
+        assert_eq!(state.format_years_filter_display(), "Año 2024");
+        state.toggle_year(2022);
+        assert_eq!(state.format_years_filter_display(), "Años: 2022, 2024");
+
+        // Meses
+        assert_eq!(state.format_months_filter_display(), "Todos los meses");
+        state.set_first_half_months();
+        assert_eq!(state.format_months_filter_display(), "1ª Mitad (Ene - Jun / H1)");
+        state.set_second_half_months();
+        assert_eq!(state.format_months_filter_display(), "2ª Mitad (Jul - Dic / H2)");
+
+        state.set_all_months();
+        state.toggle_month(5);
+        assert_eq!(state.format_months_filter_display(), "Mes 05 (May)");
+
+        state.toggle_month(10);
+        assert_eq!(state.format_months_filter_display(), "Meses: May, Oct");
     }
 }
 

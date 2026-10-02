@@ -81,18 +81,7 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
     let date_filter_str = if state.routing_all_years && state.routing_all_months {
         "Historial Completo (Sin filtro de fecha)".to_string()
     } else {
-        let mut f = Vec::new();
-        if let Some(y) = state.specific_year {
-            f.push(format!("Año: {}", y));
-        }
-        if let Some(m) = state.specific_month {
-            f.push(format!("Mes: {:02}", m));
-        }
-        if f.is_empty() {
-            "Filtro aplicado".to_string()
-        } else {
-            f.join(" | ")
-        }
+        format!("{} | {}", state.format_years_filter_display(), state.format_months_filter_display())
     };
 
     let selected_psts_rows: String = state

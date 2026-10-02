@@ -57,29 +57,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ),
     };
 
-    let (date_filter_str, date_filter_color) = if let Some(year) = state.specific_year {
-        if let Some(m) = state.specific_month {
-            let m_name = crate::ui::screens::routing::MONTH_NAMES
-                .get((m as usize).saturating_sub(1))
-                .copied()
-                .unwrap_or("Desconocido");
-            (
-                format!("Filtro Activo: Solo año {} y mes {}", year, m_name),
-                Theme::WARNING,
-            )
-        } else {
-            (
-                format!("Filtro Activo: Solo año {} (Todos los meses)", year),
-                Theme::WARNING,
-            )
-        }
-    } else if let Some(m) = state.specific_month {
-        let m_name = crate::ui::screens::routing::MONTH_NAMES
-            .get((m as usize).saturating_sub(1))
-            .copied()
-            .unwrap_or("Desconocido");
+    let (date_filter_str, date_filter_color) = if !state.routing_all_years || !state.routing_all_months {
+        let years_str = state.format_years_filter_display();
+        let months_str = state.format_months_filter_display();
         (
-            format!("Filtro Activo: Solo mes {} (Todos los años)", m_name),
+            format!("Filtro Activo: {} | {}", years_str, months_str),
             Theme::WARNING,
         )
     } else {
