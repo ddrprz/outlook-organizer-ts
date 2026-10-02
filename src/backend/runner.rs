@@ -27,6 +27,10 @@ pub struct WorkerConfig {
     pub routing_granularity: String,
     pub specific_year: Option<u32>,
     pub specific_month: Option<u32>,
+    #[serde(default)]
+    pub specific_years: Vec<u32>,
+    #[serde(default)]
+    pub specific_months: Vec<u32>,
     pub deduplication_enabled: bool,
     pub deep_scan_enabled: bool,
     pub adaptive_throttling: bool,
@@ -333,6 +337,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "Requiere Outlook en ejecución interactiva y perfil configurado"]
     async fn test_fetch_outlook_mailboxes_live() {
         let items = BackendRunner::fetch_outlook_mailboxes(None).await;
         println!("FETCHED ITEMS: {:?}", items);

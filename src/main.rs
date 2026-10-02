@@ -601,41 +601,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             _ => {}
                         },
-                        RoutingModal::YearScope => match key.code {
-                            KeyCode::Up
-                            | KeyCode::Char('k')
-                            | KeyCode::Down
-                            | KeyCode::Char('j') => {
-                                state.routing_modal_year_scope_idx =
-                                    if state.routing_modal_year_scope_idx == 0 {
-                                        1
+                        RoutingModal::YearScope => {
+                            let available_years = state.available_years_from_psts();
+                            let max_idx = available_years.len();
+                            match key.code {
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if state.routing_modal_year_cursor > 0 {
+                                        state.routing_modal_year_cursor -= 1;
                                     } else {
-                                        0
-                                    };
-                            }
-                            KeyCode::Enter => {
-                                if state.routing_modal_year_scope_idx == 0 {
-                                    // Todos los años (por defecto)
-                                    state.specific_year = None;
-                                    state.routing_all_years = true;
-                                    if state.routing_granularity == RoutingGranularity::Years {
-                                        state.specific_month = None;
-                                        state.routing_all_months = true;
-                                        state.active_routing_modal = RoutingModal::None;
-                                    } else {
-                                        state.routing_modal_month_scope_idx = 0;
-                                        state.active_routing_modal = RoutingModal::MonthScope;
+                                        state.routing_modal_year_cursor = max_idx;
                                     }
-                                } else {
-                                    // Año específico
-                                    state.active_routing_modal = RoutingModal::SpecificYear;
                                 }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if state.routing_modal_year_cursor < max_idx {
+                                        state.routing_modal_year_cursor += 1;
+                                    } else {
+                                        state.routing_modal_year_cursor = 0;
+                                    }
+                                }
+                                KeyCode::Char(' ') => {
+                                    if state.routing_modal_year_cursor == 0 {
+                                        state.set_all_years();
+                                    } else if let Some(&y) = available_years.get(state.routing_modal_year_cursor - 1) {
+                                        state.toggle_year(y);
+                                    }
+                                }
+                                KeyCode::Char('t') | KeyCode::Char('T') => {
+                                    state.set_all_years();
+                                    state.routing_modal_year_cursor = 0;
+                                }
+                                KeyCode::Enter => {
+                                    if state.routing_modal_year_cursor == 0 {
+                                        state.set_all_years();
+                                    } else if state.selected_years.is_empty() {
+                                        if let Some(&y) = available_years.get(state.routing_modal_year_cursor - 1) {
+                                            state.toggle_year(y);
+                                        }
+                                    }
+                                    state.active_routing_modal = RoutingModal::None;
+                                }
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                    state.active_routing_modal = RoutingModal::None;
+                                }
+                                _ => {}
                             }
-                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                state.active_routing_modal = RoutingModal::None;
-                            }
-                            _ => {}
-                        },
+                        }
                         RoutingModal::SpecificYear => match key.code {
                             KeyCode::Char(c) if c.is_ascii_digit() => {
                                 if state.routing_input_year.len() < 4 {
@@ -649,16 +659,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Ok(y) = state.routing_input_year.parse::<u32>()
                                     && (1990..=2050).contains(&y)
                                 {
-                                    state.specific_year = Some(y);
-                                    state.routing_all_years = false;
-                                    if state.routing_granularity == RoutingGranularity::Years {
-                                        state.specific_month = None;
-                                        state.routing_all_months = true;
-                                        state.active_routing_modal = RoutingModal::None;
-                                    } else {
-                                        state.routing_modal_month_scope_idx = 0;
-                                        state.active_routing_modal = RoutingModal::MonthScope;
-                                    }
+                                    state.set_all_years();
+                                    state.toggle_year(y);
+                                    state.active_routing_modal = RoutingModal::None;
                                 }
                             }
                             KeyCode::Esc => {
@@ -666,40 +669,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             _ => {}
                         },
-                        RoutingModal::MonthScope => match key.code {
-                            KeyCode::Up
-                            | KeyCode::Char('k')
-                            | KeyCode::Down
-                            | KeyCode::Char('j') => {
-                                state.routing_modal_month_scope_idx =
-                                    if state.routing_modal_month_scope_idx == 0 {
-                                        1
+                        RoutingModal::MonthScope => {
+                            let available_months = state.available_months_from_psts();
+                            let max_idx = 2 + available_months.len();
+                            match key.code {
+                                KeyCode::Up | KeyCode::Char('k') => {
+                                    if state.routing_modal_month_cursor > 0 {
+                                        state.routing_modal_month_cursor -= 1;
                                     } else {
-                                        0
-                                    };
-                            }
-                            KeyCode::Enter => {
-                                if state.routing_modal_month_scope_idx == 0 {
-                                    // Todos los meses:
-                                    // Si specific_year es Some(y), abarca todos los meses de ese año específico.
-                                    // Si specific_year es None, abarca todos los meses de todos los años.
-                                    state.specific_month = None;
-                                    state.routing_all_months = true;
+                                        state.routing_modal_month_cursor = max_idx;
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j') => {
+                                    if state.routing_modal_month_cursor < max_idx {
+                                        state.routing_modal_month_cursor += 1;
+                                    } else {
+                                        state.routing_modal_month_cursor = 0;
+                                    }
+                                }
+                                KeyCode::Char('1') => {
+                                    state.set_first_half_months();
+                                    state.routing_modal_month_cursor = 1;
+                                }
+                                KeyCode::Char('2') => {
+                                    state.set_second_half_months();
+                                    state.routing_modal_month_cursor = 2;
+                                }
+                                KeyCode::Char('t') | KeyCode::Char('T') => {
+                                    state.set_all_months();
+                                    state.routing_modal_month_cursor = 0;
+                                }
+                                KeyCode::Char(' ') => {
+                                    match state.routing_modal_month_cursor {
+                                        0 => state.set_all_months(),
+                                        1 => state.set_first_half_months(),
+                                        2 => state.set_second_half_months(),
+                                        idx => {
+                                            if let Some(&m) = available_months.get(idx - 3) {
+                                                state.toggle_month(m);
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    if state.routing_modal_month_cursor == 0 {
+                                        state.set_all_months();
+                                    } else if state.routing_modal_month_cursor == 1 {
+                                        state.set_first_half_months();
+                                    } else if state.routing_modal_month_cursor == 2 {
+                                        state.set_second_half_months();
+                                    } else if state.selected_months.is_empty() {
+                                        if let Some(&m) = available_months.get(state.routing_modal_month_cursor - 3) {
+                                            state.toggle_month(m);
+                                        }
+                                    }
                                     state.active_routing_modal = RoutingModal::None;
-                                } else {
-                                    // Mes específico
-                                    state.active_routing_modal = RoutingModal::SpecificMonth;
                                 }
-                            }
-                            KeyCode::Esc => {
-                                if state.specific_year.is_some() {
-                                    state.active_routing_modal = RoutingModal::SpecificYear;
-                                } else {
-                                    state.active_routing_modal = RoutingModal::YearScope;
+                                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                    state.active_routing_modal = RoutingModal::None;
                                 }
+                                _ => {}
                             }
-                            _ => {}
-                        },
+                        }
                         RoutingModal::SpecificMonth => match key.code {
                             KeyCode::Left | KeyCode::Char('h') => {
                                 if state.routing_input_month > 1 {
@@ -716,8 +747,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             KeyCode::Enter => {
-                                state.specific_month = Some(state.routing_input_month);
-                                state.routing_all_months = false;
+                                state.set_all_months();
+                                state.toggle_month(state.routing_input_month);
                                 state.active_routing_modal = RoutingModal::None;
                             }
                             KeyCode::Esc => {
@@ -777,16 +808,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 };
                                 state.active_routing_modal = RoutingModal::Criterion;
                             }
-                            KeyCode::Char('f') | KeyCode::Char('F') => {
-                                state.routing_modal_year_scope_idx =
-                                    if state.specific_year.is_some() { 1 } else { 0 };
+                            KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('a') | KeyCode::Char('A') => {
+                                state.routing_modal_year_cursor = 0;
                                 state.active_routing_modal = RoutingModal::YearScope;
                             }
+                            KeyCode::Char('m') | KeyCode::Char('M') => {
+                                state.routing_modal_month_cursor = 0;
+                                state.active_routing_modal = RoutingModal::MonthScope;
+                            }
                             KeyCode::Char('r') | KeyCode::Char('R') => {
-                                state.specific_year = None;
-                                state.specific_month = None;
-                                state.routing_all_years = true;
-                                state.routing_all_months = true;
+                                state.set_all_years();
+                                state.set_all_months();
                             }
                             _ => handle_navigation_keys(&mut state, key.code),
                         },
@@ -870,6 +902,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             },
                             specific_year: state.specific_year,
                             specific_month: state.specific_month,
+                            specific_years: if state.routing_all_years {
+                                Vec::new()
+                            } else {
+                                state.selected_years.iter().copied().collect()
+                            },
+                            specific_months: if state.routing_all_months {
+                                Vec::new()
+                            } else {
+                                state.selected_months.iter().copied().collect()
+                            },
                             deduplication_enabled: state.deduplication_enabled,
                             deep_scan_enabled: state.deep_scan_enabled,
                             adaptive_throttling: state.adaptive_throttling_enabled,

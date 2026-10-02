@@ -346,6 +346,29 @@ if ($ConfigFile -and (Test-Path $ConfigFile)) {
     }
 }
 
+# Inicializar conjuntos de filtros para búsqueda O(1) de años y meses permitidos
+$allowedYearsSet = $null
+if ($config -and $config.specific_years -and $config.specific_years.Count -gt 0) {
+    $allowedYearsSet = New-Object 'System.Collections.Generic.HashSet[int]'
+    foreach ($y in $config.specific_years) {
+        if ($y) { [void]$allowedYearsSet.Add([int]$y) }
+    }
+} elseif ($config -and $config.specific_year) {
+    $allowedYearsSet = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$allowedYearsSet.Add([int]$config.specific_year)
+}
+
+$allowedMonthsSet = $null
+if ($config -and $config.specific_months -and $config.specific_months.Count -gt 0) {
+    $allowedMonthsSet = New-Object 'System.Collections.Generic.HashSet[int]'
+    foreach ($m in $config.specific_months) {
+        if ($m) { [void]$allowedMonthsSet.Add([int]$m) }
+    }
+} elseif ($config -and $config.specific_month) {
+    $allowedMonthsSet = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$allowedMonthsSet.Add([int]$config.specific_month)
+}
+
 $outlook = $null
 $namespace = $null
 $storesToUnmount = @()
@@ -600,14 +623,14 @@ try {
                         $rcvd = Get-Date
                     }
 
-                    # Filtro por año específico si está configurado
-                    if ($config -and $config.specific_year -and $rcvd.Year -ne [int]$config.specific_year) {
+                    # Filtro por años específicos si está configurado
+                    if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
                         $pstProcessedCount++
                         continue
                     }
 
-                    # Filtro por mes específico si está configurado
-                    if ($config -and $config.specific_month -and $rcvd.Month -ne [int]$config.specific_month) {
+                    # Filtro por meses específicos si está configurado
+                    if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
                         $pstProcessedCount++
                         continue
                     }
