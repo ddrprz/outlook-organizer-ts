@@ -876,7 +876,8 @@ try {
                 $srcFolder = $null
             }
         }
-        catch {
+    }
+    catch {
             $totalErrors++
             Log-Message "Error crítico durante el procesamiento de PST '$pstName': $_" "ERROR"
         }
