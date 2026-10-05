@@ -91,6 +91,20 @@ try {
     # Función recursiva para explorar carpetas, jerarquía y métricas temporales
     function Inspect-Folder($folder, [string]$parentPath = "") {
         $fName = $folder.Name
+        if ($fName -match "^(Yammer Root|Quick Step Settings|Conversation History|Social Activity Provider RSS Feeds|Sync Issues|Problemas de sincronización|Conflictos|Errores locales|Fallos del servidor)$") {
+            return
+        }
+
+        # Desenvolver contenedor intermedio técnico MAPI si existe
+        if ($fName -match "^(Top of Information Store|Top of Personal Folders|Elemento superior del almacén de información|IPM_SUBTREE)$") {
+            try {
+                foreach ($sub in $folder.Folders) {
+                    Inspect-Folder $sub $parentPath
+                }
+            } catch {}
+            return
+        }
+
         $relPath = if ($parentPath) { "$parentPath\$fName" } else { $fName }
         $fCount = 0
         try { $fCount = $folder.Items.Count } catch {}
