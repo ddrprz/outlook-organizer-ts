@@ -17,6 +17,13 @@ pub enum WizardStep {
     Execution,
     Completion,
     PstDetailView,
+    // Pasos del Asistente para Separar PSTs
+    SplitSelect,
+    SplitFilter,
+    SplitConfig,
+    SplitSummary,
+    SplitExecution,
+    SplitCompletion,
 }
 
 impl WizardStep {
@@ -34,6 +41,12 @@ impl WizardStep {
             WizardStep::Execution => "Procesando en Tiempo Real",
             WizardStep::Completion => "Operación Finalizada y Reportes",
             WizardStep::PstDetailView => "Detalle Analítico del Archivo PST",
+            WizardStep::SplitSelect => "Separar PST: Selección de Archivo Origen",
+            WizardStep::SplitFilter => "Separar PST: Filtro de Periodos y Carpetas",
+            WizardStep::SplitConfig => "Separar PST: Configuración de Partición y Salida",
+            WizardStep::SplitSummary => "Separar PST: Resumen Pre-Vuelo y Confirmación",
+            WizardStep::SplitExecution => "Separar PST: Procesando y Generando Archivos",
+            WizardStep::SplitCompletion => "Separar PST: Operación Finalizada",
         }
     }
 
@@ -51,6 +64,105 @@ impl WizardStep {
             WizardStep::Summary => 7,
             WizardStep::Execution => 7,
             WizardStep::Completion => 7,
+            WizardStep::SplitSelect => 1,
+            WizardStep::SplitFilter => 2,
+            WizardStep::SplitConfig => 3,
+            WizardStep::SplitSummary => 4,
+            WizardStep::SplitExecution => 4,
+            WizardStep::SplitCompletion => 4,
+        }
+    }
+
+    pub fn total_steps(&self) -> usize {
+        match self {
+            WizardStep::SplitSelect
+            | WizardStep::SplitFilter
+            | WizardStep::SplitConfig
+            | WizardStep::SplitSummary
+            | WizardStep::SplitExecution
+            | WizardStep::SplitCompletion => 4,
+            _ => 7,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SplitPartitionMode {
+    ByYear,
+    ByYearMonth,
+    SinglePst,
+}
+
+impl SplitPartitionMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            SplitPartitionMode::ByYear => "Un archivo PST por cada año (ej. Backup_2023.pst)",
+            SplitPartitionMode::ByYearMonth => "Un archivo PST por cada año y mes (ej. Backup_2024_05.pst)",
+            SplitPartitionMode::SinglePst => "Un único archivo consolidado (ej. Backup_filtrado.pst)",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SplitTransferMode {
+    Copy,
+    Move,
+}
+
+impl SplitTransferMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            SplitTransferMode::Copy => "Copiar correos [Recomendado] (PST original intacto)",
+            SplitTransferMode::Move => "Mover correos [Destructivo] (Reduce tamaño del PST original)",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SplitPstState {
+    pub source_pst: Option<PstItem>,
+    pub output_dir: String,
+    pub is_editing_output_dir: bool,
+    pub partition_mode: SplitPartitionMode,
+    pub transfer_mode: SplitTransferMode,
+    pub selected_years: std::collections::BTreeSet<u32>,
+    pub selected_months: std::collections::BTreeSet<u32>,
+    pub include_inbox: bool,
+    pub include_sent: bool,
+    pub include_deleted: bool,
+    pub include_custom_folders: bool,
+    pub available_years: Vec<u32>,
+    pub available_months: Vec<u32>,
+    pub year_cursor: usize,
+    pub month_cursor: usize,
+    pub config_cursor: usize, // 0: partition_mode, 1: transfer_mode, 2: output_dir
+    pub generated_psts: Vec<crate::backend::messages::GeneratedPstInfo>,
+    pub execution_status: String,
+    pub total_extracted: u64,
+}
+
+impl Default for SplitPstState {
+    fn default() -> Self {
+        Self {
+            source_pst: None,
+            output_dir: r"C:\Correo".to_string(),
+            is_editing_output_dir: false,
+            partition_mode: SplitPartitionMode::ByYear,
+            transfer_mode: SplitTransferMode::Copy,
+            selected_years: std::collections::BTreeSet::new(),
+            selected_months: std::collections::BTreeSet::new(),
+            include_inbox: true,
+            include_sent: true,
+            include_deleted: false,
+            include_custom_folders: true,
+            available_years: Vec::new(),
+            available_months: (1..=12).collect(),
+            year_cursor: 0,
+            month_cursor: 0,
+            config_cursor: 0,
+            generated_psts: Vec::new(),
+            execution_status: "Listo".to_string(),
+            total_extracted: 0,
         }
     }
 }
@@ -771,6 +883,7 @@ pub struct FileExplorerState {
     pub selected_idx: usize,
     pub is_drives_view: bool,
     pub warning_notice: Option<String>,
+    pub return_step: WizardStep,
 }
 
 impl FileExplorerState {
@@ -781,6 +894,7 @@ impl FileExplorerState {
             selected_idx: 0,
             is_drives_view: false,
             warning_notice: None,
+            return_step: WizardStep::PstSource,
         };
         state.refresh();
         state
@@ -1046,6 +1160,12 @@ impl Default for ProgressState {
     }
 }
 
+impl ProgressState {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// Estado global reactivo de la aplicación
 pub struct AppState {
     pub step: WizardStep,
@@ -1124,6 +1244,9 @@ pub struct AppState {
     pub processed_items: Vec<ProcessedEmailItem>,
     pub html_report_path: Option<PathBuf>,
     pub json_audit_path: Option<PathBuf>,
+
+    // Estado del Asistente para Separar PSTs
+    pub split: SplitPstState,
 }
 
 pub fn default_fallback_mailboxes() -> Vec<MailboxItem> {
@@ -1201,6 +1324,7 @@ impl AppState {
             processed_items: Vec::new(),
             html_report_path: None,
             json_audit_path: None,
+            split: SplitPstState::default(),
         }
     }
 
@@ -1701,6 +1825,16 @@ impl AppState {
             WizardStep::Summary => WizardStep::Execution,
             WizardStep::Execution => WizardStep::Completion,
             WizardStep::Completion => WizardStep::Completion,
+            // Pasos de Separar PSTs
+            WizardStep::SplitSelect => {
+                self.init_split_from_selected_pst();
+                WizardStep::SplitFilter
+            }
+            WizardStep::SplitFilter => WizardStep::SplitConfig,
+            WizardStep::SplitConfig => WizardStep::SplitSummary,
+            WizardStep::SplitSummary => WizardStep::SplitExecution,
+            WizardStep::SplitExecution => WizardStep::SplitCompletion,
+            WizardStep::SplitCompletion => WizardStep::Welcome,
         };
     }
 
@@ -1725,7 +1859,107 @@ impl AppState {
             WizardStep::Summary => WizardStep::Filters,
             WizardStep::Execution => WizardStep::Summary,
             WizardStep::Completion => WizardStep::Summary,
+            // Pasos de Separar PSTs
+            WizardStep::SplitSelect => WizardStep::Welcome,
+            WizardStep::SplitFilter => WizardStep::SplitSelect,
+            WizardStep::SplitConfig => WizardStep::SplitFilter,
+            WizardStep::SplitSummary => WizardStep::SplitConfig,
+            WizardStep::SplitExecution => WizardStep::SplitSummary,
+            WizardStep::SplitCompletion => WizardStep::Welcome,
         };
+    }
+
+    pub fn init_split_from_selected_pst(&mut self) {
+        if let Some(pst) = self.discovered_psts.get(self.selected_pst_table_idx) {
+            let p_clone = pst.clone();
+            let parent_dir = Path::new(&p_clone.path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| r"C:\Correo".to_string());
+
+            self.split.source_pst = Some(p_clone);
+            self.split.output_dir = parent_dir;
+
+            if let Some(detail) = self.pst_details_cache.get(&pst.path) {
+                let mut years = detail.years.clone();
+                years.sort();
+                if years.is_empty() {
+                    let current_year = chrono::Utc::now().format("%Y").to_string().parse::<u32>().unwrap_or(2025);
+                    years = vec![current_year];
+                }
+                self.split.available_years = years.clone();
+                self.split.selected_years = years.into_iter().collect();
+
+                let mut months = Vec::new();
+                for m_list in detail.year_months.values() {
+                    for &m in m_list {
+                        if !months.contains(&m) {
+                            months.push(m);
+                        }
+                    }
+                }
+                months.sort();
+                if months.is_empty() {
+                    months = (1..=12).collect();
+                }
+                self.split.available_months = months.clone();
+                self.split.selected_months = months.into_iter().collect();
+            } else {
+                let current_year = chrono::Utc::now().format("%Y").to_string().parse::<u32>().unwrap_or(2025);
+                self.split.available_years = (current_year.saturating_sub(4)..=current_year).collect();
+                self.split.selected_years = self.split.available_years.iter().copied().collect();
+                self.split.available_months = (1..=12).collect();
+                self.split.selected_months = (1..=12).collect();
+            }
+        }
+    }
+
+    pub fn preview_split_filenames(&self) -> Vec<String> {
+        let Some(ref src) = self.split.source_pst else {
+            return Vec::new();
+        };
+        let base_name = Path::new(&src.path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("PST");
+
+        let years: Vec<u32> = if self.split.selected_years.is_empty() {
+            if !self.split.available_years.is_empty() {
+                self.split.available_years.clone()
+            } else {
+                vec![2025]
+            }
+        } else {
+            self.split.selected_years.iter().copied().collect()
+        };
+
+        let months: Vec<u32> = if self.split.selected_months.is_empty() {
+            if !self.split.available_months.is_empty() {
+                self.split.available_months.clone()
+            } else {
+                (1..=12).collect()
+            }
+        } else {
+            self.split.selected_months.iter().copied().collect()
+        };
+
+        match self.split.partition_mode {
+            SplitPartitionMode::ByYear => {
+                years.into_iter().map(|y| format!("{}_{}.pst", base_name, y)).collect()
+            }
+            SplitPartitionMode::ByYearMonth => {
+                let mut out = Vec::new();
+                for y in &years {
+                    for m in &months {
+                        out.push(format!("{}_{}_{:02}.pst", base_name, y, m));
+                    }
+                }
+                out
+            }
+            SplitPartitionMode::SinglePst => {
+                vec![format!("{}_filtrado.pst", base_name)]
+            }
+        }
     }
 }
 
@@ -2458,6 +2692,85 @@ mod tests {
 
         state.toggle_month(10);
         assert_eq!(state.format_months_filter_display(), "Meses: May, Oct");
+    }
+
+    #[test]
+    fn test_split_pst_preview_filenames_modes() {
+        let mut state = AppState::new();
+        state.split.source_pst = Some(PstItem {
+            path: r"C:\Correo\archivo_principal.pst".to_string(),
+            name: "archivo_principal.pst".to_string(),
+            size_mb: 150.0,
+            selected: true,
+        });
+        state.split.selected_years.insert(2023);
+        state.split.selected_years.insert(2024);
+        state.split.selected_months.insert(5);
+        state.split.selected_months.insert(12);
+
+        // Modo ByYear
+        state.split.partition_mode = SplitPartitionMode::ByYear;
+        let preview_years = state.preview_split_filenames();
+        assert_eq!(preview_years.len(), 2);
+        assert!(preview_years.contains(&"archivo_principal_2023.pst".to_string()));
+        assert!(preview_years.contains(&"archivo_principal_2024.pst".to_string()));
+
+        // Modo ByYearMonth
+        state.split.partition_mode = SplitPartitionMode::ByYearMonth;
+        let preview_year_months = state.preview_split_filenames();
+        assert_eq!(preview_year_months.len(), 4);
+        assert!(preview_year_months.contains(&"archivo_principal_2023_05.pst".to_string()));
+        assert!(preview_year_months.contains(&"archivo_principal_2023_12.pst".to_string()));
+        assert!(preview_year_months.contains(&"archivo_principal_2024_05.pst".to_string()));
+        assert!(preview_year_months.contains(&"archivo_principal_2024_12.pst".to_string()));
+
+        // Modo SinglePst
+        state.split.partition_mode = SplitPartitionMode::SinglePst;
+        let preview_single = state.preview_split_filenames();
+        assert_eq!(preview_single.len(), 1);
+        assert_eq!(preview_single[0], "archivo_principal_filtrado.pst");
+    }
+
+    #[test]
+    fn test_split_pst_init_and_step_transitions() {
+        let mut state = AppState::new();
+        state.discovered_psts = vec![PstItem {
+            path: r"C:\Archivos\backup.pst".to_string(),
+            name: "backup.pst".to_string(),
+            size_mb: 1024.0,
+            selected: false,
+        }];
+        state.selected_pst_table_idx = 0;
+
+        // Inicializar split para el PST en index 0
+        state.init_split_from_selected_pst();
+        assert!(state.split.source_pst.is_some());
+        assert_eq!(state.split.source_pst.as_ref().unwrap().name, "backup.pst");
+        assert_eq!(state.split.output_dir, r"C:\Archivos");
+
+        // Transiciones del wizard de Split
+        state.step = WizardStep::SplitSelect;
+        state.next_step();
+        assert_eq!(state.step, WizardStep::SplitFilter);
+
+        state.next_step();
+        assert_eq!(state.step, WizardStep::SplitConfig);
+
+        state.next_step();
+        assert_eq!(state.step, WizardStep::SplitSummary);
+
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::SplitConfig);
+
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::SplitFilter);
+
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::SplitSelect);
+
+        // Del Select hacia atrás regresa al Welcome
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::Welcome);
     }
 }
 

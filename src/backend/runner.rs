@@ -36,6 +36,22 @@ pub struct WorkerConfig {
     pub adaptive_throttling: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SplitWorkerConfig {
+    pub profile_name: Option<String>,
+    pub source_pst_path: String,
+    pub output_dir: String,
+    pub partition_mode: String,
+    pub transfer_mode: String,
+    pub selected_years: Vec<u32>,
+    pub selected_months: Vec<u32>,
+    pub include_inbox: bool,
+    pub include_sent: bool,
+    pub include_deleted: bool,
+    pub include_custom_folders: bool,
+    pub adaptive_throttling: bool,
+}
+
 /// Ejecuta el worker de PowerShell de forma completamente asíncrona sin bloquear la UI
 pub struct BackendRunner;
 
@@ -145,6 +161,104 @@ impl BackendRunner {
                                 timestamp: "WARN".to_string(),
                                 level: "WARN".to_string(),
                                 message: format!("[PowerShell] {}", line),
+                            });
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok((child, abort_path))
+    }
+
+    pub fn spawn_split_worker(
+        config: &SplitWorkerConfig,
+        tx: UnboundedSender<BackendMessage>,
+    ) -> Result<(tokio::process::Child, PathBuf), std::io::Error> {
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("outlook_organizer_split_worker.ps1");
+        let config_path = temp_dir.join("outlook_organizer_split_config.json");
+        let abort_path = temp_dir.join("outlook_organizer_split_abort.flag");
+
+        if abort_path.exists() {
+            let _ = fs::remove_file(&abort_path);
+        }
+
+        let script_content = include_str!("split_worker.ps1");
+        fs::write(&script_path, format!("\u{feff}{}", script_content))?;
+
+        let config_json = serde_json::to_string_pretty(config)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        fs::write(&config_path, config_json)?;
+
+        let mut cmd = Command::new("powershell");
+        configure_low_overhead_command(&mut cmd);
+        let mut child = cmd
+            .arg("-Sta")
+            .arg("-NoProfile")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-File")
+            .arg(&script_path)
+            .arg("-ConfigFile")
+            .arg(&config_path)
+            .arg("-AbortFile")
+            .arg(&abort_path)
+            .stdout(Stdio::piped())
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let tx_out = tx.clone();
+
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stdout);
+            let mut buf = Vec::new();
+
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf).trim().to_string();
+                        if line.is_empty() {
+                            continue;
+                        }
+
+                        if let Ok(msg) = serde_json::from_str::<BackendMessage>(&line) {
+                            let _ = tx_out.send(msg);
+                        } else {
+                            let _ = tx_out.send(BackendMessage::Log {
+                                timestamp: "LIVE".to_string(),
+                                level: "INFO".to_string(),
+                                message: line,
+                            });
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let stderr = child.stderr.take().expect("Failed to capture stderr");
+        let tx_err = tx.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut buf = Vec::new();
+
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf).trim().to_string();
+                        if !line.is_empty() {
+                            let _ = tx_err.send(BackendMessage::Log {
+                                timestamp: "WARN".to_string(),
+                                level: "WARN".to_string(),
+                                message: format!("[PowerShell Split] {}", line),
                             });
                         }
                     }

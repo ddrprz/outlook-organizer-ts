@@ -16,6 +16,9 @@ impl Theme {
     // Superficies y texto
     pub const BG_DARK: Color = Color::Rgb(15, 23, 42);            // Slate ultra oscuro fondo
     pub const BG_CARD: Color = Color::Rgb(37, 37, 38);            // Gris oscuro superficie
+    pub const SURFACE: Color = Color::Rgb(37, 37, 38);            // Superficie estándar
+    pub const SURFACE_HIGHLIGHT: Color = Color::Rgb(50, 50, 55);  // Superficie resaltada
+    pub const BORDER_INACTIVE: Color = Color::Rgb(100, 100, 105); // Borde inactivo
     pub const TEXT_MAIN: Color = Color::Rgb(255, 255, 255);       // Blanco principal
     pub const TEXT_MUTED: Color = Color::Rgb(138, 136, 134);      // Gris atenuado
 

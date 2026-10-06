@@ -28,7 +28,8 @@ use ui::{
     header::render_header,
     screens::{
         completion, deduplication, execution, explorer, filters, folders_mode, mailbox,
-        pst_detail_view, pst_source, routing, summary, welcome,
+        pst_detail_view, pst_source, routing, split_completion, split_config, split_execution,
+        split_filter, split_select, split_summary, summary, welcome,
     },
 };
 
@@ -116,6 +117,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     state.step = WizardStep::Completion;
+                }
+                BackendMessage::SplitFinished {
+                    status,
+                    total_items,
+                    generated_psts,
+                    errors: _,
+                } => {
+                    state.split.execution_status = status.clone();
+                    state.split.total_extracted = total_items;
+                    state.split.generated_psts = generated_psts;
+                    state.log_event(format!(
+                        "[FIN] Separación de PSTs finalizada con estado: {}. Correos transferidos: {}",
+                        status, total_items
+                    ));
+                    state.step = WizardStep::SplitCompletion;
                 }
                 BackendMessage::MailboxesLoaded { items } => {
                     state.is_loading_mailboxes = false;
@@ -248,7 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
-                                if state.welcome_menu_idx + 1 < 4 {
+                                if state.welcome_menu_idx + 1 < 5 {
                                     state.welcome_menu_idx += 1;
                                 }
                             }
@@ -258,20 +274,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             KeyCode::Char('2') => {
                                 state.welcome_menu_idx = 1;
+                                start_split_pst(&mut state);
+                            }
+                            KeyCode::Char('3') => {
+                                state.welcome_menu_idx = 2;
                                 open_file_explorer(&mut state);
                             }
-                            KeyCode::Char('3') | KeyCode::Char('p') | KeyCode::Char('P') => {
-                                state.welcome_menu_idx = 2;
+                            KeyCode::Char('4') | KeyCode::Char('p') | KeyCode::Char('P') => {
+                                state.welcome_menu_idx = 3;
                                 state.is_editing_profile = true;
                             }
-                            KeyCode::Char('4') => {
+                            KeyCode::Char('5') => {
                                 state.should_quit = true;
                             }
                             KeyCode::Enter => match state.welcome_menu_idx {
                                 0 => start_import_or_explore(&mut state),
-                                1 => open_file_explorer(&mut state),
-                                2 => state.is_editing_profile = true,
-                                3 => state.should_quit = true,
+                                1 => start_split_pst(&mut state),
+                                2 => open_file_explorer(&mut state),
+                                3 => state.is_editing_profile = true,
+                                4 => state.should_quit = true,
                                 _ => {}
                             },
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -314,7 +335,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 state.explorer.current_path.to_string_lossy().to_string();
                             state.selected_pst_table_idx = 0;
                             state.pst_warning_notice = None;
-                            state.step = WizardStep::PstSource;
+                            state.step = state.explorer.return_step;
+                            if state.step == WizardStep::SplitSelect {
+                                state.init_split_from_selected_pst();
+                            }
                         } else if !state.explorer.is_drives_view
                             && state.explorer.current_path.exists()
                         {
@@ -323,7 +347,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 state.explorer.current_path.to_string_lossy().to_string();
                             state.selected_pst_table_idx = 0;
                             state.pst_warning_notice = None;
-                            state.step = WizardStep::PstSource;
+                            state.step = state.explorer.return_step;
+                            if state.step == WizardStep::SplitSelect {
+                                state.init_split_from_selected_pst();
+                            }
                         }
                     }
                     KeyCode::Char('b') | KeyCode::Char('B') => {
@@ -348,7 +375,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Esc => {
-                        state.step = WizardStep::Welcome;
+                        state.step = state.explorer.return_step;
                     }
                     _ => {}
                 },
@@ -633,10 +660,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 KeyCode::Enter => {
                                     if state.routing_modal_year_cursor == 0 {
                                         state.set_all_years();
-                                    } else if state.selected_years.is_empty() {
-                                        if let Some(&y) = available_years.get(state.routing_modal_year_cursor - 1) {
+                                    } else if state.selected_years.is_empty()
+                                        && let Some(&y) = available_years.get(state.routing_modal_year_cursor - 1) {
                                             state.toggle_year(y);
-                                        }
                                     }
                                     state.active_routing_modal = RoutingModal::None;
                                 }
@@ -718,10 +744,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         state.set_first_half_months();
                                     } else if state.routing_modal_month_cursor == 2 {
                                         state.set_second_half_months();
-                                    } else if state.selected_months.is_empty() {
-                                        if let Some(&m) = available_months.get(state.routing_modal_month_cursor - 3) {
+                                    } else if state.selected_months.is_empty()
+                                        && let Some(&m) = available_months.get(state.routing_modal_month_cursor - 3) {
                                             state.toggle_month(m);
-                                        }
                                     }
                                     state.active_routing_modal = RoutingModal::None;
                                 }
@@ -1020,6 +1045,228 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     _ => {}
                 },
+                WizardStep::SplitSelect => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if state.selected_pst_table_idx > 0 {
+                            state.selected_pst_table_idx -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if state.selected_pst_table_idx + 1 < state.discovered_psts.len() {
+                            state.selected_pst_table_idx += 1;
+                        }
+                    }
+                    KeyCode::Char('e') | KeyCode::Char('E') => {
+                        state.explorer.return_step = WizardStep::SplitSelect;
+                        open_file_explorer(&mut state);
+                    }
+                    KeyCode::Enter => {
+                        if !state.discovered_psts.is_empty() {
+                            state.next_step();
+                        }
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.step = WizardStep::Welcome;
+                    }
+                    KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        state.should_quit = true;
+                    }
+                    _ => {}
+                },
+                WizardStep::SplitFilter => match key.code {
+                    KeyCode::Tab => {
+                        state.split.config_cursor = if state.split.config_cursor == 0 { 1 } else { 0 };
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if state.split.config_cursor == 0 {
+                            if state.split.year_cursor > 0 {
+                                state.split.year_cursor -= 1;
+                            }
+                        } else {
+                            if state.split.month_cursor > 0 {
+                                state.split.month_cursor -= 1;
+                            }
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if state.split.config_cursor == 0 {
+                            if state.split.year_cursor + 1 < state.split.available_years.len() {
+                                state.split.year_cursor += 1;
+                            }
+                        } else {
+                            if state.split.month_cursor + 1 < 12 {
+                                state.split.month_cursor += 1;
+                            }
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        if state.split.config_cursor == 0 {
+                            if let Some(&y) = state.split.available_years.get(state.split.year_cursor) {
+                                if state.split.selected_years.contains(&y) {
+                                    state.split.selected_years.remove(&y);
+                                } else {
+                                    state.split.selected_years.insert(y);
+                                }
+                            }
+                        } else {
+                            let m = (state.split.month_cursor + 1) as u32;
+                            if state.split.selected_months.contains(&m) {
+                                state.split.selected_months.remove(&m);
+                            } else {
+                                state.split.selected_months.insert(m);
+                            }
+                        }
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        state.split.selected_years = state.split.available_years.iter().copied().collect();
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('N') => {
+                        if state.split.config_cursor == 0 {
+                            state.split.selected_years.clear();
+                        } else {
+                            state.split.selected_months.clear();
+                        }
+                    }
+                    KeyCode::Char('1') => {
+                        state.split.selected_months = (1..=6).collect();
+                    }
+                    KeyCode::Char('2') => {
+                        state.split.selected_months = (7..=12).collect();
+                    }
+                    KeyCode::Char('t') | KeyCode::Char('T') => {
+                        state.split.selected_months = (1..=12).collect();
+                    }
+                    KeyCode::Char('i') | KeyCode::Char('I') => {
+                        state.split.include_inbox = !state.split.include_inbox;
+                    }
+                    KeyCode::Char('s') | KeyCode::Char('S') => {
+                        state.split.include_sent = !state.split.include_sent;
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        state.split.include_deleted = !state.split.include_deleted;
+                    }
+                    KeyCode::Char('c') | KeyCode::Char('C') => {
+                        state.split.include_custom_folders = !state.split.include_custom_folders;
+                    }
+                    KeyCode::Enter => {
+                        state.next_step();
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.prev_step();
+                    }
+                    _ => {}
+                },
+                WizardStep::SplitConfig => {
+                    if state.split.is_editing_output_dir {
+                        match key.code {
+                            KeyCode::Enter | KeyCode::Esc => {
+                                state.split.is_editing_output_dir = false;
+                            }
+                            KeyCode::Backspace => {
+                                state.split.output_dir.pop();
+                            }
+                            KeyCode::Char(c) if state.split.output_dir.len() < 240 => {
+                                state.split.output_dir.push(c);
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        match key.code {
+                            KeyCode::Char('1') => {
+                                state.split.partition_mode = crate::app::SplitPartitionMode::ByYear;
+                            }
+                            KeyCode::Char('2') => {
+                                state.split.partition_mode = crate::app::SplitPartitionMode::ByYearMonth;
+                            }
+                            KeyCode::Char('3') => {
+                                state.split.partition_mode = crate::app::SplitPartitionMode::SinglePst;
+                            }
+                            KeyCode::Char('m') | KeyCode::Char('M') => {
+                                state.split.transfer_mode = match state.split.transfer_mode {
+                                    crate::app::SplitTransferMode::Copy => crate::app::SplitTransferMode::Move,
+                                    crate::app::SplitTransferMode::Move => crate::app::SplitTransferMode::Copy,
+                                };
+                            }
+                            KeyCode::Char('o') | KeyCode::Char('O') => {
+                                state.split.is_editing_output_dir = true;
+                            }
+                            KeyCode::Enter => {
+                                state.next_step();
+                            }
+                            KeyCode::Esc | KeyCode::Backspace => {
+                                state.prev_step();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                WizardStep::SplitSummary => match key.code {
+                    KeyCode::Enter => {
+                        state.progress.reset();
+                        state.progress.current_pst_name = "Iniciando partición...".to_string();
+                        state.log_event("[SPLIT] Iniciando partición de archivo PST...".to_string());
+
+                        let config = crate::backend::runner::SplitWorkerConfig {
+                            profile_name: if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
+                            source_pst_path: state.split.source_pst.as_ref().map(|p| p.path.clone()).unwrap_or_default(),
+                            output_dir: state.split.output_dir.clone(),
+                            partition_mode: match state.split.partition_mode {
+                                crate::app::SplitPartitionMode::ByYear => "ByYear".to_string(),
+                                crate::app::SplitPartitionMode::ByYearMonth => "ByYearMonth".to_string(),
+                                crate::app::SplitPartitionMode::SinglePst => "SinglePst".to_string(),
+                            },
+                            transfer_mode: match state.split.transfer_mode {
+                                crate::app::SplitTransferMode::Copy => "Copy".to_string(),
+                                crate::app::SplitTransferMode::Move => "Move".to_string(),
+                            },
+                            selected_years: state.split.selected_years.iter().copied().collect(),
+                            selected_months: state.split.selected_months.iter().copied().collect(),
+                            include_inbox: state.split.include_inbox,
+                            include_sent: state.split.include_sent,
+                            include_deleted: state.split.include_deleted,
+                            include_custom_folders: state.split.include_custom_folders,
+                            adaptive_throttling: state.adaptive_throttling_enabled,
+                        };
+
+                        match BackendRunner::spawn_split_worker(&config, tx.clone()) {
+                            Ok((child, abort_path)) => {
+                                worker_child = Some(child);
+                                worker_abort_file = Some(abort_path);
+                                state.step = WizardStep::SplitExecution;
+                            }
+                            Err(e) => {
+                                state.log_event(format!("[ERROR] No se pudo iniciar el proceso de separación: {}", e));
+                            }
+                        }
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.prev_step();
+                    }
+                    _ => {}
+                },
+                WizardStep::SplitExecution => match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
+                        if !state.progress.graceful_cancelling =>
+                    {
+                        state.progress.graceful_cancelling = true;
+                        if let Some(ref path) = worker_abort_file {
+                            let _ = std::fs::File::create(path);
+                        }
+                        state.log_event("[ABORT] Señal de parada enviada al particionador de PSTs.".to_string());
+                    }
+                    _ => {}
+                },
+                WizardStep::SplitCompletion => match key.code {
+                    KeyCode::Char('o') | KeyCode::Char('O') => {
+                        let _ = std::process::Command::new("explorer")
+                            .arg(&state.split.output_dir)
+                            .spawn();
+                    }
+                    KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        state.step = WizardStep::Welcome;
+                    }
+                    _ => {}
+                },
             }
         }
     }
@@ -1049,6 +1296,17 @@ fn start_import_or_explore(state: &mut AppState) {
         state.explorer.refresh();
         state.step = WizardStep::FileExplorer;
     }
+}
+
+fn start_split_pst(state: &mut AppState) {
+    let default_path = Path::new(r"C:\Correo");
+    if default_path.exists() && state.discovered_psts.is_empty() {
+        state.discovered_psts = crate::app::scan_folder_for_psts(default_path);
+        state.pst_scan_path = r"C:\Correo".to_string();
+    }
+    state.selected_pst_table_idx = 0;
+    state.init_split_from_selected_pst();
+    state.step = WizardStep::SplitSelect;
 }
 
 fn open_file_explorer(state: &mut AppState) {
@@ -1083,7 +1341,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         .split(size);
 
     // 1. Header
-    render_header(f, chunks[0], state.step.title(), state.step.index(), 7);
+    render_header(f, chunks[0], state.step.title(), state.step.index(), state.step.total_steps());
 
     // 2. Body según el paso activo
     match state.step {
@@ -1099,6 +1357,12 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::Execution => execution::render(f, chunks[1], state),
         WizardStep::Completion => completion::render(f, chunks[1], state),
         WizardStep::PstDetailView => pst_detail_view::render(f, chunks[1], state),
+        WizardStep::SplitSelect => split_select::render(f, chunks[1], state),
+        WizardStep::SplitFilter => split_filter::render(f, chunks[1], state),
+        WizardStep::SplitConfig => split_config::render(f, chunks[1], state),
+        WizardStep::SplitSummary => split_summary::render(f, chunks[1], state),
+        WizardStep::SplitExecution => split_execution::render(f, chunks[1], state),
+        WizardStep::SplitCompletion => split_completion::render(f, chunks[1], state),
     }
 
     // 3. Footer con Marca de Agua Timeless Support
@@ -1106,7 +1370,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::Welcome => vec![
             ("↑/↓", "Navegar"),
             ("Enter", "Seleccionar"),
-            ("1-4", "Acceso"),
+            ("1-5", "Acceso"),
             ("P", "Perfil"),
             ("Q", "Salir"),
         ],
@@ -1202,6 +1466,40 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
             ("←/Backspace", "Plegar"),
             ("Espacio", "Aislar Métricas"),
             ("Esc/Q", "Volver"),
+        ],
+        WizardStep::SplitSelect => vec![
+            ("↑/↓", "Navegar"),
+            ("Enter", "Seleccionar"),
+            ("E", "Explorador"),
+            ("Esc", "Menú"),
+        ],
+        WizardStep::SplitFilter => vec![
+            ("Tab", "Años/Meses"),
+            ("↑/↓", "Navegar"),
+            ("Espacio", "Marcar"),
+            ("A/N", "Todos/Ninguno"),
+            ("1/2/T", "Semestres/Todos"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
+        ],
+        WizardStep::SplitConfig => vec![
+            ("1/2/3", "Partición"),
+            ("M", "Copiar/Mover"),
+            ("O", "Carpeta Destino"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
+        ],
+        WizardStep::SplitSummary => vec![
+            ("Enter", "Iniciar Separación"),
+            ("Esc", "Atrás"),
+            ("Q", "Salir"),
+        ],
+        WizardStep::SplitExecution => vec![
+            ("Esc/Q", "Parada Segura"),
+        ],
+        WizardStep::SplitCompletion => vec![
+            ("O", "Abrir Carpeta"),
+            ("Enter/Q", "Menú Principal"),
         ],
     };
 

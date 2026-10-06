@@ -8,11 +8,16 @@ use ratatui::{
 
 use crate::{app::AppState, ui::theme::Theme};
 
-pub const MENU_ITEMS: [(&str, &str, &str); 4] = [
+pub const MENU_ITEMS: [(&str, &str, &str); 5] = [
     (
         "Importar PST",
         "Iniciar el asistente completo de migración hacia buzones de Outlook / M365.",
         "Asistente guiado paso a paso con deduplicación y enrutamiento.",
+    ),
+    (
+        "Separar PST",
+        "Dividir un archivo PST filtrando por años y meses en uno o múltiples PSTs.",
+        "Crea nuevos archivos PST segmentados por año o mes, manteniendo el original intacto.",
     ),
     (
         "Escanear PSTs",
@@ -184,7 +189,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(detail_block, body_chunks[1]);
 
     let current_menu = MENU_ITEMS[state.welcome_menu_idx.min(MENU_ITEMS.len() - 1)];
-    let detail_lines = if state.welcome_menu_idx == 2 {
+    let detail_lines = if state.welcome_menu_idx == 3 {
         let current_profile_desc = if state.use_default_profile {
             "• Modo activo: Predeterminado de Windows"
         } else if state.custom_profile_name.trim().is_empty() {
@@ -236,7 +241,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Span::styled("Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(" para ejecutar o ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled("[1-4]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("[1-5]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(" para selección directa.", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ]
