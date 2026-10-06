@@ -74,6 +74,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),
         )
+    } else if progress.is_paused {
+        Span::styled(
+            " ⏸ EN PAUSA [P: Reanudar] ",
+            Style::default()
+                .bg(Theme::WARNING)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
     } else if progress.throttling_active {
         Span::styled(
             " ▲ THROTTLING ACTIVO ",

@@ -47,18 +47,28 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .split(chunks[1]);
 
     // COLUMNA IZQUIERDA: PARÁMETROS
-    let source_pst_name = state
-        .split
-        .source_pst
-        .as_ref()
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| "No seleccionado".to_string());
-    let source_pst_size = state
-        .split
-        .source_pst
-        .as_ref()
-        .map(|p| format!("{:.2} MB", p.size_mb))
-        .unwrap_or_else(|| "0 MB".to_string());
+    let (source_pst_label, source_pst_name, source_pst_size) = if state.split.source_psts.len() > 1 {
+        let total_size: f64 = state.split.source_psts.iter().map(|p| p.size_mb).sum();
+        (
+            "• Archivos PST Origen: ",
+            format!("{} archivos seleccionados", state.split.source_psts.len()),
+            format!("{:.2} MB en total", total_size),
+        )
+    } else {
+        let name = state
+            .split
+            .source_pst
+            .as_ref()
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "No seleccionado".to_string());
+        let size = state
+            .split
+            .source_pst
+            .as_ref()
+            .map(|p| format!("{:.2} MB", p.size_mb))
+            .unwrap_or_else(|| "0 MB".to_string());
+        ("• Archivo PST Origen:  ", name, size)
+    };
 
     let years_str = if state.split.selected_years.is_empty() {
         "Todos los años disponibles".to_string()
@@ -76,7 +86,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let param_lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("• Archivo PST Origen:  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(source_pst_label, Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(source_pst_name, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(format!(" ({})", source_pst_size), Style::default().fg(Theme::TEXT_MAIN)),
         ]),

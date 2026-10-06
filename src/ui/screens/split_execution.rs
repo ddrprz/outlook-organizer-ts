@@ -30,6 +30,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let title_str = if state.progress.graceful_cancelling {
         " [DETENIENDO CON SEGURIDAD... DESMONTANDO PSTs] "
+    } else if state.progress.is_paused {
+        " [PROCESO PAUSADO — PRESIONE 'P' PARA REANUDAR] "
     } else {
         " Generando y poblando archivos PST "
     };
@@ -39,12 +41,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         percent, current_items, total_items
     );
 
+    let alert_mode = state.progress.graceful_cancelling || state.progress.is_paused;
     let gauge = Gauge::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(if state.progress.graceful_cancelling {
+                .border_style(Style::default().fg(if alert_mode {
                     Theme::WARNING
                 } else {
                     Theme::ACCENT_PRIMARY
@@ -53,7 +56,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
         .gauge_style(
             Style::default()
-                .fg(if state.progress.graceful_cancelling {
+                .fg(if alert_mode {
                     Theme::WARNING
                 } else {
                     Theme::BRAND_PRIMARY

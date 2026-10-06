@@ -40,6 +40,8 @@ pub struct WorkerConfig {
 pub struct SplitWorkerConfig {
     pub profile_name: Option<String>,
     pub source_pst_path: String,
+    #[serde(default)]
+    pub source_pst_paths: Vec<String>,
     pub output_dir: String,
     pub partition_mode: String,
     pub transfer_mode: String,
@@ -69,15 +71,19 @@ impl BackendRunner {
     pub fn spawn_worker(
         config: &WorkerConfig,
         tx: UnboundedSender<BackendMessage>,
-    ) -> Result<(tokio::process::Child, PathBuf), std::io::Error> {
+    ) -> Result<(tokio::process::Child, PathBuf, PathBuf), std::io::Error> {
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("outlook_organizer_worker.ps1");
         let config_path = temp_dir.join("outlook_organizer_config.json");
         let abort_path = temp_dir.join("outlook_organizer_abort.flag");
+        let pause_path = temp_dir.join("outlook_organizer_pause.flag");
 
         // Limpiar bandera previa de cancelación e historial previo de items
         if abort_path.exists() {
             let _ = fs::remove_file(&abort_path);
+        }
+        if pause_path.exists() {
+            let _ = fs::remove_file(&pause_path);
         }
         let items_path = temp_dir.join("outlook_organizer_items.json");
         if items_path.exists() {
@@ -105,6 +111,8 @@ impl BackendRunner {
             .arg(&config_path)
             .arg("-AbortFile")
             .arg(&abort_path)
+            .arg("-PauseFile")
+            .arg(&pause_path)
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
             .stderr(Stdio::piped())
@@ -169,20 +177,24 @@ impl BackendRunner {
             }
         });
 
-        Ok((child, abort_path))
+        Ok((child, abort_path, pause_path))
     }
 
     pub fn spawn_split_worker(
         config: &SplitWorkerConfig,
         tx: UnboundedSender<BackendMessage>,
-    ) -> Result<(tokio::process::Child, PathBuf), std::io::Error> {
+    ) -> Result<(tokio::process::Child, PathBuf, PathBuf), std::io::Error> {
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("outlook_organizer_split_worker.ps1");
         let config_path = temp_dir.join("outlook_organizer_split_config.json");
         let abort_path = temp_dir.join("outlook_organizer_split_abort.flag");
+        let pause_path = temp_dir.join("outlook_organizer_split_pause.flag");
 
         if abort_path.exists() {
             let _ = fs::remove_file(&abort_path);
+        }
+        if pause_path.exists() {
+            let _ = fs::remove_file(&pause_path);
         }
 
         let script_content = include_str!("split_worker.ps1");
@@ -205,6 +217,8 @@ impl BackendRunner {
             .arg(&config_path)
             .arg("-AbortFile")
             .arg(&abort_path)
+            .arg("-PauseFile")
+            .arg(&pause_path)
             .stdout(Stdio::piped())
             .stdin(Stdio::piped())
             .stderr(Stdio::piped())
@@ -267,7 +281,7 @@ impl BackendRunner {
             }
         });
 
-        Ok((child, abort_path))
+        Ok((child, abort_path, pause_path))
     }
 
     /// Obtiene de forma asíncrona la lista de buzones configurados en Outlook MAPI
