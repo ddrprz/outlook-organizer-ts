@@ -215,6 +215,7 @@ try {
     if (-not (Test-Path $ConfigFile)) {
         throw "El archivo de configuración no existe: $ConfigFile"
     }
+    $rawConfig = Get-Content -Path $ConfigFile -Raw -Encoding UTF8
     $config = $rawConfig | ConvertFrom-Json
     $sourcePstPaths = @()
     if ($config.source_pst_paths -and $config.source_pst_paths.Count -gt 0) {
