@@ -38,7 +38,7 @@ function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$p
     try {
         $now = [DateTime]::UtcNow
         $elapsedSec = ($now - $startTime).TotalSeconds
-        $speed = if ($elapsedSec -gt 0) { [math]::Round($script:totalImported / $elapsedSec, 1) } else { 0.0 }
+        $speed = if ($elapsedSec -gt 0) { [math]::Round($currentItems / $elapsedSec, 1) } else { 0.0 }
         $remaining = [math]::Max(0, $totalItems - $currentItems)
         $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
 
@@ -626,12 +626,14 @@ try {
                     # Filtro por años específicos si está configurado
                     if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
                         $pstProcessedCount++
+                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                         continue
                     }
 
                     # Filtro por meses específicos si está configurado
                     if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
                         $pstProcessedCount++
+                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                         continue
                     }
 

@@ -1908,7 +1908,8 @@ impl AppState {
         let mut years = detail.years.clone();
         years.sort();
         self.split.available_years = years.clone();
-        self.split.selected_years = years.into_iter().collect();
+        // Ningún año seleccionado por defecto
+        self.split.selected_years.clear();
 
         self.update_split_available_months();
 
@@ -1941,16 +1942,8 @@ impl AppState {
         months.sort();
         self.split.available_months = months.clone();
 
-        let mut new_selected = std::collections::BTreeSet::new();
-        for &m in &self.split.selected_months {
-            if self.split.available_months.contains(&m) {
-                new_selected.insert(m);
-            }
-        }
-        if new_selected.is_empty() && !self.split.available_months.is_empty() {
-            new_selected = self.split.available_months.iter().copied().collect();
-        }
-        self.split.selected_months = new_selected;
+        // Todos los meses seleccionados por defecto
+        self.split.selected_months = self.split.available_months.iter().copied().collect();
 
         if self.split.month_cursor >= self.split.available_months.len() {
             self.split.month_cursor = self.split.available_months.len().saturating_sub(1);
@@ -1969,7 +1962,7 @@ impl AppState {
         let years: Vec<u32> = self.split.selected_years.iter().copied().collect();
         let months: Vec<u32> = self.split.selected_months.iter().copied().collect();
 
-        match self.split.partition_mode {
+        let raw_names = match self.split.partition_mode {
             SplitPartitionMode::ByYear => {
                 years.into_iter().map(|y| format!("{}_{}.pst", base_name, y)).collect()
             }
@@ -1995,7 +1988,38 @@ impl AppState {
             SplitPartitionMode::SinglePst => {
                 vec![format!("{}_filtrado.pst", base_name)]
             }
+        };
+
+        raw_names
+            .into_iter()
+            .map(|name| resolve_unique_pst_filename(&self.split.output_dir, &name))
+            .collect()
+    }
+}
+
+pub fn resolve_unique_pst_filename(output_dir: &str, candidate_name: &str) -> String {
+    let base_path = Path::new(output_dir).join(candidate_name);
+    if !base_path.exists() {
+        return candidate_name.to_string();
+    }
+
+    let stem = Path::new(candidate_name)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("PST");
+    let ext = Path::new(candidate_name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("pst");
+
+    let mut counter = 1;
+    loop {
+        let new_name = format!("{} ({}).{}", stem, counter, ext);
+        let check_path = Path::new(output_dir).join(&new_name);
+        if !check_path.exists() {
+            return new_name;
         }
+        counter += 1;
     }
 }
 
@@ -2859,6 +2883,29 @@ mod tests {
         state.split.selected_years.insert(2022);
         state.update_split_available_months();
         assert_eq!(state.split.available_months, vec![1, 10]);
+    }
+
+    #[test]
+    fn test_resolve_unique_pst_filename_collision() {
+        let temp_dir = std::env::temp_dir().join("test_pst_unique_collision");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let dir_str = temp_dir.to_str().unwrap();
+
+        // 1. Archivo no existe -> devuelve el nombre original
+        let unique1 = resolve_unique_pst_filename(dir_str, "salida.pst");
+        assert_eq!(unique1, "salida.pst");
+
+        // 2. Creamos salida.pst -> ahora debe devolver salida (1).pst
+        let _ = File::create(temp_dir.join("salida.pst"));
+        let unique2 = resolve_unique_pst_filename(dir_str, "salida.pst");
+        assert_eq!(unique2, "salida (1).pst");
+
+        // 3. Creamos salida (1).pst -> ahora debe devolver salida (2).pst
+        let _ = File::create(temp_dir.join("salida (1).pst"));
+        let unique3 = resolve_unique_pst_filename(dir_str, "salida.pst");
+        assert_eq!(unique3, "salida (2).pst");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 

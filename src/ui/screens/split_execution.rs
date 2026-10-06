@@ -105,7 +105,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(card_speed, metric_chunks[1]);
 
     let eta_str = if state.progress.eta_seconds > 0 {
-        format!("{}s", state.progress.eta_seconds)
+        format!("~{}", crate::ui::format::format_duration_compact(state.progress.eta_seconds))
     } else {
         "--".to_string()
     };
