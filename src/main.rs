@@ -71,8 +71,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     pst_name,
                     item_current,
                     item_total,
-                    global_item_current,
-                    global_item_total,
                     speed_mps,
                     eta_seconds,
                     imported,
@@ -84,16 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.progress.current_pst_name = pst_name;
                     state.progress.current_pst_items = item_current;
                     state.progress.current_pst_total = item_total;
-                    state.progress.global_items_processed = if global_item_current > 0 {
-                        global_item_current
-                    } else {
-                        item_current
-                    };
-                    state.progress.global_items_total = if global_item_total > 0 {
-                        global_item_total
-                    } else {
-                        item_total
-                    };
+                    state.progress.global_items_processed = item_current;
+                    state.progress.global_items_total = item_total;
                     state.progress.speed_mps = speed_mps;
                     state.progress.eta_seconds = eta_seconds;
                     state.progress.imported_count = imported;
@@ -643,10 +633,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 KeyCode::Enter => {
                                     if state.routing_modal_year_cursor == 0 {
                                         state.set_all_years();
-                                    } else if state.selected_years.is_empty()
-                                        && let Some(&y) = available_years.get(state.routing_modal_year_cursor - 1) {
+                                    } else if state.selected_years.is_empty() {
+                                        if let Some(&y) = available_years.get(state.routing_modal_year_cursor - 1) {
                                             state.toggle_year(y);
                                         }
+                                    }
                                     state.active_routing_modal = RoutingModal::None;
                                 }
                                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -727,10 +718,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         state.set_first_half_months();
                                     } else if state.routing_modal_month_cursor == 2 {
                                         state.set_second_half_months();
-                                    } else if state.selected_months.is_empty()
-                                        && let Some(&m) = available_months.get(state.routing_modal_month_cursor - 3) {
+                                    } else if state.selected_months.is_empty() {
+                                        if let Some(&m) = available_months.get(state.routing_modal_month_cursor - 3) {
                                             state.toggle_month(m);
                                         }
+                                    }
                                     state.active_routing_modal = RoutingModal::None;
                                 }
                                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {

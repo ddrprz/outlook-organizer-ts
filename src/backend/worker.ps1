@@ -34,45 +34,40 @@ function Log-Message([string]$msg, [string]$level = "INFO") {
     }
 }
 
-function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime, [int]$globalCurrent = 0, [int]$globalTotal = 0) {
+function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime) {
     try {
         $now = [DateTime]::UtcNow
         $elapsedSec = ($now - $startTime).TotalSeconds
         $speed = if ($elapsedSec -gt 0) { [math]::Round($script:totalImported / $elapsedSec, 1) } else { 0.0 }
-        $calcTotal = if ($globalTotal -gt 0) { $globalTotal } else { $totalItems }
-        $calcCurrent = if ($globalTotal -gt 0) { $globalCurrent } else { $currentItems }
-        $remaining = [math]::Max(0, $calcTotal - $calcCurrent)
+        $remaining = [math]::Max(0, $totalItems - $currentItems)
         $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
 
         Send-Telemetry @{
-            type                = "progress"
-            pst_index           = $currentPstIdx
-            pst_total           = $totalPsts
-            pst_name            = $pstName
-            item_current        = $currentItems
-            item_total          = $totalItems
-            global_item_current = $globalCurrent
-            global_item_total   = $globalTotal
-            speed_mps           = $speed
-            eta_seconds         = $eta
-            imported            = $script:totalImported
-            duplicates          = $script:totalDuplicates
-            errors              = $script:totalErrors
+            type         = "progress"
+            pst_index    = $currentPstIdx
+            pst_total    = $totalPsts
+            pst_name     = $pstName
+            item_current = $currentItems
+            item_total   = $totalItems
+            speed_mps    = $speed
+            eta_seconds  = $eta
+            imported     = $script:totalImported
+            duplicates   = $script:totalDuplicates
+            errors       = $script:totalErrors
         }
         $script:lastTelemetryTime = $now
     } catch {}
 }
 
-function Check-And-Emit-Progress([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime, [int]$globalCurrent = 0, [int]$globalTotal = 0, [bool]$force = $false) {
+function Check-And-Emit-Progress([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime, [bool]$force = $false) {
     try {
         $now = [DateTime]::UtcNow
         $shouldEmit = $force -or ($currentItems % 15 -eq 0) -or ($null -eq $script:lastTelemetryTime) -or (($now - $script:lastTelemetryTime).TotalMilliseconds -gt 200) -or ($currentItems -eq $totalItems)
         if ($shouldEmit) {
-            Emit-ProgressTelemetry $currentPstIdx $totalPsts $pstName $currentItems $totalItems $startTime $globalCurrent $globalTotal
+            Emit-ProgressTelemetry $currentPstIdx $totalPsts $pstName $currentItems $totalItems $startTime
         }
     } catch {}
 }
-
 
 function Get-OrCreateFolder($parentFolder, [string]$subfolderName) {
     try {
@@ -185,57 +180,25 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
             continue
         }
 
-        # Desenvolver contenedor intermedio técnico MAPI si existe (Top of Information Store / IPM_SUBTREE)
-        if ($subName -match "^(Top of Information Store|Top of Personal Folders|Elemento superior del almacén de información|IPM_SUBTREE)$") {
-            Collect-CandidateFolders $sub $currentPath $collector $selectedPathsSet $hasSubpaths $config
-            continue
-        }
-
         $subPath = if ($currentPath -eq "") { $subName } else { "$currentPath\$subName" }
         $fType = Get-FolderType $subName
 
         $shouldInclude = $false
-
         if ($selectedPathsSet -and $selectedPathsSet.Count -gt 0) {
-            # 1. Comprobar inclusión por tipo de carpeta estándar bilingüe
-            if ($fType -eq "inbox") {
-                if ($selectedPathsSet.Contains("Bandeja de entrada") -or $selectedPathsSet.Contains("Inbox") -or ($config -and [bool]$config.include_inbox)) {
+            if ($hasSubpaths) {
+                # Modo árbol detallado: coincidencia exacta de ruta
+                if ($selectedPathsSet.Contains($subPath)) {
                     $shouldInclude = $true
                 }
-            } elseif ($fType -eq "sent") {
-                if ($selectedPathsSet.Contains("Elementos enviados") -or $selectedPathsSet.Contains("Sent Items") -or $selectedPathsSet.Contains("Sent") -or ($config -and [bool]$config.include_sent)) {
+            } else {
+                # Modo básico: coincidencia por top-level o ancestro raíz
+                $topAncestor = ($subPath -split "[\\/]")[0]
+                if ($selectedPathsSet.Contains($topAncestor) -or $selectedPathsSet.Contains($subName)) {
                     $shouldInclude = $true
-                }
-            } elseif ($fType -eq "deleted") {
-                if ($selectedPathsSet.Contains("Elementos eliminados") -or $selectedPathsSet.Contains("Deleted Items") -or $selectedPathsSet.Contains("Trash") -or ($config -and [bool]$config.include_deleted)) {
-                    $shouldInclude = $true
-                }
-            } elseif ($fType -eq "custom") {
-                # Comprobar categoría genérica de fallback 'Carpetas personalizadas'
-                if ($selectedPathsSet.Contains("Carpetas personalizadas") -or $selectedPathsSet.Contains("Carpetas personalizadas / subcarpetas") -or ($config -and [bool]$config.include_custom_folders)) {
-                    $shouldInclude = $true
-                }
-            }
-
-            # 2. Si aún no está incluida, comprobar coincidencia específica de ruta, nombre o ancestros
-            if (-not $shouldInclude) {
-                if ($selectedPathsSet.Contains($subPath) -or $selectedPathsSet.Contains($subName)) {
-                    $shouldInclude = $true
-                } else {
-                    # Comprobar si algún ancestro de esta subcarpeta fue seleccionado (ej. seleccionó '2021', debe incluir '2021\Operaciones')
-                    $parts = $subPath -split "[\\/]"
-                    $partialPath = ""
-                    for ($p = 0; $p -lt ($parts.Length - 1); $p++) {
-                        $partialPath = if ($partialPath -eq "") { $parts[$p] } else { "$partialPath\$($parts[$p])" }
-                        if ($selectedPathsSet.Contains($partialPath) -or $selectedPathsSet.Contains($parts[$p])) {
-                            $shouldInclude = $true
-                            break
-                        }
-                    }
                 }
             }
         } else {
-            # Compatibilidad con flags heredados (legacy flags) o todo seleccionado por defecto
+            # Compatibilidad con flags heredados (legacy flags)
             switch ($fType) {
                 "inbox"   { $shouldInclude = if ($config) { [bool]$config.include_inbox } else { $true } }
                 "sent"    { $shouldInclude = if ($config) { [bool]$config.include_sent } else { $true } }
@@ -496,26 +459,6 @@ try {
 
     $totalPsts = $pstList.Count
 
-    # 5.1 Resolver conjunto de rutas seleccionadas para coincidencia eficiente O(1)
-    $selectedPathsSet = $null
-    $hasSubpaths = $false
-    if ($config -and $config.selected_folder_paths -and $config.selected_folder_paths.Count -gt 0) {
-        $selectedPathsSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-        foreach ($sp in $config.selected_folder_paths) {
-            if ($sp -and $sp.Trim() -ne "") {
-                [void]$selectedPathsSet.Add($sp.Trim())
-                if ($sp.Contains("\") -or $sp.Contains("/")) {
-                    $hasSubpaths = $true
-                }
-            }
-        }
-    }
-
-    # 5.2 Contadores acumulados para telemetría consolidada multi-PST
-    $globalItemsTotal = 0
-    $globalItemsProcessed = 0
-    $totalDateFiltered = 0
-
     # 6. Iterar sobre cada archivo PST
     for ($pIdx = 0; $pIdx -lt $totalPsts; $pIdx++) {
         $pstPath = $pstList[$pIdx]
@@ -530,14 +473,9 @@ try {
 
         Log-Message "Montando archivo PST [$($pIdx + 1)/$totalPsts]: $pstName"
 
+        # Verificar si ya está montado
         $pstStore = $null
-        $wasMountedByUs = $false
-        $candidateFolders = $null
-        $pstRoot = $null
-
-        try {
-            # Verificar si ya está montado
-            foreach ($s in $namespace.Stores) {
+        foreach ($s in $namespace.Stores) {
             if ($s.FilePath -and ($s.FilePath.Trim().ToLower() -eq $pstPath.Trim().ToLower())) {
                 $pstStore = $s
                 break
@@ -585,12 +523,19 @@ try {
             continue
         }
 
-        # Desenvolver contenedor técnico MAPI intermedio si la raíz contiene solo IPM_SUBTREE
-        try {
-            while ($pstRoot.Folders.Count -eq 1 -and $pstRoot.Folders.Item(1).Name -match "^(Top of Information Store|Top of Personal Folders|Elemento superior del almacén de información|IPM_SUBTREE)$") {
-                $pstRoot = $pstRoot.Folders.Item(1)
+        $selectedPathsSet = $null
+        $hasSubpaths = $false
+        if ($config -and $config.selected_folder_paths -and $config.selected_folder_paths.Count -gt 0) {
+            $selectedPathsSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($sp in $config.selected_folder_paths) {
+                if ($sp -and $sp.Trim() -ne "") {
+                    [void]$selectedPathsSet.Add($sp.Trim())
+                    if ($sp.Contains("\") -or $sp.Contains("/")) {
+                        $hasSubpaths = $true
+                    }
+                }
             }
-        } catch {}
+        }
 
         $candidateList = New-Object 'System.Collections.Generic.List[hashtable]'
         Collect-CandidateFolders $pstRoot "" $candidateList $selectedPathsSet $hasSubpaths $config
@@ -602,14 +547,21 @@ try {
             try { $totalPstItems += $cf.Folder.Items.Count } catch {}
         }
 
-        # Actualizar total global consolidado de ítems
-        if ($globalItemsTotal -lt ($globalItemsProcessed + $totalPstItems)) {
-            $globalItemsTotal = $globalItemsProcessed + $totalPstItems
+        Log-Message "PST '$pstName': $totalPstItems correos encontrados en carpetas seleccionadas."
+
+        Send-Telemetry @{
+            type         = "progress"
+            pst_index    = $pIdx + 1
+            pst_total    = $totalPsts
+            pst_name     = $pstName
+            item_current = 0
+            item_total   = $totalPstItems
+            speed_mps    = 0.0
+            eta_seconds  = 0
+            imported     = $totalImported
+            duplicates   = $totalDuplicates
+            errors       = $totalErrors
         }
-
-        Log-Message "PST '$pstName': $totalPstItems correos encontrados en $($candidateFolders.Length) carpetas candidatas."
-
-        Emit-ProgressTelemetry ($pIdx + 1) $totalPsts $pstName 0 $totalPstItems $startTime $globalItemsProcessed $globalItemsTotal
 
         $pstProcessedCount = 0
         $lastTelemetryTime = [DateTime]::UtcNow
@@ -661,39 +613,26 @@ try {
                 }
 
                 try {
-                    # Extraer fecha del correo con múltiples fallbacks para correos y reportes
+                    # Extraer fecha del correo
                     $rcvd = $null
                     try { $rcvd = $item.ReceivedTime } catch {}
                     if ($null -eq $rcvd -or $rcvd.Year -lt 1980) {
                         try { $rcvd = $item.SentOn } catch {}
                     }
-                    if ($null -eq $rcvd -or $rcvd.Year -lt 1980) {
-                        try { $rcvd = $item.CreationTime } catch {}
-                    }
-                    if ($null -eq $rcvd -or $rcvd.Year -lt 1980) {
-                        try { $rcvd = $item.LastModificationTime } catch {}
+                    if ($null -eq $rcvd) {
+                        $rcvd = Get-Date
                     }
 
                     # Filtro por años específicos si está configurado
-                    if ($null -ne $allowedYearsSet -and $null -ne $rcvd -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
-                        $totalDateFiltered++
+                    if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
                         $pstProcessedCount++
-                        $globalItemsProcessed++
-                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime $globalItemsProcessed $globalItemsTotal
                         continue
                     }
 
                     # Filtro por meses específicos si está configurado
-                    if ($null -ne $allowedMonthsSet -and $null -ne $rcvd -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
-                        $totalDateFiltered++
+                    if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
                         $pstProcessedCount++
-                        $globalItemsProcessed++
-                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime $globalItemsProcessed $globalItemsTotal
                         continue
-                    }
-
-                    if ($null -eq $rcvd) {
-                        $rcvd = Get-Date
                     }
 
                     # Determinar carpeta de destino final con enrutamiento y caché O(1)
@@ -755,7 +694,6 @@ try {
                     if ($isDuplicate) {
                         $totalDuplicates++
                         $pstProcessedCount++
-                        $globalItemsProcessed++
                         if ($processedItemsList.Count -lt 5000) {
                             $itemKb = 0.0
                             try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
@@ -779,7 +717,6 @@ try {
                             $item.Move($finalDest) | Out-Null
                             $totalImported++
                             $pstProcessedCount++
-                            $globalItemsProcessed++
                         } else {
                             $copy = $item.Copy()
                             $copy.Move($finalDest) | Out-Null
@@ -788,7 +725,6 @@ try {
                             }
                             $totalImported++
                             $pstProcessedCount++
-                            $globalItemsProcessed++
                         }
 
                         if ($processedItemsList.Count -lt 5000) {
@@ -828,7 +764,7 @@ try {
                         [System.Threading.Thread]::Sleep(1)
                     }
 
-                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime $globalItemsProcessed $globalItemsTotal
+                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
                     if ($pstProcessedCount % 100 -eq 0) {
                         [System.GC]::Collect()
@@ -838,7 +774,6 @@ try {
                 catch {
                     $totalErrors++
                     $pstProcessedCount++
-                    $globalItemsProcessed++
                     $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 2)
                     Log-Message "Aviso al procesar correo #$idx de carpeta '$($cf.RelPath)': $_" "WARN"
                     if ($processedItemsList.Count -lt 5000) {
@@ -854,7 +789,7 @@ try {
                         })
                     }
 
-                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime $globalItemsProcessed $globalItemsTotal
+                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                 }
                 finally {
                     if ($null -ne $copy) {
@@ -876,51 +811,46 @@ try {
                 $srcFolder = $null
             }
         }
-        catch {
-            $totalErrors++
-            Log-Message "Error crítico durante el procesamiento de PST '$pstName': $_" "ERROR"
+
+        # 1. Liberar todas las referencias COM de las carpetas candidatas del PST
+        if ($candidateFolders) {
+            foreach ($cf in $candidateFolders) {
+                if ($cf -and $cf.Folder) {
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($cf.Folder) | Out-Null } catch {}
+                    $cf.Folder = $null
+                }
+            }
         }
-        finally {
-            # 1. Liberar todas las referencias COM de las carpetas candidatas del PST
-            if ($candidateFolders) {
-                foreach ($cf in $candidateFolders) {
-                    if ($cf -and $cf.Folder) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($cf.Folder) | Out-Null } catch {}
-                        $cf.Folder = $null
-                    }
-                }
-            }
-            $candidateFolders = $null
+        $candidateFolders = $null
 
-            # 2. Liberar raíz del PST
-            if ($null -ne $pstRoot) {
-                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstRoot) | Out-Null } catch {}
-                $pstRoot = $null
-            }
+        # 2. Liberar raíz del PST
+        if ($null -ne $pstRoot) {
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstRoot) | Out-Null } catch {}
+            $pstRoot = $null
+        }
 
-            # 3. Forzar limpieza de punteros COM para que MAPI no mantenga bloqueos en el archivo PST
-            [System.GC]::Collect()
-            [System.GC]::WaitForPendingFinalizers()
-            [System.GC]::Collect()
-            [System.GC]::WaitForPendingFinalizers()
+        # 3. Forzar limpieza de punteros COM para que MAPI no mantenga bloqueos en el archivo PST
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
 
-            # 4. Desmontar PST si fue montado en esta ejecución
-            if ($wasMountedByUs -and -not $isAborted -and $null -ne $pstStore) {
-                try {
-                    $rootF = $pstStore.GetRootFolder()
-                    $namespace.RemoveStore($rootF)
-                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
-                    $storesToUnmount = $storesToUnmount | Where-Object { $_ -ne $pstStore }
-                    Log-Message "PST '$pstName' desmontado limpiamente."
-                } catch {
-                    Log-Message "Aviso al desmontar PST: $_" "WARN"
-                }
+        # 4. Desmontar PST si fue montado en esta ejecución
+        if ($wasMountedByUs -and -not $isAborted) {
+            try {
+                $rootF = $pstStore.GetRootFolder()
+                $namespace.RemoveStore($rootF)
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
+                $storesToUnmount = $storesToUnmount | Where-Object { $_ -ne $pstStore }
+                Log-Message "PST '$pstName' desmontado limpiamente."
+            } catch {
+                Log-Message "Aviso al desmontar PST: $_" "WARN"
             }
+        }
 
-            if ($null -ne $pstStore) {
-                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstStore) | Out-Null } catch {}
-                $pstStore = $null
-            }
+        if ($null -ne $pstStore) {
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstStore) | Out-Null } catch {}
+            $pstStore = $null
         }
 
         if ($isAborted) { break }

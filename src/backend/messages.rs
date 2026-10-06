@@ -10,10 +10,6 @@ pub enum BackendMessage {
         pst_name: String,
         item_current: u64,
         item_total: u64,
-        #[serde(default)]
-        global_item_current: u64,
-        #[serde(default)]
-        global_item_total: u64,
         speed_mps: f64,
         eta_seconds: u64,
         #[serde(default)]
