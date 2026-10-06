@@ -607,8 +607,6 @@ try {
                 try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($srcFolder) | Out-Null } catch {}
             }
         }
-    }l } catch {}
-        }
     }
 
     Check-And-Emit-Split-Progress "Finalizado" $totalProcessed $totalCandidateItems $totalTransferred $startTime $true
