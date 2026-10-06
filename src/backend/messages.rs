@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GeneratedPstInfo {
+    pub file_path: String,
+    pub file_name: String,
+    pub items_count: usize,
+    pub size_mb: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum BackendMessage {
@@ -35,6 +43,15 @@ pub enum BackendMessage {
         status: String, // "completed", "cancelled", "failed"
         imported: u64,
         duplicates: u64,
+        errors: u64,
+    },
+    #[serde(rename = "split_finished")]
+    SplitFinished {
+        status: String,
+        total_items: u64,
+        #[serde(default)]
+        generated_psts: Vec<GeneratedPstInfo>,
+        #[serde(default)]
         errors: u64,
     },
     #[serde(rename = "mailboxes_loaded")]
@@ -117,6 +134,49 @@ mod tests {
             assert_eq!(errors, 0);
         } else {
             panic!("Expected BackendMessage::Progress");
+        }
+    }
+
+    #[test]
+    fn test_split_finished_deserialization() {
+        let json = r#"{
+            "type": "split_finished",
+            "status": "completed",
+            "total_items": 150,
+            "generated_psts": [
+                {
+                    "file_path": "C:\\Correo\\backup_2023.pst",
+                    "file_name": "backup_2023.pst",
+                    "items_count": 90,
+                    "size_mb": 14.5
+                },
+                {
+                    "file_path": "C:\\Correo\\backup_2024.pst",
+                    "file_name": "backup_2024.pst",
+                    "items_count": 60,
+                    "size_mb": 9.2
+                }
+            ],
+            "errors": 0
+        }"#;
+
+        let msg: BackendMessage = serde_json::from_str(json).expect("Failed to parse split_finished message");
+        if let BackendMessage::SplitFinished {
+            status,
+            total_items,
+            generated_psts,
+            errors,
+        } = msg {
+            assert_eq!(status, "completed");
+            assert_eq!(total_items, 150);
+            assert_eq!(generated_psts.len(), 2);
+            assert_eq!(generated_psts[0].file_name, "backup_2023.pst");
+            assert_eq!(generated_psts[0].items_count, 90);
+            assert_eq!(generated_psts[1].file_name, "backup_2024.pst");
+            assert_eq!(generated_psts[1].items_count, 60);
+            assert_eq!(errors, 0);
+        } else {
+            panic!("Expected BackendMessage::SplitFinished");
         }
     }
 }
