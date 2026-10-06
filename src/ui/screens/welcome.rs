@@ -15,14 +15,14 @@ pub const MENU_ITEMS: [(&str, &str, &str); 5] = [
         "Asistente guiado paso a paso con deduplicación y enrutamiento.",
     ),
     (
-        "Separar PST",
-        "Dividir un archivo PST filtrando por años y meses en uno o múltiples PSTs.",
-        "Crea nuevos archivos PST segmentados por año o mes, manteniendo el original intacto.",
-    ),
-    (
         "Escanear PSTs",
         "Explorar y listar los archivos .pst detectados en C:\\Correo o rutas locales.",
         "Detección de archivos, cálculo de tamaño y verificación de bloqueos.",
+    ),
+    (
+        "Separar PST",
+        "Dividir un archivo PST filtrando por años y meses en uno o múltiples PSTs.",
+        "Crea nuevos archivos PST segmentados por año o mes, manteniendo el original intacto.",
     ),
     (
         "Perfil MAPI",

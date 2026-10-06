@@ -136,6 +136,10 @@ pub struct SplitPstState {
     pub year_cursor: usize,
     pub month_cursor: usize,
     pub config_cursor: usize, // 0: partition_mode, 1: transfer_mode, 2: output_dir
+    pub is_scanning: bool,
+    pub scanning_folder: Option<String>,
+    pub scanned_items: usize,
+    pub waiting_to_advance: bool,
     pub generated_psts: Vec<crate::backend::messages::GeneratedPstInfo>,
     pub execution_status: String,
     pub total_extracted: u64,
@@ -156,10 +160,14 @@ impl Default for SplitPstState {
             include_deleted: false,
             include_custom_folders: true,
             available_years: Vec::new(),
-            available_months: (1..=12).collect(),
+            available_months: Vec::new(),
             year_cursor: 0,
             month_cursor: 0,
             config_cursor: 0,
+            is_scanning: false,
+            scanning_folder: None,
+            scanned_items: 0,
+            waiting_to_advance: false,
             generated_psts: Vec::new(),
             execution_status: "Listo".to_string(),
             total_extracted: 0,
@@ -1877,40 +1885,75 @@ impl AppState {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| r"C:\Correo".to_string());
 
-            self.split.source_pst = Some(p_clone);
+            self.split.source_pst = Some(p_clone.clone());
             self.split.output_dir = parent_dir;
 
-            if let Some(detail) = self.pst_details_cache.get(&pst.path) {
-                let mut years = detail.years.clone();
-                years.sort();
-                if years.is_empty() {
-                    let current_year = chrono::Utc::now().format("%Y").to_string().parse::<u32>().unwrap_or(2025);
-                    years = vec![current_year];
-                }
-                self.split.available_years = years.clone();
-                self.split.selected_years = years.into_iter().collect();
+            if let Some(detail) = self.pst_details_cache.get(&p_clone.path).cloned() {
+                self.apply_pst_detail_to_split(&detail);
+            } else {
+                self.split.available_years.clear();
+                self.split.selected_years.clear();
+                self.split.available_months.clear();
+                self.split.selected_months.clear();
+                self.split.is_scanning = true;
+                self.split.scanned_items = 0;
+                self.split.scanning_folder = None;
+            }
+        }
+    }
 
-                let mut months = Vec::new();
-                for m_list in detail.year_months.values() {
+    pub fn apply_pst_detail_to_split(&mut self, detail: &PstDetail) {
+        self.split.is_scanning = false;
+        self.split.scanned_items = detail.total_items;
+        let mut years = detail.years.clone();
+        years.sort();
+        self.split.available_years = years.clone();
+        self.split.selected_years = years.into_iter().collect();
+
+        self.update_split_available_months();
+
+        if self.split.year_cursor >= self.split.available_years.len() {
+            self.split.year_cursor = self.split.available_years.len().saturating_sub(1);
+        }
+    }
+
+    pub fn update_split_available_months(&mut self) {
+        let mut months = Vec::new();
+        if let Some(ref src) = self.split.source_pst
+            && let Some(detail) = self.pst_details_cache.get(&src.path)
+        {
+            let target_years: Vec<String> = if self.split.selected_years.is_empty() {
+                detail.years.iter().map(|y| y.to_string()).collect()
+            } else {
+                self.split.selected_years.iter().map(|y| y.to_string()).collect()
+            };
+
+            for y_str in &target_years {
+                if let Some(m_list) = detail.year_months.get(y_str) {
                     for &m in m_list {
                         if !months.contains(&m) {
                             months.push(m);
                         }
                     }
                 }
-                months.sort();
-                if months.is_empty() {
-                    months = (1..=12).collect();
-                }
-                self.split.available_months = months.clone();
-                self.split.selected_months = months.into_iter().collect();
-            } else {
-                let current_year = chrono::Utc::now().format("%Y").to_string().parse::<u32>().unwrap_or(2025);
-                self.split.available_years = (current_year.saturating_sub(4)..=current_year).collect();
-                self.split.selected_years = self.split.available_years.iter().copied().collect();
-                self.split.available_months = (1..=12).collect();
-                self.split.selected_months = (1..=12).collect();
             }
+        }
+        months.sort();
+        self.split.available_months = months.clone();
+
+        let mut new_selected = std::collections::BTreeSet::new();
+        for &m in &self.split.selected_months {
+            if self.split.available_months.contains(&m) {
+                new_selected.insert(m);
+            }
+        }
+        if new_selected.is_empty() && !self.split.available_months.is_empty() {
+            new_selected = self.split.available_months.iter().copied().collect();
+        }
+        self.split.selected_months = new_selected;
+
+        if self.split.month_cursor >= self.split.available_months.len() {
+            self.split.month_cursor = self.split.available_months.len().saturating_sub(1);
         }
     }
 
@@ -1923,25 +1966,8 @@ impl AppState {
             .and_then(|s| s.to_str())
             .unwrap_or("PST");
 
-        let years: Vec<u32> = if self.split.selected_years.is_empty() {
-            if !self.split.available_years.is_empty() {
-                self.split.available_years.clone()
-            } else {
-                vec![2025]
-            }
-        } else {
-            self.split.selected_years.iter().copied().collect()
-        };
-
-        let months: Vec<u32> = if self.split.selected_months.is_empty() {
-            if !self.split.available_months.is_empty() {
-                self.split.available_months.clone()
-            } else {
-                (1..=12).collect()
-            }
-        } else {
-            self.split.selected_months.iter().copied().collect()
-        };
+        let years: Vec<u32> = self.split.selected_years.iter().copied().collect();
+        let months: Vec<u32> = self.split.selected_months.iter().copied().collect();
 
         match self.split.partition_mode {
             SplitPartitionMode::ByYear => {
@@ -1950,7 +1976,17 @@ impl AppState {
             SplitPartitionMode::ByYearMonth => {
                 let mut out = Vec::new();
                 for y in &years {
-                    for m in &months {
+                    let year_months: Vec<u32> = if let Some(detail) = self.pst_details_cache.get(&src.path) {
+                        if let Some(m_list) = detail.year_months.get(&y.to_string()) {
+                            months.iter().copied().filter(|m| m_list.contains(m)).collect()
+                        } else {
+                            months.clone()
+                        }
+                    } else {
+                        months.clone()
+                    };
+
+                    for m in &year_months {
                         out.push(format!("{}_{}_{:02}.pst", base_name, y, m));
                     }
                 }
@@ -2771,6 +2807,58 @@ mod tests {
         // Del Select hacia atrás regresa al Welcome
         state.prev_step();
         assert_eq!(state.step, WizardStep::Welcome);
+    }
+
+    #[test]
+    fn test_split_pst_scanning_and_dynamic_months_from_detail() {
+        let mut state = AppState::new();
+        let pst_path = r"C:\Correo\archivo_prueba.pst".to_string();
+        state.discovered_psts = vec![PstItem {
+            path: pst_path.clone(),
+            name: "archivo_prueba.pst".to_string(),
+            size_mb: 250.0,
+            selected: true,
+        }];
+        state.selected_pst_table_idx = 0;
+
+        // Al inicio sin cache, no inventa años ni meses
+        state.init_split_from_selected_pst();
+        assert!(state.split.is_scanning);
+        assert!(state.split.available_years.is_empty());
+        assert!(state.split.available_months.is_empty());
+
+        // Simular que el inspector MAPI retorna el detalle real
+        let mut year_months = std::collections::BTreeMap::new();
+        year_months.insert("2021".to_string(), vec![3, 8]);
+        year_months.insert("2022".to_string(), vec![1, 10]);
+
+        let detail = PstDetail {
+            file_name: "archivo_prueba.pst".to_string(),
+            file_path: pst_path.clone(),
+            total_items: 1200,
+            years: vec![2021, 2022],
+            year_months,
+            ..Default::default()
+        };
+        state.pst_details_cache.insert(pst_path, detail.clone());
+
+        // Aplicar el detalle escaneado
+        state.apply_pst_detail_to_split(&detail);
+        assert!(!state.split.is_scanning);
+        assert_eq!(state.split.available_years, vec![2021, 2022]);
+        assert_eq!(state.split.available_months, vec![1, 3, 8, 10]);
+
+        // Si solo se selecciona el año 2021, los meses disponibles deben ser solo [3, 8]
+        state.split.selected_years.clear();
+        state.split.selected_years.insert(2021);
+        state.update_split_available_months();
+        assert_eq!(state.split.available_months, vec![3, 8]);
+
+        // Si solo se selecciona el año 2022, los meses disponibles deben ser solo [1, 10]
+        state.split.selected_years.clear();
+        state.split.selected_years.insert(2022);
+        state.update_split_available_months();
+        assert_eq!(state.split.available_months, vec![1, 10]);
     }
 }
 

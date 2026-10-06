@@ -148,7 +148,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let app::PstDetailModalState::Loading { pst_path: ref p, .. } = state.pst_detail_modal
                                 && p == &pst_path {
                                 state.pst_folder_explorer.build_from_detail(&d);
-                                state.pst_detail_modal = app::PstDetailModalState::Loaded(d);
+                                state.pst_detail_modal = app::PstDetailModalState::Loaded(d.clone());
+                            }
+                            if let Some(ref src) = state.split.source_pst
+                                && src.path == pst_path
+                            {
+                                state.apply_pst_detail_to_split(&d);
+                                if state.split.waiting_to_advance && state.step == WizardStep::SplitSelect {
+                                    state.split.waiting_to_advance = false;
+                                    state.next_step();
+                                }
                             }
                             state.sync_folder_tree_from_selected_psts();
                         }
@@ -160,14 +169,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     message: err,
                                 };
                             }
+                            if let Some(ref src) = state.split.source_pst
+                                && src.path == pst_path
+                            {
+                                state.split.is_scanning = false;
+                                state.split.waiting_to_advance = false;
+                            }
                         }
                     }
                 }
                 BackendMessage::PstInspectionProgress { pst_path, folder_name, scanned_items } => {
                     if let app::PstDetailModalState::Loading { pst_path: ref p, ref mut current_folder, scanned_items: ref mut items, .. } = state.pst_detail_modal
                         && p == &pst_path {
-                        *current_folder = Some(folder_name);
+                        *current_folder = Some(folder_name.clone());
                         *items = scanned_items;
+                    }
+                    if let Some(ref src) = state.split.source_pst
+                        && src.path == pst_path
+                    {
+                        state.split.is_scanning = true;
+                        state.split.scanning_folder = Some(folder_name);
+                        state.split.scanned_items = scanned_items;
                     }
                 }
             }
@@ -182,6 +204,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(state.custom_profile_name.clone())
             };
             BackendRunner::trigger_pst_inspection(pst.path, pst.name, profile, tx.clone());
+        }
+
+        // Disparar inspección para el archivo PST origen de Separar PST si aún no está analizado
+        if (state.step == WizardStep::SplitSelect || state.step == WizardStep::SplitFilter)
+            && let Some(ref src) = state.split.source_pst
+            && !state.pst_details_cache.contains_key(&src.path)
+            && !state.inspecting_psts.contains(&src.path)
+        {
+            state.inspecting_psts.insert(src.path.clone());
+            let profile = if state.use_default_profile {
+                None
+            } else {
+                Some(state.custom_profile_name.clone())
+            };
+            BackendRunner::trigger_pst_inspection(src.path.clone(), src.name.clone(), profile, tx.clone());
         }
 
         // Garantizar que si el detalle está cargado, el árbol de carpetas esté construido
@@ -274,11 +311,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             KeyCode::Char('2') => {
                                 state.welcome_menu_idx = 1;
-                                start_split_pst(&mut state);
+                                open_file_explorer(&mut state);
                             }
                             KeyCode::Char('3') => {
                                 state.welcome_menu_idx = 2;
-                                open_file_explorer(&mut state);
+                                start_split_pst(&mut state);
                             }
                             KeyCode::Char('4') | KeyCode::Char('p') | KeyCode::Char('P') => {
                                 state.welcome_menu_idx = 3;
@@ -289,8 +326,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             KeyCode::Enter => match state.welcome_menu_idx {
                                 0 => start_import_or_explore(&mut state),
-                                1 => start_split_pst(&mut state),
-                                2 => open_file_explorer(&mut state),
+                                1 => open_file_explorer(&mut state),
+                                2 => start_split_pst(&mut state),
                                 3 => state.is_editing_profile = true,
                                 4 => state.should_quit = true,
                                 _ => {}
@@ -1049,11 +1086,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     KeyCode::Up | KeyCode::Char('k') => {
                         if state.selected_pst_table_idx > 0 {
                             state.selected_pst_table_idx -= 1;
+                            state.init_split_from_selected_pst();
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         if state.selected_pst_table_idx + 1 < state.discovered_psts.len() {
                             state.selected_pst_table_idx += 1;
+                            state.init_split_from_selected_pst();
                         }
                     }
                     KeyCode::Char('e') | KeyCode::Char('E') => {
@@ -1061,12 +1100,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         open_file_explorer(&mut state);
                     }
                     KeyCode::Enter => {
-                        if !state.discovered_psts.is_empty() {
-                            state.next_step();
+                        if !state.discovered_psts.is_empty()
+                            && let Some(ref src) = state.split.source_pst
+                        {
+                            if state.pst_details_cache.contains_key(&src.path) {
+                                state.next_step();
+                            } else {
+                                state.split.waiting_to_advance = true;
+                            }
                         }
                     }
                     KeyCode::Esc | KeyCode::Backspace => {
-                        state.step = WizardStep::Welcome;
+                        if state.split.waiting_to_advance {
+                            state.split.waiting_to_advance = false;
+                        } else {
+                            state.step = WizardStep::Welcome;
+                        }
                     }
                     KeyCode::Char('q') | KeyCode::Char('Q') => {
                         state.should_quit = true;
@@ -1082,10 +1131,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if state.split.year_cursor > 0 {
                                 state.split.year_cursor -= 1;
                             }
-                        } else {
-                            if state.split.month_cursor > 0 {
-                                state.split.month_cursor -= 1;
-                            }
+                        } else if state.split.month_cursor > 0 {
+                            state.split.month_cursor -= 1;
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
@@ -1093,10 +1140,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if state.split.year_cursor + 1 < state.split.available_years.len() {
                                 state.split.year_cursor += 1;
                             }
-                        } else {
-                            if state.split.month_cursor + 1 < 12 {
-                                state.split.month_cursor += 1;
-                            }
+                        } else if state.split.month_cursor + 1 < state.split.available_months.len() {
+                            state.split.month_cursor += 1;
                         }
                     }
                     KeyCode::Char(' ') => {
@@ -1107,9 +1152,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     state.split.selected_years.insert(y);
                                 }
+                                state.update_split_available_months();
                             }
-                        } else {
-                            let m = (state.split.month_cursor + 1) as u32;
+                        } else if let Some(&m) = state.split.available_months.get(state.split.month_cursor) {
                             if state.split.selected_months.contains(&m) {
                                 state.split.selected_months.remove(&m);
                             } else {
@@ -1118,23 +1163,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Char('a') | KeyCode::Char('A') => {
-                        state.split.selected_years = state.split.available_years.iter().copied().collect();
+                        if state.split.config_cursor == 0 {
+                            state.split.selected_years = state.split.available_years.iter().copied().collect();
+                            state.update_split_available_months();
+                        } else {
+                            state.split.selected_months = state.split.available_months.iter().copied().collect();
+                        }
                     }
                     KeyCode::Char('n') | KeyCode::Char('N') => {
                         if state.split.config_cursor == 0 {
                             state.split.selected_years.clear();
+                            state.update_split_available_months();
                         } else {
                             state.split.selected_months.clear();
                         }
                     }
                     KeyCode::Char('1') => {
-                        state.split.selected_months = (1..=6).collect();
+                        let h1: std::collections::BTreeSet<u32> = state.split.available_months.iter().copied().filter(|&m| m <= 6).collect();
+                        state.split.selected_months = h1;
                     }
                     KeyCode::Char('2') => {
-                        state.split.selected_months = (7..=12).collect();
+                        let h2: std::collections::BTreeSet<u32> = state.split.available_months.iter().copied().filter(|&m| m >= 7).collect();
+                        state.split.selected_months = h2;
                     }
                     KeyCode::Char('t') | KeyCode::Char('T') => {
-                        state.split.selected_months = (1..=12).collect();
+                        state.split.selected_months = state.split.available_months.iter().copied().collect();
                     }
                     KeyCode::Char('i') | KeyCode::Char('I') => {
                         state.split.include_inbox = !state.split.include_inbox;
@@ -1304,9 +1357,17 @@ fn start_split_pst(state: &mut AppState) {
         state.discovered_psts = crate::app::scan_folder_for_psts(default_path);
         state.pst_scan_path = r"C:\Correo".to_string();
     }
-    state.selected_pst_table_idx = 0;
-    state.init_split_from_selected_pst();
-    state.step = WizardStep::SplitSelect;
+    if state.discovered_psts.is_empty() {
+        state.explorer.warning_notice = Some(
+            "Selecciona la carpeta o archivo .pst que deseas particionar.".to_string(),
+        );
+        state.explorer.return_step = WizardStep::SplitSelect;
+        open_file_explorer(state);
+    } else {
+        state.selected_pst_table_idx = 0;
+        state.init_split_from_selected_pst();
+        state.step = WizardStep::SplitSelect;
+    }
 }
 
 fn open_file_explorer(state: &mut AppState) {

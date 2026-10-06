@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Row, Table},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Row, Table},
     Frame,
 };
 
@@ -143,4 +143,48 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .title(" Resumen de Selección ");
     let info_p = Paragraph::new(info_text).block(info_block);
     f.render_widget(info_p, chunks[2]);
+
+    // Modal flotante si el usuario pulsó Enter y el PST aún se está escaneando
+    if state.split.waiting_to_advance {
+        let popup_width = 68.min(area.width.saturating_sub(4));
+        let popup_height = 9.min(area.height.saturating_sub(4));
+        let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+        let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+        let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+        f.render_widget(Clear, popup_area);
+
+        let pst_name = state.split.source_pst.as_ref().map(|p| p.name.as_str()).unwrap_or("PST");
+        let folder_info = if let Some(ref f) = state.split.scanning_folder {
+            format!("Carpeta en análisis: {}", f)
+        } else {
+            "Conectando a almacén MAPI...".to_string()
+        };
+
+        let modal_lines = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Archivo: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(pst_name, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("  •  Correos leídos: {}", state.split.scanned_items), Style::default().fg(Theme::TEXT_MAIN)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  ⚡ ", Style::default().fg(Theme::WARNING)),
+                Span::styled(folder_info, Style::default().fg(Theme::TEXT_MUTED)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Descubriendo años y meses exactos... ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                Span::styled("[Esc para cancelar]", Style::default().fg(Theme::TEXT_MUTED)),
+            ]),
+        ];
+
+        let modal_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
+            .title(" ⚡ Escaneando Estructura y Periodos del Archivo PST ");
+        f.render_widget(Paragraph::new(modal_lines).block(modal_block), popup_area);
+    }
 }
