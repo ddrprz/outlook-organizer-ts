@@ -122,15 +122,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 BackendMessage::SplitFinished {
                     status,
                     total_items,
+                    total_extracted,
                     generated_psts,
                     errors: _,
                 } => {
+                    let final_count = if total_items > 0 {
+                        total_items
+                    } else {
+                        total_extracted.unwrap_or(0)
+                    };
                     state.split.execution_status = status.clone();
-                    state.split.total_extracted = total_items;
+                    state.split.total_extracted = final_count;
                     state.split.generated_psts = generated_psts;
                     state.log_event(format!(
                         "[FIN] Separación de PSTs finalizada con estado: {}. Correos transferidos: {}",
-                        status, total_items
+                        status, final_count
                     ));
                     state.step = WizardStep::SplitCompletion;
                     state.cleanup_pause_file();

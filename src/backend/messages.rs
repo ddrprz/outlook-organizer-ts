@@ -48,8 +48,10 @@ pub enum BackendMessage {
     #[serde(rename = "split_finished")]
     SplitFinished {
         status: String,
-        #[serde(default, alias = "total_extracted")]
+        #[serde(default)]
         total_items: u64,
+        #[serde(default)]
+        total_extracted: Option<u64>,
         #[serde(default)]
         generated_psts: Vec<GeneratedPstInfo>,
         #[serde(default)]
@@ -167,6 +169,7 @@ mod tests {
             total_items,
             generated_psts,
             errors,
+            total_extracted: _,
         } = msg {
             assert_eq!(status, "completed");
             assert_eq!(total_items, 150);
@@ -179,6 +182,13 @@ mod tests {
         } else {
             panic!("Expected BackendMessage::SplitFinished");
         }
+    }
+
+    #[test]
+    fn test_exact_user_json() {
+        let json = r#"{"total_items":237,"errors":268,"type":"split_finished","total_extracted":237,"status":"completed","generated_psts":[{"size_mb":150.66,"items_count":237,"file_name":"Consolidado_2018.pst","file_path":"D:\\PST OPERACIONES3\\Consolidado_2018.pst"}]}"#;
+        let res = serde_json::from_str::<BackendMessage>(json);
+        assert!(res.is_ok(), "Failed to deserialize: {:?}", res.err());
     }
 }
 

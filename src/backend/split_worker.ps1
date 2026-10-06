@@ -674,12 +674,11 @@ finally {
     Log-Message "Almacenes desmontados correctamente."
 
     Send-Telemetry @{
-        type            = "split_finished"
-        status          = $finalStatus
-        total_items     = [uint64]$totalTransferred
-        total_extracted = [uint64]$totalTransferred
-        generated_psts  = $pstsReport
-        errors          = [uint64]$script:totalErrors
+        type           = "split_finished"
+        status         = $finalStatus
+        total_items    = [uint64]$totalTransferred
+        generated_psts = $pstsReport
+        errors         = [uint64]$script:totalErrors
     }
 
     if ($PauseFile -and (Test-Path $PauseFile)) {
