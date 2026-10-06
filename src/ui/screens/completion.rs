@@ -401,20 +401,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         RoutingGranularity::YearsAndMonths => "Agrupación por Años y Meses",
     };
 
-    let (date_filter_str, date_filter_color) = if !state.routing_all_years || !state.routing_all_months {
-        let years_str = state.format_years_filter_display();
-        let months_str = state.format_months_filter_display();
-        (
-            format!("{} | {}", years_str, months_str),
-            Theme::WARNING,
-        )
-    } else {
-        (
-            "Historial Completo (Sin filtro)".to_string(),
-            Theme::TEXT_MAIN,
-        )
-    };
-
     let profile_name = if state.use_default_profile {
         "Predeterminado de Windows".to_string()
     } else {
@@ -459,13 +445,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(routing_str, Style::default().fg(Theme::ACCENT_PRIMARY)),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "• Filtro de Fecha:   ",
-                Style::default().fg(Theme::TEXT_MUTED),
-            ),
-            Span::styled(date_filter_str, Style::default().fg(date_filter_color)),
         ]),
         Line::from(vec![
             Span::styled(
