@@ -48,6 +48,7 @@ pub enum BackendMessage {
     #[serde(rename = "split_finished")]
     SplitFinished {
         status: String,
+        #[serde(default, alias = "total_extracted")]
         total_items: u64,
         #[serde(default)]
         generated_psts: Vec<GeneratedPstInfo>,

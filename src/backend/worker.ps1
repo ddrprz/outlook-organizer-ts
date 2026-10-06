@@ -6,7 +6,8 @@
 #>
 param (
     [string]$ConfigFile = "",
-    [string]$AbortFile = ""
+    [string]$AbortFile = "",
+    [string]$PauseFile = ""
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -597,6 +598,18 @@ try {
                     break
                 }
 
+                # Comprobar pausa solicitada por el usuario
+                if ($PauseFile -and (Test-Path $PauseFile)) {
+                    Log-Message "Proceso de importación pausado por el usuario. En espera de reanudación..." "WARN"
+                    while ($PauseFile -and (Test-Path $PauseFile)) {
+                        if ($AbortFile -and (Test-Path $AbortFile)) { break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                    if (-not ($AbortFile -and (Test-Path $AbortFile))) {
+                        Log-Message "Proceso de importación reanudado." "INFO"
+                    }
+                }
+
                 $item = $null
                 $copy = $null
                 try {
@@ -946,6 +959,9 @@ finally {
 
     if ($AbortFile -and (Test-Path $AbortFile)) {
         try { Remove-Item -Path $AbortFile -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    if ($PauseFile -and (Test-Path $PauseFile)) {
+        try { Remove-Item -Path $PauseFile -Force -ErrorAction SilentlyContinue } catch {}
     }
 
     Log-Message "Punteros COM liberados, procesos desacoplados y recursos finalizados con seguridad."

@@ -117,6 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     state.step = WizardStep::Completion;
+                    state.cleanup_pause_file();
                 }
                 BackendMessage::SplitFinished {
                     status,
@@ -132,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         status, total_items
                     ));
                     state.step = WizardStep::SplitCompletion;
+                    state.cleanup_pause_file();
                 }
                 BackendMessage::MailboxesLoaded { items } => {
                     state.is_loading_mailboxes = false;
@@ -150,13 +152,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 state.pst_folder_explorer.build_from_detail(&d);
                                 state.pst_detail_modal = app::PstDetailModalState::Loaded(d.clone());
                             }
-                            if let Some(ref src) = state.split.source_pst
-                                && src.path == pst_path
+                            if state.split.source_psts.iter().any(|p| p.path == pst_path)
+                                || state.split.source_pst.as_ref().map(|p| &p.path) == Some(&pst_path)
                             {
                                 state.apply_pst_detail_to_split(&d);
                                 if state.split.waiting_to_advance && state.step == WizardStep::SplitSelect {
-                                    state.split.waiting_to_advance = false;
-                                    state.next_step();
+                                    let all_cached = state.split.source_psts.iter().all(|p| state.pst_details_cache.contains_key(&p.path));
+                                    if all_cached {
+                                        state.split.waiting_to_advance = false;
+                                        state.next_step();
+                                    }
                                 }
                             }
                             state.sync_folder_tree_from_selected_psts();
@@ -206,19 +211,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             BackendRunner::trigger_pst_inspection(pst.path, pst.name, profile, tx.clone());
         }
 
-        // Disparar inspección para el archivo PST origen de Separar PST si aún no está analizado
-        if (state.step == WizardStep::SplitSelect || state.step == WizardStep::SplitFilter)
-            && let Some(ref src) = state.split.source_pst
-            && !state.pst_details_cache.contains_key(&src.path)
-            && !state.inspecting_psts.contains(&src.path)
-        {
-            state.inspecting_psts.insert(src.path.clone());
-            let profile = if state.use_default_profile {
-                None
+        // Disparar inspección para los archivos PST marcados/seleccionados para separar si aún no están analizados
+        if state.step == WizardStep::SplitSelect || state.step == WizardStep::SplitFilter {
+            let psts_to_inspect: Vec<crate::app::PstItem> = if !state.split.source_psts.is_empty() {
+                state.split.source_psts.clone()
+            } else if let Some(ref src) = state.split.source_pst {
+                vec![src.clone()]
+            } else if let Some(pst) = state.discovered_psts.get(state.selected_pst_table_idx) {
+                vec![pst.clone()]
             } else {
-                Some(state.custom_profile_name.clone())
+                Vec::new()
             };
-            BackendRunner::trigger_pst_inspection(src.path.clone(), src.name.clone(), profile, tx.clone());
+
+            for pst in psts_to_inspect {
+                if !state.pst_details_cache.contains_key(&pst.path)
+                    && !state.inspecting_psts.contains(&pst.path)
+                {
+                    state.inspecting_psts.insert(pst.path.clone());
+                    let profile = if state.use_default_profile {
+                        None
+                    } else {
+                        Some(state.custom_profile_name.clone())
+                    };
+                    BackendRunner::trigger_pst_inspection(pst.path, pst.name, profile, tx.clone());
+                }
+            }
         }
 
         // Garantizar que si el detalle está cargado, el árbol de carpetas esté construido
@@ -980,9 +997,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         match BackendRunner::spawn_worker(&config, tx.clone()) {
-                            Ok((child, abort_path)) => {
+                            Ok((child, abort_path, pause_path)) => {
                                 worker_child = Some(child);
                                 worker_abort_file = Some(abort_path);
+                                state.pause_file = Some(pause_path);
                             }
                             Err(e) => {
                                 state.log_event(format!(
@@ -1043,6 +1061,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else {
                         match key.code {
+                            KeyCode::Char('p') | KeyCode::Char('P') => {
+                                state.toggle_pause();
+                            }
                             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
                                 if !state.progress.graceful_cancelling =>
                             {
@@ -1095,15 +1116,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             state.init_split_from_selected_pst();
                         }
                     }
+                    KeyCode::Char(' ') => {
+                        if let Some(item) = state.discovered_psts.get_mut(state.selected_pst_table_idx) {
+                            item.selected = !item.selected;
+                        }
+                        let marked: Vec<_> = state.discovered_psts.iter().filter(|p| p.selected).cloned().collect();
+                        if !marked.is_empty() {
+                            state.split.source_psts = marked.clone();
+                            state.split.source_pst = marked.first().cloned();
+                        } else if let Some(current) = state.discovered_psts.get(state.selected_pst_table_idx) {
+                            state.split.source_psts = vec![current.clone()];
+                            state.split.source_pst = Some(current.clone());
+                        }
+                        state.sync_split_available_filters();
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        for p in &mut state.discovered_psts {
+                            p.selected = true;
+                        }
+                        let marked: Vec<_> = state.discovered_psts.iter().filter(|p| p.selected).cloned().collect();
+                        state.split.source_psts = marked.clone();
+                        state.split.source_pst = marked.first().cloned();
+                        state.sync_split_available_filters();
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        for p in &mut state.discovered_psts {
+                            p.selected = false;
+                        }
+                        if let Some(current) = state.discovered_psts.get(state.selected_pst_table_idx) {
+                            state.split.source_psts = vec![current.clone()];
+                            state.split.source_pst = Some(current.clone());
+                        }
+                        state.sync_split_available_filters();
+                    }
                     KeyCode::Char('e') | KeyCode::Char('E') => {
                         state.explorer.return_step = WizardStep::SplitSelect;
                         open_file_explorer(&mut state);
                     }
                     KeyCode::Enter => {
-                        if !state.discovered_psts.is_empty()
-                            && let Some(ref src) = state.split.source_pst
-                        {
-                            if state.pst_details_cache.contains_key(&src.path) {
+                        if !state.discovered_psts.is_empty() {
+                            let any_selected = state.discovered_psts.iter().any(|p| p.selected);
+                            if !any_selected {
+                                if let Some(item) = state.discovered_psts.get_mut(state.selected_pst_table_idx) {
+                                    item.selected = true;
+                                }
+                                let marked: Vec<_> = state.discovered_psts.iter().filter(|p| p.selected).cloned().collect();
+                                state.split.source_psts = marked.clone();
+                                state.split.source_pst = marked.first().cloned();
+                                state.sync_split_available_filters();
+                            }
+
+                            let all_cached = state.split.source_psts.iter().all(|p| state.pst_details_cache.contains_key(&p.path));
+                            if all_cached && !state.split.source_psts.is_empty() {
                                 state.next_step();
                             } else {
                                 state.split.waiting_to_advance = true;
@@ -1259,9 +1323,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         state.progress.current_pst_name = "Iniciando partición...".to_string();
                         state.log_event("[SPLIT] Iniciando partición de archivo PST...".to_string());
 
+                        let source_pst_paths: Vec<String> = if !state.split.source_psts.is_empty() {
+                            state.split.source_psts.iter().map(|p| p.path.clone()).collect()
+                        } else if let Some(ref src) = state.split.source_pst {
+                            vec![src.path.clone()]
+                        } else {
+                            Vec::new()
+                        };
+
                         let config = crate::backend::runner::SplitWorkerConfig {
                             profile_name: if state.use_default_profile { None } else { Some(state.custom_profile_name.clone()) },
-                            source_pst_path: state.split.source_pst.as_ref().map(|p| p.path.clone()).unwrap_or_default(),
+                            source_pst_path: source_pst_paths.first().cloned().unwrap_or_default(),
+                            source_pst_paths,
                             output_dir: state.split.output_dir.clone(),
                             partition_mode: match state.split.partition_mode {
                                 crate::app::SplitPartitionMode::ByYear => "ByYear".to_string(),
@@ -1282,9 +1355,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         match BackendRunner::spawn_split_worker(&config, tx.clone()) {
-                            Ok((child, abort_path)) => {
+                            Ok((child, abort_path, pause_path)) => {
                                 worker_child = Some(child);
                                 worker_abort_file = Some(abort_path);
+                                state.pause_file = Some(pause_path);
                                 state.step = WizardStep::SplitExecution;
                             }
                             Err(e) => {
@@ -1298,6 +1372,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ => {}
                 },
                 WizardStep::SplitExecution => match key.code {
+                    KeyCode::Char('p') | KeyCode::Char('P') => {
+                        state.toggle_pause();
+                    }
                     KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
                         if !state.progress.graceful_cancelling =>
                     {
@@ -1511,7 +1588,8 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
             } else if state.progress.graceful_cancelling {
                 vec![("Espere...", "Desmontando PST con seguridad")]
             } else {
-                vec![("Esc/Q", "Parada Segura")]
+                let p_label = if state.progress.is_paused { "Reanudar" } else { "Pausar" };
+                vec![("P", p_label), ("Esc/Q", "Parada Segura")]
             }
         }
         WizardStep::Completion => {
@@ -1530,7 +1608,9 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         ],
         WizardStep::SplitSelect => vec![
             ("↑/↓", "Navegar"),
-            ("Enter", "Seleccionar"),
+            ("Espacio", "Marcar"),
+            ("A/D", "Todos/Ninguno"),
+            ("Enter", "Continuar"),
             ("E", "Explorador"),
             ("Esc", "Menú"),
         ],
@@ -1555,9 +1635,14 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
             ("Esc", "Atrás"),
             ("Q", "Salir"),
         ],
-        WizardStep::SplitExecution => vec![
-            ("Esc/Q", "Parada Segura"),
-        ],
+        WizardStep::SplitExecution => {
+            if state.progress.graceful_cancelling {
+                vec![("Espere...", "Desmontando PST con seguridad")]
+            } else {
+                let p_label = if state.progress.is_paused { "Reanudar" } else { "Pausar" };
+                vec![("P", p_label), ("Esc/Q", "Parada Segura")]
+            }
+        }
         WizardStep::SplitCompletion => vec![
             ("O", "Abrir Carpeta"),
             ("Enter/Q", "Menú Principal"),

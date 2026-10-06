@@ -6,7 +6,8 @@
 #>
 param (
     [string]$ConfigFile = "",
-    [string]$AbortFile = ""
+    [string]$AbortFile = "",
+    [string]$PauseFile = ""
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -214,17 +215,37 @@ try {
     if (-not (Test-Path $ConfigFile)) {
         throw "El archivo de configuración no existe: $ConfigFile"
     }
-    $rawConfig = [System.IO.File]::ReadAllText($ConfigFile, [System.Text.Encoding]::UTF8)
     $config = $rawConfig | ConvertFrom-Json
+    $sourcePstPaths = @()
+    if ($config.source_pst_paths -and $config.source_pst_paths.Count -gt 0) {
+        $sourcePstPaths = $config.source_pst_paths
+    } elseif ($config.source_pst_path) {
+        $sourcePstPaths = @($config.source_pst_path)
+    }
 
-    $sourcePstPath = $config.source_pst_path
+    $validSourcePaths = @()
+    foreach ($sp in $sourcePstPaths) {
+        if (Test-Path $sp) {
+            $validSourcePaths += $sp
+        } else {
+            Log-Message "Advertencia: El archivo PST '$sp' no existe en disco. Omitiendo." "WARN"
+        }
+    }
+
+    if ($validSourcePaths.Count -eq 0) {
+        throw "No se encontró ningún archivo PST de origen válido para procesar."
+    }
+
+    $isMultiSource = ($validSourcePaths.Count -gt 1)
+    $defaultPrefix = if ($isMultiSource) {
+        "Consolidado"
+    } else {
+        [System.IO.Path]::GetFileNameWithoutExtension($validSourcePaths[0])
+    }
+
     $outputDir     = $config.output_dir
     $partitionMode = if ($config.partition_mode) { $config.partition_mode } else { "ByYear" }
     $transferMode  = if ($config.transfer_mode) { $config.transfer_mode } else { "Copy" }
-
-    if (-not (Test-Path $sourcePstPath)) {
-        throw "El archivo PST de origen no existe: $sourcePstPath"
-    }
 
     if (-not (Test-Path $outputDir)) {
         try {
@@ -266,323 +287,327 @@ try {
         $namespace.Logon("", $null, $false, $true)
     }
 
-    # 3. Montar PST de origen de forma segura
-    $fullSourcePath = [System.IO.Path]::GetFullPath($sourcePstPath).ToLowerInvariant()
-    $sourceStore = $null
-    foreach ($st in $namespace.Stores) {
-        $p = ""
-        try { $p = $st.FilePath } catch {}
-        if ($p) {
-            try {
-                if ([System.IO.Path]::GetFullPath($p).ToLowerInvariant() -eq $fullSourcePath) {
-                    $sourceStore = $st
-                    break
-                }
-            } catch {}
-        }
-    }
-
-    if ($null -eq $sourceStore) {
-        Log-Message "Montando PST de origen: $sourcePstPath"
-        $namespace.AddStoreEx($sourcePstPath, 3) # 3 = olStoreUnicode
-        for ($retry = 0; $retry -lt 5; $retry++) {
-            Start-Sleep -Milliseconds 150
-            foreach ($st in $namespace.Stores) {
-                $p = ""
-                try { $p = $st.FilePath } catch {}
-                if ($p) {
-                    try {
-                        if ([System.IO.Path]::GetFullPath($p).ToLowerInvariant() -eq $fullSourcePath) {
-                            $sourceStore = $st
-                            break
-                        }
-                    } catch {}
-                }
-            }
-            if ($null -ne $sourceStore) { break }
-        }
-        if ($sourceStore) {
-            $storesToUnmount += $sourceStore
-        }
-    }
-
-    if ($null -eq $sourceStore) {
-        throw "No se pudo montar ni acceder al archivo PST de origen en MAPI: $sourcePstPath"
-    }
-
-    $sourceRoot = $sourceStore.GetRootFolder()
-    $sourceBaseName = [System.IO.Path]::GetFileNameWithoutExtension($sourcePstPath)
-
-    # 4. Descubrir carpetas de origen
-    $candidateList = New-Object 'System.Collections.Generic.List[hashtable]'
-    Collect-CandidateFolders $sourceRoot "" $candidateList $config
-    $candidateFolders = $candidateList.ToArray()
-
-    $totalCandidateItems = 0
-    foreach ($cf in $candidateFolders) {
-        try { $totalCandidateItems += $cf.Folder.Items.Count } catch {}
-    }
-    Log-Message "PST Origen: $totalCandidateItems correos encontrados en las carpetas a procesar."
-
+    $unmountRef = [ref]$storesToUnmount
     $startTime = [DateTime]::UtcNow
+
+    # Paso A: Descubrir y contar total de correos de todas las fuentes
+    $sourcesData = @()
+    $totalCandidateItems = 0
+
+    foreach ($srcPath in $validSourcePaths) {
+        if ($isAborted) { break }
+        $st = Get-OrMountTargetStore $namespace $srcPath $unmountRef
+        if ($null -ne $st) {
+            $root = $st.GetRootFolder()
+            $cList = New-Object 'System.Collections.Generic.List[hashtable]'
+            Collect-CandidateFolders $root "" $cList $config
+            $fCount = 0
+            foreach ($cf in $cList) {
+                try { $fCount += $cf.Folder.Items.Count } catch {}
+            }
+            $totalCandidateItems += $fCount
+            $sourcesData += @{
+                Store       = $st
+                Path        = $srcPath
+                Folders     = $cList.ToArray()
+                ItemsCount  = $fCount
+            }
+        }
+    }
+
+    if ($totalCandidateItems -eq 0) {
+        $totalCandidateItems = 1
+    }
+
+    Log-Message "Total correos a examinar en $($validSourcePaths.Count) archivo(s) PST: $totalCandidateItems"
     Check-And-Emit-Split-Progress "Iniciando partición..." 0 $totalCandidateItems 0 $startTime $true
 
-    # 5. Procesar correos y generar archivos PST con aceleración MAPI Table
-    $unmountRef = [ref]$storesToUnmount
-
-    foreach ($cf in $candidateFolders) {
+    # Paso B: Procesar correos de cada archivo PST de origen
+    foreach ($sData in $sourcesData) {
         if ($isAborted) { break }
+        $sourceStore = $sData.Store
+        $sourcePath  = $sData.Path
+        $curBaseName = [System.IO.Path]::GetFileNameWithoutExtension($sourcePath)
+        Log-Message "Procesando archivo: $curBaseName.pst ($($sData.Folders.Count) carpetas)..."
 
-        $srcFolder = $cf.Folder
-        $itemCount = 0
-        try {
-            $itemCount = $srcFolder.Items.Count
-        } catch {
-            Log-Message "No se pudieron leer elementos de '$($cf.RelPath)': $_" "WARN"
-            continue
-        }
+        foreach ($cf in $sData.Folders) {
+            if ($isAborted) { break }
 
-        if ($itemCount -eq 0) { continue }
-        Log-Message "Examinando carpeta '$($cf.RelPath)' ($itemCount correos)..."
-
-        # Intento de escaneo ultra-rápido con MAPI Table
-        $tableEntries = New-Object 'System.Collections.Generic.List[hashtable]'
-        $useTable = $true
-
-        try {
-            $tbl = $srcFolder.GetTable()
-            try { $tbl.Columns.RemoveAll() } catch {}
-            try { $tbl.Columns.Add("EntryID") | Out-Null } catch {}
-            try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
-
-            $batchSize = 5000
-            while (-not $tbl.EndOfTable) {
-                $arr = $tbl.GetArray($batchSize)
-                $batchRows = $arr.GetLength(0)
-                if ($batchRows -eq 0) { break }
-                for ($r = 0; $r -lt $batchRows; $r++) {
-                    $eId = $arr[$r, 0]
-                    $rTime = $arr[$r, 1]
-                    if ($eId) {
-                        $tableEntries.Add(@{
-                            EntryID      = $eId
-                            ReceivedTime = $rTime
-                        })
-                    }
-                }
+            $srcFolder = $cf.Folder
+            $itemCount = 0
+            try {
+                $itemCount = $srcFolder.Items.Count
+            } catch {
+                Log-Message "No se pudieron leer elementos de '$($cf.RelPath)': $_" "WARN"
+                continue
             }
-            if ($null -ne $tbl) {
-                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tbl) | Out-Null } catch {}
-            }
-        } catch {
-            $useTable = $false
-        }
 
-        if ($useTable -and $tableEntries.Count -gt 0) {
-            # === RUTA A: PROCESAMIENTO ACELERADO EN RAM CON MAPI TABLE ===
-            foreach ($entry in $tableEntries) {
-                if ($AbortFile -and (Test-Path $AbortFile)) {
-                    Log-Message "Señal de cancelación recibida. Deteniendo separación ordenadamente..." "WARN"
-                    $isAborted = $true
-                    break
-                }
+            if ($itemCount -eq 0) { continue }
+            Log-Message "Examinando carpeta '$($cf.RelPath)' ($itemCount correos)..."
 
-                $totalProcessed++
+            # Intento de escaneo ultra-rápido con MAPI Table
+            $tableEntries = New-Object 'System.Collections.Generic.List[hashtable]'
+            $useTable = $true
 
-                $rcvd = $entry.ReceivedTime
-                if ($null -eq $rcvd -or -not ($rcvd -is [DateTime])) {
-                    $rcvd = Get-Date
-                }
+            try {
+                $tbl = $srcFolder.GetTable()
+                try { $tbl.Columns.RemoveAll() } catch {}
+                try { $tbl.Columns.Add("EntryID") | Out-Null } catch {}
+                try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
 
-                $y = $rcvd.Year
-                $m = $rcvd.Month
-
-                if ($null -ne $allowedYears -and -not $allowedYears.Contains([int]$y)) {
-                    Check-And-Emit-Split-Progress "Omitiendo por año..." $totalProcessed $totalCandidateItems $totalTransferred $startTime
-                    continue
-                }
-                if ($null -ne $allowedMonths -and -not $allowedMonths.Contains([int]$m)) {
-                    Check-And-Emit-Split-Progress "Omitiendo por mes..." $totalProcessed $totalCandidateItems $totalTransferred $startTime
-                    continue
-                }
-
-                # Determinar nombre y ruta única del PST destino
-                $targetKey = ""
-                $baseFileName = ""
-                switch ($partitionMode) {
-                    "ByYear" {
-                        $targetKey = "$y"
-                        $baseFileName = "${sourceBaseName}_$y.pst"
-                    }
-                    "ByYearMonth" {
-                        $mPad = "{0:D2}" -f $m
-                        $targetKey = "${y}_$mPad"
-                        $baseFileName = "${sourceBaseName}_${y}_$mPad.pst"
-                    }
-                    default {
-                        $targetKey = "single"
-                        $baseFileName = "${sourceBaseName}_filtrado.pst"
-                    }
-                }
-
-                # Resolver nombre único con (1) (2) si ya existe en disco
-                $targetPstPath = ""
-                if ($targetPathCache.ContainsKey($targetKey)) {
-                    $targetPstPath = $targetPathCache[$targetKey]
-                } else {
-                    $targetPstPath = Get-UniquePstPath $outputDir $baseFileName
-                    $targetPathCache[$targetKey] = $targetPstPath
-                }
-                $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
-
-                # Montar o recuperar almacén destino de forma segura
-                $targetStore = $null
-                if ($openTargetStores.ContainsKey($targetPstPath)) {
-                    $targetStore = $openTargetStores[$targetPstPath]
-                } else {
-                    Log-Message "Inicializando archivo PST de salida: $targetFileName"
-                    $targetStore = Get-OrMountTargetStore $namespace $targetPstPath $unmountRef
-                    if ($null -eq $targetStore) {
-                        $script:totalErrors++
-                        continue
-                    }
-                    $openTargetStores[$targetPstPath] = $targetStore
-                    $generatedPsts[$targetPstPath] = @{
-                        file_path   = $targetPstPath
-                        file_name   = $targetFileName
-                        items_count = 0
-                    }
-                }
-
-                # Carpeta equivalente en el PST destino
-                $targetRoot = $null
-                try { $targetRoot = $targetStore.GetRootFolder() } catch {}
-                if ($null -eq $targetRoot) {
-                    $script:totalErrors++
-                    continue
-                }
-
-                $cacheKey = "$targetPstPath|$($cf.RelPath)"
-                $destFolder = $null
-                if ($targetFolderCache.ContainsKey($cacheKey)) {
-                    $destFolder = $targetFolderCache[$cacheKey]
-                } else {
-                    $destFolder = Ensure-FolderHierarchy $targetRoot $cf.RelPath
-                    $targetFolderCache[$cacheKey] = $destFolder
-                }
-
-                # Cargar el ítem específico por EntryID y transferir
-                $item = $null
-                try {
-                    $item = $namespace.GetItemFromID($entry.EntryID, $sourceStore.StoreID)
-                    if ($null -ne $item) {
-                        if ($transferMode -eq "Move") {
-                            $item.Move($destFolder) | Out-Null
-                        } else {
-                            $copy = $item.Copy()
-                            $copy.Move($destFolder) | Out-Null
-                            if ($null -ne $copy) {
-                                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
-                            }
+                $batchSize = 5000
+                while (-not $tbl.EndOfTable) {
+                    $arr = $tbl.GetArray($batchSize)
+                    $batchRows = $arr.GetLength(0)
+                    if ($batchRows -eq 0) { break }
+                    for ($r = 0; $r -lt $batchRows; $r++) {
+                        $eId = $arr[$r, 0]
+                        $rTime = $arr[$r, 1]
+                        if ($eId) {
+                            $tableEntries.Add(@{
+                                EntryID      = $eId
+                                ReceivedTime = $rTime
+                            })
                         }
-                        $totalTransferred++
-                        $generatedPsts[$targetPstPath].items_count++
-                    }
-                } catch {
-                    Log-Message "Error al transferir correo a '$targetFileName': $_" "WARN"
-                    $script:totalErrors++
-                } finally {
-                    if ($null -ne $item) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
                     }
                 }
-
-                Check-And-Emit-Split-Progress $targetFileName $totalProcessed $totalCandidateItems $totalTransferred $startTime
+                if ($null -ne $tbl) {
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tbl) | Out-Null } catch {}
+                }
+            } catch {
+                $useTable = $false
             }
-        } else {
-            # === RUTA B: FALLBACK TRADICIONAL SI LA CARPETA NO SOPORTA MAPI TABLE ===
-            $folderItems = $null
-            try { $folderItems = $srcFolder.Items } catch {}
-            if ($null -ne $folderItems) {
-                for ($idx = $itemCount; $idx -ge 1; $idx--) {
+
+            if ($useTable -and $tableEntries.Count -gt 0) {
+                # === RUTA A: PROCESAMIENTO ACELERADO EN RAM CON MAPI TABLE ===
+                foreach ($entry in $tableEntries) {
                     if ($AbortFile -and (Test-Path $AbortFile)) {
                         Log-Message "Señal de cancelación recibida. Deteniendo separación ordenadamente..." "WARN"
                         $isAborted = $true
                         break
                     }
 
+                    if ($PauseFile -and (Test-Path $PauseFile)) {
+                        Log-Message "Proceso de separación en pausa. En espera de reanudación..." "WARN"
+                        while ($PauseFile -and (Test-Path $PauseFile)) {
+                            if ($AbortFile -and (Test-Path $AbortFile)) { break }
+                            Start-Sleep -Milliseconds 200
+                        }
+                        if (-not ($AbortFile -and (Test-Path $AbortFile))) {
+                            Log-Message "Proceso de separación reanudado." "INFO"
+                        }
+                    }
+
                     $totalProcessed++
 
-                    $item = $null
-                    try { $item = $folderItems.Item($idx) } catch { $script:totalErrors++; continue }
-                    if ($null -eq $item) { continue }
-
-                    $rcvd = $null
-                    try { $rcvd = $item.ReceivedTime } catch {}
-                    if ($null -eq $rcvd) { try { $rcvd = $item.SentOn } catch {} }
-                    if ($null -eq $rcvd) { $rcvd = Get-Date }
+                    $rcvd = $entry.ReceivedTime
+                    if ($null -eq $rcvd -or -not ($rcvd -is [DateTime])) {
+                        $rcvd = Get-Date
+                    }
 
                     $y = $rcvd.Year
                     $m = $rcvd.Month
 
                     if ($null -ne $allowedYears -and -not $allowedYears.Contains([int]$y)) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
                         Check-And-Emit-Split-Progress "Omitiendo por año..." $totalProcessed $totalCandidateItems $totalTransferred $startTime
                         continue
                     }
                     if ($null -ne $allowedMonths -and -not $allowedMonths.Contains([int]$m)) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
                         Check-And-Emit-Split-Progress "Omitiendo por mes..." $totalProcessed $totalCandidateItems $totalTransferred $startTime
                         continue
                     }
 
-                    $targetKey = if ($partitionMode -eq "ByYear") { "$y" } elseif ($partitionMode -eq "ByYearMonth") { "${y}_{0:D2}" -f $m } else { "single" }
-                    $baseFileName = if ($partitionMode -eq "ByYear") { "${sourceBaseName}_$y.pst" } elseif ($partitionMode -eq "ByYearMonth") { "${sourceBaseName}_${y}_{0:D2}.pst" -f $m } else { "${sourceBaseName}_filtrado.pst" }
-
-                    $targetPstPath = if ($targetPathCache.ContainsKey($targetKey)) { $targetPathCache[$targetKey] } else { $p = Get-UniquePstPath $outputDir $baseFileName; $targetPathCache[$targetKey] = $p; $p }
-                    $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
-
-                    $targetStore = if ($openTargetStores.ContainsKey($targetPstPath)) { $openTargetStores[$targetPstPath] } else {
-                        Log-Message "Inicializando archivo PST de salida: $targetFileName"
-                        $st = Get-OrMountTargetStore $namespace $targetPstPath $unmountRef
-                        if ($st) { $openTargetStores[$targetPstPath] = $st; $generatedPsts[$targetPstPath] = @{ file_path = $targetPstPath; file_name = $targetFileName; items_count = 0 }; $st } else { $null }
+                    # Determinar nombre y ruta única del PST destino
+                    $targetKey = ""
+                    $baseFileName = ""
+                    switch ($partitionMode) {
+                        "ByYear" {
+                            $targetKey = "$y"
+                            $baseFileName = "${defaultPrefix}_$y.pst"
+                        }
+                        "ByYearMonth" {
+                            $mPad = "{0:D2}" -f $m
+                            $targetKey = "${y}_$mPad"
+                            $baseFileName = "${defaultPrefix}_${y}_$mPad.pst"
+                        }
+                        default {
+                            $targetKey = "single"
+                            $baseFileName = "${defaultPrefix}_filtrado.pst"
+                        }
                     }
 
-                    if ($null -eq $targetStore) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                    # Resolver nombre único con (1) (2) si ya existe en disco
+                    $targetPstPath = ""
+                    if ($targetPathCache.ContainsKey($targetKey)) {
+                        $targetPstPath = $targetPathCache[$targetKey]
+                    } else {
+                        $targetPstPath = Get-UniquePstPath $outputDir $baseFileName
+                        $targetPathCache[$targetKey] = $targetPstPath
+                    }
+                    $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
+
+                    # Montar o recuperar almacén destino de forma segura
+                    $targetStore = $null
+                    if ($openTargetStores.ContainsKey($targetPstPath)) {
+                        $targetStore = $openTargetStores[$targetPstPath]
+                    } else {
+                        Log-Message "Inicializando archivo PST de salida: $targetFileName"
+                        $targetStore = Get-OrMountTargetStore $namespace $targetPstPath $unmountRef
+                        if ($null -eq $targetStore) {
+                            $script:totalErrors++
+                            continue
+                        }
+                        $openTargetStores[$targetPstPath] = $targetStore
+                        $generatedPsts[$targetPstPath] = @{
+                            file_path   = $targetPstPath
+                            file_name   = $targetFileName
+                            items_count = 0
+                        }
+                    }
+
+                    # Carpeta equivalente en el PST destino
+                    $targetRoot = $null
+                    try { $targetRoot = $targetStore.GetRootFolder() } catch {}
+                    if ($null -eq $targetRoot) {
                         $script:totalErrors++
                         continue
                     }
 
-                    $targetRoot = $null
-                    try { $targetRoot = $targetStore.GetRootFolder() } catch {}
                     $cacheKey = "$targetPstPath|$($cf.RelPath)"
-                    $destFolder = if ($targetFolderCache.ContainsKey($cacheKey)) { $targetFolderCache[$cacheKey] } else { $df = Ensure-FolderHierarchy $targetRoot $cf.RelPath; $targetFolderCache[$cacheKey] = $df; $df }
+                    $destFolder = $null
+                    if ($targetFolderCache.ContainsKey($cacheKey)) {
+                        $destFolder = $targetFolderCache[$cacheKey]
+                    } else {
+                        $destFolder = Ensure-FolderHierarchy $targetRoot $cf.RelPath
+                        $targetFolderCache[$cacheKey] = $destFolder
+                    }
 
+                    # Cargar el ítem específico por EntryID y transferir
+                    $item = $null
                     try {
-                        if ($transferMode -eq "Move") {
-                            $item.Move($destFolder) | Out-Null
-                        } else {
-                            $copy = $item.Copy()
-                            $copy.Move($destFolder) | Out-Null
-                            if ($null -ne $copy) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {} }
+                        $item = $namespace.GetItemFromID($entry.EntryID, $sourceStore.StoreID)
+                        if ($null -ne $item) {
+                            if ($transferMode -eq "Move") {
+                                $item.Move($destFolder) | Out-Null
+                            } else {
+                                $copy = $item.Copy()
+                                $copy.Move($destFolder) | Out-Null
+                                if ($null -ne $copy) {
+                                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                                }
+                            }
+                            $totalTransferred++
+                            $generatedPsts[$targetPstPath].items_count++
                         }
-                        $totalTransferred++
-                        $generatedPsts[$targetPstPath].items_count++
                     } catch {
+                        Log-Message "Error al transferir correo a '$targetFileName': $_" "WARN"
                         $script:totalErrors++
                     } finally {
-                        if ($null -ne $item) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {} }
+                        if ($null -ne $item) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                        }
                     }
 
                     Check-And-Emit-Split-Progress $targetFileName $totalProcessed $totalCandidateItems $totalTransferred $startTime
                 }
-                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($folderItems) | Out-Null } catch {}
+            } else {
+                # === RUTA B: FALLBACK TRADICIONAL SI LA CARPETA NO SOPORTA MAPI TABLE ===
+                $folderItems = $null
+                try { $folderItems = $srcFolder.Items } catch {}
+                if ($null -ne $folderItems) {
+                    for ($idx = $itemCount; $idx -ge 1; $idx--) {
+                        if ($AbortFile -and (Test-Path $AbortFile)) {
+                            Log-Message "Señal de cancelación recibida. Deteniendo separación ordenadamente..." "WARN"
+                            $isAborted = $true
+                            break
+                        }
+
+                        if ($PauseFile -and (Test-Path $PauseFile)) {
+                            Log-Message "Proceso de separación en pausa. En espera de reanudación..." "WARN"
+                            while ($PauseFile -and (Test-Path $PauseFile)) {
+                                if ($AbortFile -and (Test-Path $AbortFile)) { break }
+                                Start-Sleep -Milliseconds 200
+                            }
+                            if (-not ($AbortFile -and (Test-Path $AbortFile))) {
+                                Log-Message "Proceso de separación reanudado." "INFO"
+                            }
+                        }
+
+                        $totalProcessed++
+
+                        $item = $null
+                        try { $item = $folderItems.Item($idx) } catch { $script:totalErrors++; continue }
+                        if ($null -eq $item) { continue }
+
+                        $rcvd = $null
+                        try { $rcvd = $item.ReceivedTime } catch {}
+                        if ($null -eq $rcvd) { try { $rcvd = $item.SentOn } catch {} }
+                        if ($null -eq $rcvd) { $rcvd = Get-Date }
+
+                        $y = $rcvd.Year
+                        $m = $rcvd.Month
+
+                        if ($null -ne $allowedYears -and -not $allowedYears.Contains([int]$y)) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            Check-And-Emit-Split-Progress "Omitiendo por año..." $totalProcessed $totalCandidateItems $totalTransferred $startTime
+                            continue
+                        }
+                        if ($null -ne $allowedMonths -and -not $allowedMonths.Contains([int]$m)) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            Check-And-Emit-Split-Progress "Omitiendo por mes..." $totalProcessed $totalCandidateItems $totalTransferred $startTime
+                            continue
+                        }
+
+                        $targetKey = if ($partitionMode -eq "ByYear") { "$y" } elseif ($partitionMode -eq "ByYearMonth") { "${y}_{0:D2}" -f $m } else { "single" }
+                        $baseFileName = if ($partitionMode -eq "ByYear") { "${defaultPrefix}_$y.pst" } elseif ($partitionMode -eq "ByYearMonth") { "${defaultPrefix}_${y}_{0:D2}.pst" -f $m } else { "${defaultPrefix}_filtrado.pst" }
+
+                        $targetPstPath = if ($targetPathCache.ContainsKey($targetKey)) { $targetPathCache[$targetKey] } else { $p = Get-UniquePstPath $outputDir $baseFileName; $targetPathCache[$targetKey] = $p; $p }
+                        $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
+
+                        $targetStore = if ($openTargetStores.ContainsKey($targetPstPath)) { $openTargetStores[$targetPstPath] } else {
+                            Log-Message "Inicializando archivo PST de salida: $targetFileName"
+                            $st = Get-OrMountTargetStore $namespace $targetPstPath $unmountRef
+                            if ($st) { $openTargetStores[$targetPstPath] = $st; $generatedPsts[$targetPstPath] = @{ file_path = $targetPstPath; file_name = $targetFileName; items_count = 0 }; $st } else { $null }
+                        }
+
+                        if ($null -eq $targetStore) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            $script:totalErrors++
+                            continue
+                        }
+
+                        $targetRoot = $null
+                        try { $targetRoot = $targetStore.GetRootFolder() } catch {}
+                        $cacheKey = "$targetPstPath|$($cf.RelPath)"
+                        $destFolder = if ($targetFolderCache.ContainsKey($cacheKey)) { $targetFolderCache[$cacheKey] } else { $df = Ensure-FolderHierarchy $targetRoot $cf.RelPath; $targetFolderCache[$cacheKey] = $df; $df }
+
+                        try {
+                            if ($transferMode -eq "Move") {
+                                $item.Move($destFolder) | Out-Null
+                            } else {
+                                $copy = $item.Copy()
+                                $copy.Move($destFolder) | Out-Null
+                                if ($null -ne $copy) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {} }
+                            }
+                            $totalTransferred++
+                            $generatedPsts[$targetPstPath].items_count++
+                        } catch {
+                            $script:totalErrors++
+                        } finally {
+                            if ($null -ne $item) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {} }
+                        }
+
+                        Check-And-Emit-Split-Progress $targetFileName $totalProcessed $totalCandidateItems $totalTransferred $startTime
+                    }
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($folderItems) | Out-Null } catch {}
+                }
+            }
+
+            if ($null -ne $srcFolder) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($srcFolder) | Out-Null } catch {}
             }
         }
-
-        if ($null -ne $srcFolder) {
-            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($srcFolder) | Out-Null } catch {}
+    }l } catch {}
         }
     }
 
@@ -652,7 +677,13 @@ finally {
     Send-Telemetry @{
         type            = "split_finished"
         status          = $finalStatus
-        total_extracted = $totalTransferred
+        total_items     = [uint64]$totalTransferred
+        total_extracted = [uint64]$totalTransferred
         generated_psts  = $pstsReport
+        errors          = [uint64]$script:totalErrors
+    }
+
+    if ($PauseFile -and (Test-Path $PauseFile)) {
+        try { Remove-Item -Path $PauseFile -Force -ErrorAction SilentlyContinue } catch {}
     }
 }

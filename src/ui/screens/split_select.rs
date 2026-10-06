@@ -19,20 +19,23 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .split(area);
 
     // 1. Encabezado
+    let selected_count = state.discovered_psts.iter().filter(|p| p.selected).count();
     let guide_lines = vec![
         Line::from(vec![
-            Span::styled("SELECCIÓN DE ARCHIVO PST ORIGEN", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" — Selecciona el archivo que deseas dividir por periodos", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("SELECCIÓN DE ARCHIVOS PST ORIGEN", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(" — Selecciona uno o varios archivos para dividir o consolidar", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
-        Line::from(""),
         Line::from(vec![
-            Span::styled("Usa ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("[↑/↓]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" para navegar, ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" para seleccionar y avanzar, o ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("[E]", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" para buscar con el explorador en otra carpeta.", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Archivos detectados: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(format!("{}", state.discovered_psts.len()), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(" | Marcados para procesar: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(
+                format!("{}", selected_count),
+                Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("[↑/↓] Navegar  •  [Espacio] Marcar/Desmarcar  •  [A] Todos  •  [D] Ninguno  •  [Enter] Continuar  •  [E] Explorador", Style::default().fg(Theme::ACCENT_PRIMARY)),
         ]),
     ];
     let guide_p = Paragraph::new(guide_lines);
@@ -42,7 +45,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let selected_idx = state.selected_pst_table_idx;
     let rows: Vec<Row> = if state.discovered_psts.is_empty() {
         vec![Row::new(vec![
+            Span::raw(""),
             Span::styled("No se detectaron archivos .pst en la ruta actual.", Style::default().fg(Theme::WARNING)),
+            Span::raw(""),
             Span::raw(""),
             Span::raw(""),
         ])]
@@ -53,7 +58,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .enumerate()
             .map(|(i, pst)| {
                 let is_focused = i == selected_idx;
-                let marker = if is_focused { " ▶ " } else { "   " };
+                let checkbox = if pst.selected { "[x]" } else { "[ ]" };
                 let size_str = format!("{:.2} MB", pst.size_mb);
 
                 let has_cache = state.pst_details_cache.contains_key(&pst.path);
@@ -71,8 +76,15 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     Style::default().fg(Theme::TEXT_MAIN)
                 };
 
+                let cb_style = if pst.selected {
+                    Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Theme::TEXT_MUTED)
+                };
+
                 Row::new(vec![
-                    Span::styled(format!("{}{}", marker, pst.name), row_style),
+                    Span::styled(format!(" {}", checkbox), cb_style),
+                    Span::styled(pst.name.clone(), row_style),
                     Span::styled(size_str, if is_focused { Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MUTED) }),
                     Span::styled(status_str, if has_cache { Style::default().fg(Theme::SUCCESS) } else { Style::default().fg(Theme::TEXT_MUTED) }),
                     Span::styled(pst.path.clone(), Style::default().fg(Theme::TEXT_MUTED)),
@@ -84,6 +96,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let table = Table::new(
         rows,
         [
+            Constraint::Length(6),  // [x]
             Constraint::Length(32), // Nombre
             Constraint::Length(14), // Tamaño
             Constraint::Length(22), // Estado
@@ -92,6 +105,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     )
     .header(
         Row::new(vec![
+            Span::styled(" Sel", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(" Nombre de Archivo", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(" Tamaño", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(" Inspección", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -110,8 +124,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(table, chunks[1]);
 
     // 3. Panel de Información
-    let selected_pst_info = state.discovered_psts.get(selected_idx);
-    let info_text = if let Some(pst) = selected_pst_info {
+    let info_text = if selected_count > 1 {
+        let total_size: f64 = state.discovered_psts.iter().filter(|p| p.selected).map(|p| p.size_mb).sum();
+        let selected_names = state.discovered_psts.iter().filter(|p| p.selected).map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ");
+        vec![
+            Line::from(vec![
+                Span::styled("Múltiples archivos seleccionados: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(format!("{} archivos ({:.2} MB en total)", selected_count, total_size), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("PSTs: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(selected_names, Style::default().fg(Theme::TEXT_MAIN)),
+            ]),
+        ]
+    } else if let Some(pst) = state.discovered_psts.get(selected_idx) {
         let details_info = if let Some(det) = state.pst_details_cache.get(&pst.path) {
             format!(
                 " • Años detectados: {:?} • Total correos: {}",
@@ -122,7 +148,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         };
         vec![
             Line::from(vec![
-                Span::styled("Archivo Seleccionado: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Archivo Enfocado: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(&pst.name, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" ({:.2} MB)", pst.size_mb), Style::default().fg(Theme::TEXT_MAIN)),
                 Span::styled(details_info, Style::default().fg(Theme::SUCCESS)),
@@ -133,7 +159,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ]),
         ]
     } else {
-        vec![Line::from(Span::styled("No hay ningún archivo PST seleccionado.", Style::default().fg(Theme::WARNING)))]
+        vec![Line::from(Span::styled("No hay ningún archivo PST disponible.", Style::default().fg(Theme::WARNING)))]
     };
 
     let info_block = Block::default()
