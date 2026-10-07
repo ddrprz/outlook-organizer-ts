@@ -642,15 +642,81 @@ finally {
         }
     }
 
-    # Desmontar almacenes PST creados y el de origen
-    foreach ($st in $storesToUnmount) {
-        try {
-            if ($null -ne $st -and $null -ne $namespace) {
-                $namespace.RemoveStore($st.GetRootFolder()) | Out-Null
+    # 1. Liberar cachés de carpetas y almacenes abiertos para no bloquear MAPI
+    if ($targetFolderCache) {
+        foreach ($k in $targetFolderCache.Keys) {
+            $f = $targetFolderCache[$k]
+            if ($null -ne $f) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($f) | Out-Null } catch {}
             }
-        } catch {}
+        }
+        $targetFolderCache.Clear()
+    }
+    if ($openTargetStores) {
+        foreach ($k in $openTargetStores.Keys) {
+            $s = $openTargetStores[$k]
+            if ($null -ne $s) {
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($s) | Out-Null } catch {}
+            }
+        }
+        $openTargetStores.Clear()
+    }
+
+    if ($sourcesData) {
+        foreach ($sd in $sourcesData) {
+            if ($sd.Folders) {
+                foreach ($cf in $sd.Folders) {
+                    if ($cf -and $cf.Folder) {
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($cf.Folder) | Out-Null } catch {}
+                    }
+                }
+            }
+        }
+    }
+
+    # 2. Forzar recolección de basura COM antes de invocar RemoveStore
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+
+    # 3. Desmontar almacenes PST creados y los de origen
+    foreach ($st in $storesToUnmount) {
+        if ($null -ne $st -and $null -ne $namespace) {
+            try {
+                $rootF = $st.GetRootFolder()
+                $namespace.RemoveStore($rootF)
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
+                Log-Message "Almacén PST '$($st.DisplayName)' desmontado limpiamente."
+            } catch {
+                Log-Message "Aviso al desmontar PST: $_" "WARN"
+            }
+        }
         if ($null -ne $st) {
             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($st) | Out-Null } catch {}
+        }
+    }
+
+    # 4. Verificación de respaldo: comprobar en $namespace.Stores si quedó montado algún PST generado
+    $allKnownPaths = @()
+    if ($validSourcePaths) { $allKnownPaths += $validSourcePaths }
+    if ($generatedPsts) { foreach ($k in $generatedPsts.Keys) { $allKnownPaths += $k } }
+
+    if ($null -ne $namespace) {
+        foreach ($kp in $allKnownPaths) {
+            $fullKp = [System.IO.Path]::GetFullPath($kp).ToLowerInvariant()
+            foreach ($st in $namespace.Stores) {
+                $sp = ""
+                try { $sp = $st.FilePath } catch {}
+                if ($sp -and [System.IO.Path]::GetFullPath($sp).ToLowerInvariant() -eq $fullKp) {
+                    try {
+                        $rootF = $st.GetRootFolder()
+                        $namespace.RemoveStore($rootF)
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
+                        Log-Message "Almacén PST residual '$sp' desmontado en pase de verificación."
+                    } catch {}
+                }
+            }
         }
     }
 
