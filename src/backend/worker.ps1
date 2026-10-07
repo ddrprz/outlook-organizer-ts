@@ -388,7 +388,30 @@ $consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 
 $weStartedOutlook = $false
-try {
+    # Configurar límites de tamaño máximo para archivos PST en el registro (47.5 GB = 48,640 MB)
+    $maxLargeMb = 48640   # 47.5 GB exactos (47.5 * 1024 MB)
+    $warnLargeMb = 46080  # 45.0 GB advertencia (45 * 1024 MB, margen seguro de 2.5 GB)
+
+    $pstRegVersions = @("16.0", "15.0", "14.0", "12.0", "11.0")
+    $regHives = @(
+        "HKCU:\Software\Microsoft\Office",
+        "HKCU:\Software\Policies\Microsoft\Office",
+        "HKLM:\Software\Microsoft\Office",
+        "HKLM:\Software\Policies\Microsoft\Office"
+    )
+    foreach ($ver in $pstRegVersions) {
+        foreach ($hive in $regHives) {
+            $regPstPath = "$hive\$ver\Outlook\PST"
+            try {
+                if (-not (Test-Path $regPstPath)) {
+                    New-Item -Path $regPstPath -Force -ErrorAction SilentlyContinue | Out-Null
+                }
+                Set-ItemProperty -Path $regPstPath -Name "MaxLargeFileSize" -Value $maxLargeMb -Type DWord -Force -ErrorAction SilentlyContinue
+                Set-ItemProperty -Path $regPstPath -Name "WarnLargeFileSize" -Value $warnLargeMb -Type DWord -Force -ErrorAction SilentlyContinue
+            } catch {}
+        }
+    }
+
     # 2. Conectar a Outlook COM en modo STA
     try {
         $outlook = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Outlook.Application")

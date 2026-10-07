@@ -120,6 +120,54 @@ function Collect-CandidateFolders($folder, [string]$parentRelPath, [System.Colle
     } catch {}
 }
 
+function Test-IsAnsiPst([string]$filePath) {
+    if (-not (Test-Path $filePath)) { return $false }
+    try {
+        $stream = [System.IO.File]::OpenRead($filePath)
+        try {
+            $bytes = New-Object byte[] 10
+            $read = $stream.Read($bytes, 0, 10)
+            if ($read -ge 10) {
+                # Cabecera mágica !BDN (0x21, 0x42, 0x44, 0x4E)
+                if ($bytes[0] -eq 0x21 -and $bytes[1] -eq 0x42 -and $bytes[2] -eq 0x44 -and $bytes[3] -eq 0x4E) {
+                    $ver = [BitConverter]::ToUInt16($bytes, 8)
+                    # 14 (0x0E) o 15 (0x0F) = ANSI PST heredado (tope físico estricto de 2 GB)
+                    return ($ver -eq 14 -or $ver -eq 15)
+                }
+            }
+        } finally {
+            $stream.Close()
+            $stream.Dispose()
+        }
+    } catch {}
+    return $false
+}
+
+function Get-NextVolumePstPath([string]$currentPath) {
+    $dir = [System.IO.Path]::GetDirectoryName($currentPath)
+    $nameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($currentPath)
+    $ext = [System.IO.Path]::GetExtension($currentPath)
+    if ([string]::IsNullOrEmpty($ext)) { $ext = ".pst" }
+
+    $partIdx = 2
+    $baseName = $nameWithoutExt
+    if ($nameWithoutExt -match '^(.*)_Part(\d+)$') {
+        $baseName = $matches[1]
+        $partIdx = [int]$matches[2] + 1
+    } elseif ($nameWithoutExt -match '^(.*) \((\d+)\)$') {
+        $baseName = $matches[1]
+        $partIdx = [int]$matches[2] + 1
+    }
+
+    while ($true) {
+        $candidate = [System.IO.Path]::Combine($dir, "${baseName}_Part${partIdx}${ext}")
+        if (-not (Test-Path $candidate)) {
+            return $candidate
+        }
+        $partIdx++
+    }
+}
+
 function Get-UniquePstPath([string]$dir, [string]$baseFileName) {
     $nameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($baseFileName)
     $ext = [System.IO.Path]::GetExtension($baseFileName)
@@ -128,6 +176,11 @@ function Get-UniquePstPath([string]$dir, [string]$baseFileName) {
     $candidatePath = [System.IO.Path]::Combine($dir, "$nameWithoutExt$ext")
     if (-not (Test-Path $candidatePath)) {
         return $candidatePath
+    }
+
+    # Si el archivo existente es ANSI antiguo (2 GB), advertir
+    if (Test-IsAnsiPst $candidatePath) {
+        Log-Message "Aviso: '$candidatePath' existe en formato ANSI (2 GB). Generando nuevo archivo Unicode (47.5 GB)." "WARN"
     }
 
     $idx = 1
@@ -276,17 +329,30 @@ try {
         foreach ($m in $config.selected_months) { [void]$allowedMonths.Add([int]$m) }
     }
 
-    # Configurar límites de tamaño extendido para archivos PST en el registro (hasta 100 GB)
-    $pstRegVersions = @("16.0", "15.0", "14.0")
+    # Configurar límites de tamaño máximo para archivos PST en el registro (47.5 GB = 48,640 MB)
+    $maxLargeMb = 48640   # 47.5 GB exactos (47.5 * 1024 MB)
+    $warnLargeMb = 46080  # 45.0 GB advertencia (45 * 1024 MB, margen seguro de 2.5 GB)
+    $script:MAX_PST_SIZE_BYTES = [long](47.5 * 1024 * 1024 * 1024)       # 51,002,736,640 bytes
+    $script:ROLLOVER_THRESHOLD_BYTES = [long](47.0 * 1024 * 1024 * 1024) # 50,465,865,728 bytes (margen preventivo)
+
+    $pstRegVersions = @("16.0", "15.0", "14.0", "12.0", "11.0")
+    $regHives = @(
+        "HKCU:\Software\Microsoft\Office",
+        "HKCU:\Software\Policies\Microsoft\Office",
+        "HKLM:\Software\Microsoft\Office",
+        "HKLM:\Software\Policies\Microsoft\Office"
+    )
     foreach ($ver in $pstRegVersions) {
-        $regPstPath = "HKCU:\Software\Microsoft\Office\$ver\Outlook\PST"
-        try {
-            if (-not (Test-Path $regPstPath)) {
-                New-Item -Path $regPstPath -Force -ErrorAction SilentlyContinue | Out-Null
-            }
-            Set-ItemProperty -Path $regPstPath -Name "MaxLargeFileSize" -Value 102400 -Type DWord -Force -ErrorAction SilentlyContinue
-            Set-ItemProperty -Path $regPstPath -Name "WarnLargeFileSize" -Value 97280 -Type DWord -Force -ErrorAction SilentlyContinue
-        } catch {}
+        foreach ($hive in $regHives) {
+            $regPstPath = "$hive\$ver\Outlook\PST"
+            try {
+                if (-not (Test-Path $regPstPath)) {
+                    New-Item -Path $regPstPath -Force -ErrorAction SilentlyContinue | Out-Null
+                }
+                Set-ItemProperty -Path $regPstPath -Name "MaxLargeFileSize" -Value $maxLargeMb -Type DWord -Force -ErrorAction SilentlyContinue
+                Set-ItemProperty -Path $regPstPath -Name "WarnLargeFileSize" -Value $warnLargeMb -Type DWord -Force -ErrorAction SilentlyContinue
+            } catch {}
+        }
     }
 
     # 2. Inicializar sesión MAPI
@@ -466,6 +532,23 @@ try {
                     }
                     $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
 
+                    # Monitoreo preventivo del límite de 47.5 GB: si el PST alcanzó ~47 GB, rotar volumen
+                    if ($generatedPsts.ContainsKey($targetPstPath) -and ($generatedPsts[$targetPstPath].items_count -gt 0) -and ($generatedPsts[$targetPstPath].items_count % 50 -eq 0)) {
+                        if (Test-Path $targetPstPath) {
+                            try {
+                                $currLen = (Get-Item -LiteralPath $targetPstPath).Length
+                                if ($currLen -ge $script:ROLLOVER_THRESHOLD_BYTES) {
+                                    $nextVol = Get-NextVolumePstPath $targetPstPath
+                                    $nextVolName = [System.IO.Path]::GetFileName($nextVol)
+                                    Log-Message "Aviso: '$targetFileName' alcanzó el límite de 47.5 GB ($('{0:N2}' -f ($currLen/1GB)) GB). Rotando a nuevo volumen: $nextVolName..." "WARN"
+                                    $targetPstPath = $nextVol
+                                    $targetFileName = $nextVolName
+                                    $targetPathCache[$targetKey] = $targetPstPath
+                                }
+                            } catch {}
+                        }
+                    }
+
                     # Montar o recuperar almacén destino de forma segura
                     $targetStore = $null
                     if ($openTargetStores.ContainsKey($targetPstPath)) {
@@ -520,8 +603,52 @@ try {
                             $generatedPsts[$targetPstPath].items_count++
                         }
                     } catch {
-                        Log-Message "Error al transferir correo a '$targetFileName': $_" "WARN"
-                        $script:totalErrors++
+                        $errStr = "$_"
+                        if ($errStr -match "tamaño máximo" -or $errStr -match "maximum size" -or $errStr -match "8004060C") {
+                            Log-Message "Límite máximo de tamaño alcanzado en '$targetFileName'. Creando nuevo volumen automáticamente..." "WARN"
+                            $nextVol = Get-NextVolumePstPath $targetPstPath
+                            $nextVolName = [System.IO.Path]::GetFileName($nextVol)
+                            $newStore = Get-OrMountTargetStore $namespace $nextVol $unmountRef
+                            if ($null -ne $newStore) {
+                                $targetPstPath = $nextVol
+                                $targetFileName = $nextVolName
+                                $targetPathCache[$targetKey] = $targetPstPath
+                                $openTargetStores[$targetPstPath] = $newStore
+                                $generatedPsts[$targetPstPath] = @{
+                                    file_path   = $targetPstPath
+                                    file_name   = $targetFileName
+                                    items_count = 0
+                                }
+                                $targetStore = $newStore
+                                $newRoot = $null
+                                try { $newRoot = $targetStore.GetRootFolder() } catch {}
+                                $destFolder = Ensure-FolderHierarchy $newRoot $cf.RelPath
+                                $targetFolderCache["$targetPstPath|$($cf.RelPath)"] = $destFolder
+
+                                try {
+                                    if ($transferMode -eq "Move") {
+                                        $item.Move($destFolder) | Out-Null
+                                    } else {
+                                        $copy = $item.Copy()
+                                        $copy.Move($destFolder) | Out-Null
+                                        if ($null -ne $copy) {
+                                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                                        }
+                                    }
+                                    $totalTransferred++
+                                    $generatedPsts[$targetPstPath].items_count++
+                                    Log-Message "Correo transferido exitosamente en nuevo volumen '$targetFileName'." "INFO"
+                                } catch {
+                                    Log-Message "Error al reintentar transferencia en nuevo volumen '$targetFileName': $_" "WARN"
+                                    $script:totalErrors++
+                                }
+                            } else {
+                                $script:totalErrors++
+                            }
+                        } else {
+                            Log-Message "Error al transferir correo a '$targetFileName': $_" "WARN"
+                            $script:totalErrors++
+                        }
                     } finally {
                         if ($null -ne $item) {
                             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
@@ -584,6 +711,23 @@ try {
                         $targetPstPath = if ($targetPathCache.ContainsKey($targetKey)) { $targetPathCache[$targetKey] } else { $p = Get-UniquePstPath $outputDir $baseFileName; $targetPathCache[$targetKey] = $p; $p }
                         $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
 
+                        # Monitoreo preventivo del límite de 47.5 GB: si el PST alcanzó ~47 GB, rotar volumen
+                        if ($generatedPsts.ContainsKey($targetPstPath) -and ($generatedPsts[$targetPstPath].items_count -gt 0) -and ($generatedPsts[$targetPstPath].items_count % 50 -eq 0)) {
+                            if (Test-Path $targetPstPath) {
+                                try {
+                                    $currLen = (Get-Item -LiteralPath $targetPstPath).Length
+                                    if ($currLen -ge $script:ROLLOVER_THRESHOLD_BYTES) {
+                                        $nextVol = Get-NextVolumePstPath $targetPstPath
+                                        $nextVolName = [System.IO.Path]::GetFileName($nextVol)
+                                        Log-Message "Aviso: '$targetFileName' alcanzó el límite de 47.5 GB ($('{0:N2}' -f ($currLen/1GB)) GB). Rotando a nuevo volumen: $nextVolName..." "WARN"
+                                        $targetPstPath = $nextVol
+                                        $targetFileName = $nextVolName
+                                        $targetPathCache[$targetKey] = $targetPstPath
+                                    }
+                                } catch {}
+                            }
+                        }
+
                         $targetStore = if ($openTargetStores.ContainsKey($targetPstPath)) { $openTargetStores[$targetPstPath] } else {
                             Log-Message "Inicializando archivo PST de salida: $targetFileName"
                             $st = Get-OrMountTargetStore $namespace $targetPstPath $unmountRef
@@ -612,7 +756,50 @@ try {
                             $totalTransferred++
                             $generatedPsts[$targetPstPath].items_count++
                         } catch {
-                            $script:totalErrors++
+                            $errStr = "$_"
+                            if ($errStr -match "tamaño máximo" -or $errStr -match "maximum size" -or $errStr -match "8004060C") {
+                                Log-Message "Límite máximo de tamaño alcanzado en '$targetFileName'. Creando nuevo volumen automáticamente..." "WARN"
+                                $nextVol = Get-NextVolumePstPath $targetPstPath
+                                $nextVolName = [System.IO.Path]::GetFileName($nextVol)
+                                $newStore = Get-OrMountTargetStore $namespace $nextVol $unmountRef
+                                if ($null -ne $newStore) {
+                                    $targetPstPath = $nextVol
+                                    $targetFileName = $nextVolName
+                                    $targetPathCache[$targetKey] = $targetPstPath
+                                    $openTargetStores[$targetPstPath] = $newStore
+                                    $generatedPsts[$targetPstPath] = @{
+                                        file_path   = $targetPstPath
+                                        file_name   = $targetFileName
+                                        items_count = 0
+                                    }
+                                    $targetStore = $newStore
+                                    $newRoot = $null
+                                    try { $newRoot = $targetStore.GetRootFolder() } catch {}
+                                    $destFolder = Ensure-FolderHierarchy $newRoot $cf.RelPath
+                                    $targetFolderCache["$targetPstPath|$($cf.RelPath)"] = $destFolder
+
+                                    try {
+                                        if ($transferMode -eq "Move") {
+                                            $item.Move($destFolder) | Out-Null
+                                        } else {
+                                            $copy = $item.Copy()
+                                            $copy.Move($destFolder) | Out-Null
+                                            if ($null -ne $copy) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {} }
+                                        }
+                                        $totalTransferred++
+                                        $generatedPsts[$targetPstPath].items_count++
+                                        Log-Message "Correo transferido exitosamente en nuevo volumen '$targetFileName'." "INFO"
+                                    } catch {
+                                        Log-Message "Error al reintentar transferencia en nuevo volumen '$targetFileName': $_" "WARN"
+                                        $script:totalErrors++
+                                    }
+                                } else {
+                                    $script:totalErrors++
+                                }
+                            } else {
+                                Log-Message "Error al transferir correo a '$targetFileName': $_" "WARN"
+                                $script:totalErrors++
+                            }
                         } finally {
                             if ($null -ne $item) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {} }
                         }

@@ -122,6 +122,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("• Directorio destino:  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(&state.split.output_dir, Style::default().fg(Theme::TEXT_MAIN)),
         ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("• Tamaño máx. por PST: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("47.5 GB (Unicode)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+        ]),
     ];
 
     let param_block = Block::default()
