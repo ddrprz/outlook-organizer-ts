@@ -159,10 +159,16 @@ function Get-OrMountTargetStore($namespace, [string]$targetPstPath, [ref]$stores
 
     if ($null -eq $targetStore) {
         try {
-            $namespace.AddStoreEx($targetPstPath, 3) # 3 = olStoreUnicode
+            # 2 = olStoreUnicode (Formato Unicode moderno de alta capacidad: 50 GB - 100 GB)
+            $namespace.AddStoreEx($targetPstPath, 2)
         } catch {
-            Log-Message "Error al invocar AddStoreEx para '$targetPstPath': $_" "ERROR"
-            return $null
+            try {
+                # 1 = olStoreDefault (Predeterminado de Exchange/Outlook)
+                $namespace.AddStoreEx($targetPstPath, 1)
+            } catch {
+                Log-Message "Error al invocar AddStoreEx para '$targetPstPath': $_" "ERROR"
+                return $null
+            }
         }
 
         for ($retry = 0; $retry -lt 5; $retry++) {
@@ -268,6 +274,19 @@ try {
     if ($config.selected_months -and $config.selected_months.Count -gt 0) {
         $allowedMonths = New-Object 'System.Collections.Generic.HashSet[int]'
         foreach ($m in $config.selected_months) { [void]$allowedMonths.Add([int]$m) }
+    }
+
+    # Configurar límites de tamaño extendido para archivos PST en el registro (hasta 100 GB)
+    $pstRegVersions = @("16.0", "15.0", "14.0")
+    foreach ($ver in $pstRegVersions) {
+        $regPstPath = "HKCU:\Software\Microsoft\Office\$ver\Outlook\PST"
+        try {
+            if (-not (Test-Path $regPstPath)) {
+                New-Item -Path $regPstPath -Force -ErrorAction SilentlyContinue | Out-Null
+            }
+            Set-ItemProperty -Path $regPstPath -Name "MaxLargeFileSize" -Value 102400 -Type DWord -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $regPstPath -Name "WarnLargeFileSize" -Value 97280 -Type DWord -Force -ErrorAction SilentlyContinue
+        } catch {}
     }
 
     # 2. Inicializar sesión MAPI
