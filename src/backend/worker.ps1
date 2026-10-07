@@ -644,13 +644,18 @@ try {
                                 $rTime = Get-Date
                             }
 
+                            $eSubj = $arr[$r, 2]
+                            $eSender = $arr[$r, 3]
+                            $eMid = $arr[$r, 4]
+                            $eSize = $arr[$r, 5]
+
                             $tableEntries.Add(@{
                                 EntryID      = $eId
                                 ReceivedTime = $rTime
-                                Subject      = $arr[$r, 2]
-                                Sender       = $arr[$r, 3]
-                                MessageID    = $arr[$r, 4]
-                                Size         = $arr[$r, 5]
+                                Subject      = $eSubj
+                                Sender       = $eSender
+                                MessageID    = $eMid
+                                Size         = $eSize
                             })
                         }
                     }
