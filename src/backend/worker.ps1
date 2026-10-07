@@ -388,6 +388,7 @@ $consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 
 $weStartedOutlook = $false
+try {
     # Configurar límites de tamaño máximo para archivos PST en el registro (47.5 GB = 48,640 MB)
     $maxLargeMb = 48640   # 47.5 GB exactos (47.5 * 1024 MB)
     $warnLargeMb = 46080  # 45.0 GB advertencia (45 * 1024 MB, margen seguro de 2.5 GB)
