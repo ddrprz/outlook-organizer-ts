@@ -113,8 +113,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     if selected_count > 0 {
         header_line2.push(Span::styled(" | Capacidad libre en seleccionados: ", Style::default().fg(Theme::TEXT_MUTED)));
+        let combined_total_fmt = if combined_total_gb.fract() == 0.0 {
+            format!("{:.0} GB", combined_total_gb)
+        } else {
+            format!("{:.1} GB", combined_total_gb)
+        };
         header_line2.push(Span::styled(
-            format!("{:.1} GB / {:.0} GB", combined_free_gb, combined_total_gb),
+            format!("{:.1} GB / {}", combined_free_gb, combined_total_fmt),
             Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
         ));
     } else {
@@ -253,7 +258,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             let (health_label, health_color) = item.health_status();
             let free_gb = item.get_free_gb();
             let used_gb = item.get_used_gb();
-            let total_gb = item.get_total_gb();
             let pct = item.get_usage_percent();
 
             let line1 = Line::from(vec![
@@ -263,7 +267,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Span::styled("Estado: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{} ({:.1}%)   ", health_label, pct), Style::default().fg(health_color).add_modifier(Modifier::BOLD)),
                 Span::styled("Uso: ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled(format!("{:.2} GB / {:.0} GB   ", used_gb, total_gb), Style::default().fg(Theme::TEXT_MAIN)),
+                Span::styled(format!("{:.2} GB / {}   ", used_gb, item.get_quota_display()), Style::default().fg(Theme::TEXT_MAIN)),
                 Span::styled("Libre: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{:.2} GB", free_gb), Style::default().fg(health_color).add_modifier(Modifier::BOLD)),
             ]);
