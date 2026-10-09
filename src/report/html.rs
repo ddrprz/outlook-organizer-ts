@@ -125,12 +125,278 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
         .replace("__PROFILE_INFO__", &profile_str)
         .replace("__DATE_FILTER_INFO__", &date_filter_str)
         .replace("__PST_ROWS__", &selected_psts_rows)
+        .replace("__STORAGE_IMPACT_SECTION__", &build_storage_impact_html(state))
         .replace("__FOLDERS_JSON__", &folders_json)
         .replace("__EMAILS_JSON__", &emails_json)
         .replace("__LOGS_JSON__", &logs_json);
 
     fs::write(&target_path, rendered)?;
     Ok(target_path)
+}
+
+fn build_storage_impact_html(state: &AppState) -> String {
+    let impacts = state.get_mailbox_storage_impacts();
+    if impacts.is_empty() {
+        return r#"<div class="storage-impact-panel"><p style="color: var(--text-muted); text-align: center; padding: 1.5rem;">No se detectaron buzones destino seleccionados para auditar el impacto en almacenamiento.</p></div>"#.to_string();
+    }
+
+    let impacts_count = impacts.len();
+    let total_quota_gb: f64 = impacts.iter().map(|i| i.total_gb).sum();
+    let total_used_before_gb: f64 = impacts.iter().map(|i| i.used_before_gb).sum();
+    let total_used_after_gb: f64 = impacts.iter().map(|i| i.used_after_gb).sum();
+    let total_imported_gb: f64 = impacts.iter().map(|i| i.imported_gb).sum();
+    let total_free_after_gb: f64 = impacts.iter().map(|i| i.free_after_gb).sum();
+    let total_imported_items: u64 = state.progress.imported_count;
+
+    let mut cards_html = String::new();
+    let mut table_rows_html = String::new();
+
+    for item in &impacts {
+        let health_color_before = match item.health_before.as_str() {
+            "Lleno" | "Crítico" => "var(--danger)",
+            "Atención" => "var(--warning)",
+            _ => "var(--success)",
+        };
+        let health_color_after = match item.health_after.as_str() {
+            "Lleno" | "Crítico" => "var(--danger)",
+            "Atención" => "var(--warning)",
+            _ => "var(--success)",
+        };
+
+        let card = format!(
+            r#"<div class="mailbox-impact-card">
+        <div class="mbx-card-header">
+          <div class="mbx-name-group">
+            <svg class="icon icon-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            <strong class="mbx-name">{}</strong>
+            <span class="store-type-tag">({})</span>
+          </div>
+          <div class="quota-pill">
+            <span>Cuota Asignada:</span> <strong>{}</strong>
+          </div>
+        </div>
+
+        <div class="mbx-comparison-grid">
+          <!-- Columna Antes -->
+          <div class="comparison-col before-col">
+            <div class="phase-header">
+              <span class="phase-badge before-badge">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 14"/></svg>
+                ESTADO ANTES DE IMPORTAR
+              </span>
+              <span class="health-indicator" style="color: {};">● {}</span>
+            </div>
+
+            <div class="storage-metric-row">
+              <div class="storage-box">
+                <span class="box-label">Espacio Usado Inicial</span>
+                <span class="box-value">{:.2} GB</span>
+                <span class="box-sub">{:.1}% de la cuota</span>
+              </div>
+              <div class="storage-box free-box">
+                <span class="box-label">Espacio Libre Inicial</span>
+                <span class="box-value free-val">{:.2} GB</span>
+                <span class="box-sub">disponible</span>
+              </div>
+            </div>
+
+            <div class="impact-bar-wrapper">
+              <div class="impact-bar-outer">
+                <div class="impact-bar-fill before-fill" style="width: {:.1}%;"></div>
+              </div>
+              <div class="impact-bar-labels">
+                <span>Ocupación: <strong>{:.1}%</strong></span>
+                <span>Restante: <strong>{:.2} GB</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Separador de Incremento / Delta -->
+          <div class="comparison-arrow-col">
+            <div class="delta-badge">
+              <span class="delta-title">TRANSFERIDO</span>
+              <span class="delta-value">+{:.2} GB</span>
+              <span class="delta-sub">+{:.1}% incremento</span>
+              <span class="delta-items">{} correos</span>
+            </div>
+            <div class="arrow-svg-wrapper">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2.5">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Columna Después -->
+          <div class="comparison-col after-col">
+            <div class="phase-header">
+              <span class="phase-badge after-badge">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                ESTADO DESPUÉS DE IMPORTAR
+              </span>
+              <span class="health-indicator" style="color: {};">● {}</span>
+            </div>
+
+            <div class="storage-metric-row">
+              <div class="storage-box">
+                <span class="box-label">Espacio Usado Final</span>
+                <span class="box-value after-val">{:.2} GB</span>
+                <span class="box-sub">{:.1}% de la cuota</span>
+              </div>
+              <div class="storage-box free-box">
+                <span class="box-label">Espacio Libre Final</span>
+                <span class="box-value free-val-after">{:.2} GB</span>
+                <span class="box-sub">remanente neto</span>
+              </div>
+            </div>
+
+            <div class="impact-bar-wrapper">
+              <div class="impact-bar-outer">
+                <div class="impact-bar-fill base-fill" style="width: {:.1}%;"></div>
+                <div class="impact-bar-fill delta-fill" style="width: {:.1}%;"></div>
+              </div>
+              <div class="impact-bar-labels">
+                <span>Ocupación: <strong>{:.1}%</strong></span>
+                <span>Restante: <strong>{:.2} GB</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>"#,
+            item.display_name,
+            item.store_type,
+            item.quota_display,
+            health_color_before,
+            item.health_before,
+            item.used_before_gb,
+            item.percent_before,
+            item.free_before_gb,
+            item.percent_before,
+            item.percent_before,
+            item.free_before_gb,
+            item.delta_gb,
+            item.delta_percent,
+            item.imported_items,
+            health_color_after,
+            item.health_after,
+            item.used_after_gb,
+            item.percent_after,
+            item.free_after_gb,
+            item.percent_before,
+            item.delta_percent,
+            item.percent_after,
+            item.free_after_gb
+        );
+        cards_html.push_str(&card);
+
+        let row = format!(
+            r#"<tr>
+          <td><strong>{}</strong> <span class="muted-cell">({})</span></td>
+          <td><strong>{}</strong></td>
+          <td>{:.2} GB <span class="muted-cell">({:.1}%)</span></td>
+          <td><span style="color: #34d399; font-weight: 700;">{:.2} GB libres</span></td>
+          <td><span class="badge badge-duplicate">+{:.2} GB</span></td>
+          <td><strong>{:.2} GB</strong> <span class="muted-cell">({:.1}%)</span></td>
+          <td><strong style="color: var(--cyan);">{:.2} GB libres</strong></td>
+          <td><span class="health-pill" style="color: {};">● {}</span></td>
+        </tr>"#,
+            item.display_name,
+            item.store_type,
+            item.quota_display,
+            item.used_before_gb,
+            item.percent_before,
+            item.free_before_gb,
+            item.delta_gb,
+            item.used_after_gb,
+            item.percent_after,
+            item.free_after_gb,
+            health_color_after,
+            item.health_after
+        );
+        table_rows_html.push_str(&row);
+    }
+
+    format!(
+        r#"<div class="storage-impact-panel">
+      <div class="storage-panel-header">
+        <div class="storage-title-area">
+          <div class="storage-icon-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </div>
+          <div>
+            <h2>Auditoría de Almacenamiento MAPI: Antes vs. Después de la Importación</h2>
+            <p class="storage-subtitle">Balance de capacidad y consumo de cuota por ingesta de correo en Microsoft Outlook / Exchange</p>
+          </div>
+        </div>
+        <div class="storage-header-tags">
+          <span class="meta-pill"><svg class="icon icon-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Auditoría MAPI</span>
+          <span class="meta-pill"><strong>{}</strong> Buzón(es)</span>
+        </div>
+      </div>
+
+      <div class="storage-kpis-grid">
+        <div class="storage-kpi-box">
+          <span class="kpi-label">Capacidad Total Combinada</span>
+          <span class="kpi-val cyan">{:.1} GB</span>
+          <span class="kpi-hint">Cuota asignada</span>
+        </div>
+        <div class="storage-kpi-box">
+          <span class="kpi-label">Espacio Ocupado Antes</span>
+          <span class="kpi-val">{:.2} GB</span>
+          <span class="kpi-hint">Línea base previa</span>
+        </div>
+        <div class="storage-kpi-box delta-box">
+          <span class="kpi-label">Volumen Transferido (Delta)</span>
+          <span class="kpi-val green">+{:.2} GB</span>
+          <span class="kpi-hint">+{} correos importados</span>
+        </div>
+        <div class="storage-kpi-box">
+          <span class="kpi-label">Espacio Ocupado Después</span>
+          <span class="kpi-val purple">{:.2} GB</span>
+          <span class="kpi-hint">{:.2} GB libres restantes</span>
+        </div>
+      </div>
+
+      {}
+
+      <div class="storage-table-card">
+        <div class="storage-table-header">
+          <h3>
+            <svg class="icon icon-cyan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            Desglose Comparativo de Almacenamiento por Buzón
+          </h3>
+        </div>
+        <div class="table-responsive">
+          <table class="storage-comparison-table">
+            <thead>
+              <tr>
+                <th>Buzón Destino</th>
+                <th>Cuota</th>
+                <th>Antes (Usado)</th>
+                <th>Antes (Libre)</th>
+                <th>Transferido</th>
+                <th>Después (Usado)</th>
+                <th>Después (Libre)</th>
+                <th>Salud Final</th>
+              </tr>
+            </thead>
+            <tbody>
+              {}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>"#,
+        impacts_count,
+        total_quota_gb,
+        total_used_before_gb,
+        total_imported_gb,
+        total_imported_items,
+        total_used_after_gb,
+        total_free_after_gb,
+        cards_html,
+        table_rows_html
+    )
 }
 
 fn get_html_template() -> &'static str {
@@ -748,6 +1014,351 @@ fn get_html_template() -> &'static str {
     .log-error { color: var(--danger); font-weight: 700; }
     .log-success { color: var(--success); }
 
+    /* Storage Impact Section Styles */
+    .storage-impact-panel {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+    .storage-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+      padding-bottom: 1.25rem;
+    }
+    .storage-title-area {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+    .storage-icon-badge {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: rgba(0, 229, 255, 0.12);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--cyan);
+      flex-shrink: 0;
+    }
+    .storage-icon-badge svg {
+      width: 22px;
+      height: 22px;
+    }
+    .storage-title-area h2 {
+      font-size: 1.25rem;
+      color: var(--text);
+      letter-spacing: -0.3px;
+    }
+    .storage-subtitle {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-top: 0.2rem;
+    }
+    .storage-header-tags {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .storage-kpis-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .storage-kpi-box {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.15rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .storage-kpi-box:hover {
+      transform: translateY(-2px);
+      border-color: var(--cyan);
+    }
+    .storage-kpi-box .kpi-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .storage-kpi-box .kpi-val {
+      font-size: 1.45rem;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.5px;
+    }
+    .storage-kpi-box .kpi-val.cyan { color: var(--cyan); }
+    .storage-kpi-box .kpi-val.green { color: #34d399; }
+    .storage-kpi-box .kpi-val.purple { color: #a78bfa; }
+    .storage-kpi-box .kpi-hint {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+    .storage-kpi-box.delta-box {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.8) 100%);
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+    .mailbox-impact-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.35rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.15);
+    }
+    .mbx-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+      padding-bottom: 0.85rem;
+    }
+    .mbx-name-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .mbx-name {
+      font-size: 1rem;
+      color: var(--cyan);
+    }
+    .store-type-tag {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.15rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .quota-pill {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      background: rgba(15, 23, 42, 0.7);
+      padding: 0.3rem 0.75rem;
+      border-radius: 9999px;
+      border: 1px solid var(--border);
+    }
+    .quota-pill strong {
+      color: var(--text);
+    }
+    .mbx-comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 1.25rem;
+      align-items: center;
+    }
+    @media (max-width: 860px) {
+      .mbx-comparison-grid {
+        grid-template-columns: 1fr;
+      }
+      .comparison-arrow-col {
+        padding: 0.5rem 0;
+        transform: rotate(90deg);
+      }
+    }
+    .comparison-col {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.15rem;
+    }
+    .before-col {
+      border-left: 3px solid #64748b;
+    }
+    .after-col {
+      border-left: 3px solid var(--cyan);
+      background: linear-gradient(135deg, rgba(0, 229, 255, 0.03) 0%, rgba(15, 23, 42, 0.6) 100%);
+    }
+    .phase-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.85rem;
+    }
+    .phase-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 0.2rem 0.55rem;
+      border-radius: 6px;
+    }
+    .before-badge {
+      background: rgba(100, 116, 139, 0.2);
+      color: #94a3b8;
+      border: 1px solid rgba(100, 116, 139, 0.3);
+    }
+    .after-badge {
+      background: rgba(0, 229, 255, 0.15);
+      color: var(--cyan);
+      border: 1px solid rgba(0, 229, 255, 0.3);
+    }
+    .health-indicator {
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .storage-metric-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .storage-box {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .storage-box.free-box {
+      text-align: right;
+    }
+    .box-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+    .box-value {
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .box-value.after-val {
+      color: #f8fafc;
+    }
+    .free-val {
+      color: #34d399;
+    }
+    .free-val-after {
+      color: var(--cyan);
+    }
+    .box-sub {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+    .impact-bar-wrapper {
+      margin-top: 0.5rem;
+    }
+    .impact-bar-outer {
+      height: 10px;
+      background: rgba(15, 23, 42, 0.9);
+      border-radius: 9999px;
+      overflow: hidden;
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      display: flex;
+    }
+    .impact-bar-fill.before-fill {
+      background: linear-gradient(90deg, #3b82f6, #06b6d4);
+      height: 100%;
+      border-radius: 9999px;
+      transition: width 0.6s ease;
+    }
+    .impact-bar-fill.base-fill {
+      background: linear-gradient(90deg, #3b82f6, #06b6d4);
+      height: 100%;
+    }
+    .impact-bar-fill.delta-fill {
+      background: linear-gradient(90deg, #10b981, #34d399);
+      height: 100%;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+    }
+    .impact-bar-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 0.35rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+    .comparison-arrow-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.65rem;
+    }
+    .delta-badge {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(15, 23, 42, 0.8) 100%);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      border-radius: 12px;
+      padding: 0.65rem 0.95rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.15rem;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+    }
+    .delta-title {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #34d399;
+      font-weight: 700;
+    }
+    .delta-value {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #34d399;
+    }
+    .delta-sub {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+    .delta-items {
+      font-size: 0.68rem;
+      color: var(--cyan);
+      font-weight: 600;
+    }
+    .arrow-svg-wrapper {
+      filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.5));
+    }
+    .storage-table-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      margin-top: 1.25rem;
+    }
+    .storage-table-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.6);
+    }
+    .storage-table-header h3 {
+      font-size: 0.95rem;
+      color: var(--cyan);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .storage-comparison-table th {
+      font-size: 0.72rem;
+    }
+    .health-pill {
+      font-weight: 700;
+      font-size: 0.78rem;
+    }
+
     /* Footer */
     .footer {
       text-align: center;
@@ -928,6 +1539,8 @@ fn get_html_template() -> &'static str {
 
     <!-- TAB 1: Resumen & Auditoría -->
     <section id="tab-summary" class="tab-content active">
+      __STORAGE_IMPACT_SECTION__
+
       <div class="table-card" style="margin-bottom: 2rem;">
         <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);">
           <h2 style="font-size: 1.15rem; color: var(--cyan); display: flex; align-items: center; gap: 0.5rem;">
@@ -1618,6 +2231,9 @@ mod tests {
         assert!(content.contains("Carpetas Importadas"));
         assert!(content.contains("Explorador de Correos"));
         assert!(content.contains("rawFoldersData"));
+        assert!(content.contains("Auditoría de Almacenamiento MAPI: Antes vs. Después"));
+        assert!(content.contains("ESTADO ANTES DE IMPORTAR"));
+        assert!(content.contains("ESTADO DESPUÉS DE IMPORTAR"));
         let logs_dir = PathBuf::from("logs");
         let _ = fs::create_dir_all(&logs_dir);
         let preview_path = logs_dir.join("preview_report.html");

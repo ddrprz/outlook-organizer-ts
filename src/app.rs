@@ -1007,6 +1007,27 @@ impl MailboxItem {
     }
 }
 
+/// Métrica de impacto en capacidad y almacenamiento del buzón (Antes vs. Después)
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MailboxStorageImpact {
+    pub display_name: String,
+    pub store_type: String,
+    pub quota_display: String,
+    pub total_gb: f64,
+    pub used_before_gb: f64,
+    pub free_before_gb: f64,
+    pub percent_before: f64,
+    pub used_after_gb: f64,
+    pub free_after_gb: f64,
+    pub percent_after: f64,
+    pub imported_gb: f64,
+    pub imported_items: u64,
+    pub delta_gb: f64,
+    pub delta_percent: f64,
+    pub health_before: String,
+    pub health_after: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExplorerItemType {
     ParentDir,
@@ -1747,6 +1768,131 @@ impl AppState {
         }
     }
 
+    /// Calcula el tamaño total en MB de correos importados exitosamente
+    pub fn total_imported_size_mb(&self) -> f64 {
+        // 1. Sumar tamaño de correos individuales procesados con estado "Importado"
+        let from_emails: f64 = self
+            .processed_items
+            .iter()
+            .filter(|e| e.status == "Importado")
+            .map(|e| e.size_kb / 1024.0)
+            .sum();
+        if from_emails > 0.0 {
+            return from_emails;
+        }
+
+        // 2. Sumar tamaño de carpetas importadas si están disponibles
+        let from_folders: f64 = self
+            .get_imported_folders_summary()
+            .iter()
+            .map(|f| f.size_mb)
+            .sum();
+        if from_folders > 0.0 {
+            return from_folders;
+        }
+
+        // 3. Proporción del tamaño total de PSTs según los correos importados
+        let total_pst_mb = self.total_selected_psts_size_mb();
+        if total_pst_mb > 0.0 {
+            let total_items = (self.progress.imported_count
+                + self.progress.duplicates_skipped
+                + self.progress.error_count) as f64;
+            if total_items > 0.0 && self.progress.imported_count > 0 {
+                return (self.progress.imported_count as f64 / total_items) * total_pst_mb;
+            }
+            return total_pst_mb;
+        }
+        0.0
+    }
+
+    /// Genera la auditoría de impacto en almacenamiento (Antes vs. Después) para los buzones destino
+    pub fn get_mailbox_storage_impacts(&self) -> Vec<MailboxStorageImpact> {
+        let selected = self.selected_mailboxes();
+        let mailboxes_to_process: Vec<&MailboxItem> = if selected.is_empty() {
+            if let Some(first) = self.discovered_mailboxes.first() {
+                vec![first]
+            } else {
+                Vec::new()
+            }
+        } else {
+            selected
+        };
+
+        if mailboxes_to_process.is_empty() {
+            return Vec::new();
+        }
+
+        let total_imported_mb = self.total_imported_size_mb();
+        let total_imported_gb = total_imported_mb / 1024.0;
+        let count = mailboxes_to_process.len() as f64;
+        let per_mbx_imported_gb = total_imported_gb / count;
+        let per_mbx_imported_items = if mailboxes_to_process.is_empty() {
+            0
+        } else {
+            self.progress.imported_count / (mailboxes_to_process.len() as u64)
+        };
+
+        mailboxes_to_process
+            .into_iter()
+            .map(|m| {
+                let total_gb = m.get_total_gb();
+                let used_before_gb = m.get_used_gb();
+                let free_before_gb = m.get_free_gb();
+                let percent_before = m.get_usage_percent();
+
+                let imported_gb = per_mbx_imported_gb;
+                let used_after_gb = if total_gb > 0.0 {
+                    (used_before_gb + imported_gb).min(total_gb)
+                } else {
+                    used_before_gb + imported_gb
+                };
+                let free_after_gb = if total_gb > 0.0 {
+                    (total_gb - used_after_gb).max(0.0)
+                } else {
+                    0.0
+                };
+                let percent_after = if total_gb > 0.0 {
+                    ((used_after_gb / total_gb) * 100.0).clamp(0.0, 100.0)
+                } else {
+                    0.0
+                };
+
+                let delta_gb = (used_after_gb - used_before_gb).max(0.0);
+                let delta_percent = (percent_after - percent_before).max(0.0);
+
+                let health_before = m.health_status().0.to_string();
+                let health_after = if percent_after >= 99.0 || (total_gb > 0.0 && free_after_gb <= 0.001) {
+                    "Lleno".to_string()
+                } else if percent_after >= 90.0 {
+                    "Crítico".to_string()
+                } else if percent_after >= 75.0 {
+                    "Atención".to_string()
+                } else {
+                    "Normal".to_string()
+                };
+
+                MailboxStorageImpact {
+                    display_name: m.display_name.clone(),
+                    store_type: m.store_type.clone(),
+                    quota_display: m.get_quota_display(),
+                    total_gb,
+                    used_before_gb,
+                    free_before_gb,
+                    percent_before,
+                    used_after_gb,
+                    free_after_gb,
+                    percent_after,
+                    imported_gb,
+                    imported_items: per_mbx_imported_items,
+                    delta_gb,
+                    delta_percent,
+                    health_before,
+                    health_after,
+                }
+            })
+            .collect()
+    }
+
     pub fn log_event(&mut self, event: String) {
         if self.activity_log.len() >= 300 {
             self.activity_log.pop_front();
@@ -2438,6 +2584,45 @@ mod tests {
         assert_eq!(item_kiosk.get_total_gb(), 2.0);
         assert_eq!(item_kiosk.get_quota_display(), "2 GB");
         assert_eq!(item_kiosk.health_status().0, "Atención");
+    }
+
+    #[test]
+    fn test_mailbox_storage_impacts_calculation() {
+        let mut state = AppState::new();
+        state.discovered_mailboxes = vec![
+            MailboxItem {
+                display_name: "soporte@timeless.com.pe".to_string(),
+                store_type: "SharedMailbox".to_string(),
+                size_display: "1.70 GB".to_string(),
+                file_path: None,
+                selected: true,
+                used_bytes: Some(1_825_361_100), // ~1.70 GB
+                total_bytes: Some(107_374_182_400), // 100 GB
+                quota_display: Some("100 GB".to_string()),
+                usage_percent: Some(1.7),
+            },
+        ];
+        state.progress.imported_count = 500;
+        state.progress.duplicates_skipped = 50;
+        state.progress.error_count = 0;
+        state.discovered_psts = vec![PstItem {
+            name: "archivo.pst".to_string(),
+            path: r"C:\Correo\archivo.pst".to_string(),
+            size_mb: 2048.0, // 2 GB
+            selected: true,
+        }];
+
+        let impacts = state.get_mailbox_storage_impacts();
+        assert_eq!(impacts.len(), 1);
+        let impact = &impacts[0];
+        assert_eq!(impact.display_name, "soporte@timeless.com.pe");
+        assert_eq!(impact.total_gb, 100.0);
+        assert!((impact.used_before_gb - 1.70).abs() < 0.05);
+        assert!(impact.imported_gb > 0.0);
+        assert!(impact.used_after_gb > impact.used_before_gb);
+        assert!(impact.free_after_gb < impact.free_before_gb);
+        assert_eq!(impact.health_before, "Normal");
+        assert_eq!(impact.health_after, "Normal");
     }
 
     #[test]
