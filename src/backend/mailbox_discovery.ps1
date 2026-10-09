@@ -84,13 +84,102 @@ try {
         }
     }
 
+    function Get-StoreDataSize($store) {
+        $bytes = [int64]0
+        try {
+            $root = $store.GetRootFolder()
+            if ($root) {
+                # 1. Intentar leer tamaño extendido total en la raíz (PR_EXTENDED_FOLDER_SIZE = 0x36E40014)
+                try {
+                    $ext = $root.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014")
+                    if ($ext -and [int64]$ext -gt 1MB) {
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($root) | Out-Null } catch {}
+                        return [int64]$ext
+                    }
+                } catch {}
+
+                # 2. Recorrer las carpetas principales del buzón (Bandeja de entrada, Enviados, Eliminados, etc.)
+                $folders = $null
+                try { $folders = $root.Folders } catch {}
+                if ($folders) {
+                    foreach ($f in $folders) {
+                        try {
+                            $fSize = $null
+                            # PR_EXTENDED_FOLDER_SIZE (0x36E40014): tamaño acumulado con subcarpetas
+                            try { $fSize = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014") } catch {}
+                            if ($fSize -and [int64]$fSize -gt 0) {
+                                $bytes += [int64]$fSize
+                            } else {
+                                # PR_MESSAGE_SIZE_EXTENDED (0x0E080014): tamaño de mensajes directos
+                                try {
+                                    $mSize = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
+                                    if ($mSize -and [int64]$mSize -gt 0) {
+                                        $bytes += [int64]$mSize
+                                    }
+                                } catch {}
+
+                                # Subcarpetas de segundo nivel
+                                try {
+                                    foreach ($sub in $f.Folders) {
+                                        try {
+                                            $subSize = $sub.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
+                                            if ($subSize -and [int64]$subSize -gt 0) {
+                                                $bytes += [int64]$subSize
+                                            }
+                                        } catch {}
+                                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sub) | Out-Null } catch {}
+                                    }
+                                } catch {}
+                            }
+                        } catch {}
+                        finally {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($f) | Out-Null } catch {}
+                        }
+                    }
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($folders) | Out-Null } catch {}
+                }
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($root) | Out-Null } catch {}
+            }
+        } catch {}
+        return $bytes
+    }
+
+    function Get-StoreQuota($store) {
+        # Cuota estándar en Microsoft 365 (49.5 GB utilizables para SharedMailbox / Exchange)
+        $standardBytes = [int64]53150220288 # 49.5 GB
+        $standardStr   = "49.5 GB"
+
+        $propTags = @(
+            "http://schemas.microsoft.com/mapi/proptag/0x34040003", # PR_STORAGE_QUOTA_LIMIT (KB)
+            "http://schemas.microsoft.com/mapi/proptag/0x341A0003", # PR_STORAGE_QUOTA_LIMIT_EXTENDED (KB)
+            "http://schemas.microsoft.com/mapi/proptag/0x34050003"  # PR_QUOTA_WARNING (KB)
+        )
+
+        foreach ($tag in $propTags) {
+            try {
+                $val = $store.PropertyAccessor.GetProperty($tag)
+                if ($val) {
+                    $kb = [int64]$val
+                    # Si la cuota reportada es >= 10 GB (10,485,760 KB), aceptarla (ej. 49.5 GB, 50 GB, 100 GB)
+                    if ($kb -ge 10485760) {
+                        $bytes = $kb * 1024
+                        $gb = [Math]::Round($bytes / 1GB, 1)
+                        return @{ TotalBytes = $bytes; QuotaDisplay = ("{0:N1} GB" -f $gb) }
+                    }
+                }
+            } catch {}
+        }
+
+        return @{ TotalBytes = $standardBytes; QuotaDisplay = $standardStr }
+    }
+
     $discovered = [System.Collections.Generic.List[hashtable]]::new()
     $seenKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     # 1. Explorar Almacenes (Stores) MAPI
     foreach ($s in $namespace.Stores) {
         $filePath = if ($s.FilePath) { $s.FilePath.Trim() } else { "" }
-        $dispName = if ($s.DisplayName) { $s.DisplayName.Trim() } else { "" }
+        $dispName = if ($s.DisplayName) { $dispName = $s.DisplayName.Trim(); $dispName } else { "" }
 
         # EXCLUIR ARCHIVOS PST: Un PST es un archivo de origen o archivo local, NUNCA un buzón de destino MAPI
         if ($filePath -and $filePath.ToLower().EndsWith(".pst")) {
@@ -119,64 +208,34 @@ try {
             }
         }
 
-        # Cálculo de tamaño o estado Online
-        $sizeStr = "Online (Nube)"
-        $usedBytes = $null
-        $totalBytes = 53687091200 # 50 GB estándar M365 (50 * 1024^3)
-        $quotaStr = "50 GB"
-        $usagePercent = 0.0
-
+        # Cálculo de tamaño usado
+        $usedBytes = [int64]0
         if ($filePath -and (Test-Path $filePath)) {
-            try {
-                $len = (Get-Item $filePath).Length
-                $usedBytes = [int64]$len
-                if ($len -ge 1GB) {
-                    $sizeStr = "{0:N2} GB" -f ($len / 1GB)
-                } elseif ($len -ge 1MB) {
-                    $sizeStr = "{0:N2} MB" -f ($len / 1MB)
-                } else {
-                    $sizeStr = "{0} Bytes" -f $len
-                }
-            } catch {
-                $sizeStr = "Online (Nube)"
-            }
+            try { $usedBytes = [int64](Get-Item $filePath).Length } catch {}
+        }
+        if ($usedBytes -le 0) {
+            $usedBytes = Get-StoreDataSize $s
         }
 
-        # Intentar consultar cuota MAPI en el Store si está expuesta (PR_STORAGE_QUOTA_LIMIT = 0x34040003 en KB)
-        try {
-            $quotaKb = $s.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34040003")
-            if ($quotaKb -and $quotaKb -gt 0) {
-                $totalBytes = [int64]$quotaKb * 1024
-                $quotaStr = "{0:N0} GB" -f ($totalBytes / 1GB)
-            }
-        } catch {}
+        # Cálculo de cuota
+        $quotaInfo = Get-StoreQuota $s
+        $totalBytes = $quotaInfo.TotalBytes
+        $quotaStr   = $quotaInfo.QuotaDisplay
 
-        # Si aún no tenemos bytes usados (modo online sin OST local), intentar consultar tamaño de la raíz (PR_MESSAGE_SIZE_EXTENDED = 0x0E080014)
-        if ($null -eq $usedBytes) {
-            try {
-                $rootFolder = $s.GetRootFolder()
-                if ($rootFolder) {
-                    try {
-                        $storeSize = $rootFolder.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
-                        if ($storeSize -and $storeSize -gt 0) {
-                            $usedBytes = [int64]$storeSize
-                            if ($usedBytes -ge 1GB) {
-                                $sizeStr = "{0:N2} GB" -f ($usedBytes / 1GB)
-                            } elseif ($usedBytes -ge 1MB) {
-                                $sizeStr = "{0:N2} MB" -f ($usedBytes / 1MB)
-                            } else {
-                                $sizeStr = "{0} Bytes" -f $usedBytes
-                            }
-                        }
-                    } catch {}
-                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootFolder) | Out-Null } catch {}
-                }
-            } catch {}
-        }
-
-        if ($usedBytes -and $totalBytes -gt 0) {
+        # Porcentaje de ocupación
+        $usagePercent = 0.0
+        if ($totalBytes -gt 0) {
             $usagePercent = [Math]::Round(($usedBytes / $totalBytes) * 100, 1)
             if ($usagePercent -gt 100.0) { $usagePercent = 100.0 }
+            if ($usagePercent -lt 0.0) { $usagePercent = 0.0 }
+        }
+
+        $sizeStr = if ($usedBytes -ge 1GB) {
+            "{0:N1} GB" -f ($usedBytes / 1GB)
+        } elseif ($usedBytes -ge 1MB) {
+            "{0:N1} MB" -f ($usedBytes / 1MB)
+        } else {
+            "0.0 GB"
         }
 
         $key = if ($dispName) { $dispName.ToLower() } else { $filePath.ToLower() }
@@ -223,39 +282,31 @@ try {
                     "ExchangeOnline"
                 }
 
-                $sizeStr = "Online (Nube)"
-                $usedBytes = $null
-                $totalBytes = 53687091200
-                $quotaStr = "50 GB"
-                $usagePercent = 0.0
-
+                $usedBytes = [int64]0
                 if ($delFilePath -and (Test-Path $delFilePath)) {
-                    try {
-                        $len = (Get-Item $delFilePath).Length
-                        $usedBytes = [int64]$len
-                        if ($len -ge 1GB) {
-                            $sizeStr = "{0:N2} GB" -f ($len / 1GB)
-                        } elseif ($len -ge 1MB) {
-                            $sizeStr = "{0:N2} MB" -f ($len / 1MB)
-                        } else {
-                            $sizeStr = "{0} Bytes" -f $len
-                        }
-                    } catch {}
+                    try { $usedBytes = [int64](Get-Item $delFilePath).Length } catch {}
+                }
+                if ($delStore -and $usedBytes -le 0) {
+                    $usedBytes = Get-StoreDataSize $delStore
                 }
 
-                if ($delStore) {
-                    try {
-                        $quotaKb = $delStore.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34040003")
-                        if ($quotaKb -and $quotaKb -gt 0) {
-                            $totalBytes = [int64]$quotaKb * 1024
-                            $quotaStr = "{0:N0} GB" -f ($totalBytes / 1GB)
-                        }
-                    } catch {}
-                }
+                $quotaInfo = if ($delStore) { Get-StoreQuota $delStore } else { @{ TotalBytes = [int64]53150220288; QuotaDisplay = "49.5 GB" } }
+                $totalBytes = $quotaInfo.TotalBytes
+                $quotaStr   = $quotaInfo.QuotaDisplay
 
-                if ($usedBytes -and $totalBytes -gt 0) {
+                $usagePercent = 0.0
+                if ($totalBytes -gt 0) {
                     $usagePercent = [Math]::Round(($usedBytes / $totalBytes) * 100, 1)
                     if ($usagePercent -gt 100.0) { $usagePercent = 100.0 }
+                    if ($usagePercent -lt 0.0) { $usagePercent = 0.0 }
+                }
+
+                $sizeStr = if ($usedBytes -ge 1GB) {
+                    "{0:N1} GB" -f ($usedBytes / 1GB)
+                } elseif ($usedBytes -ge 1MB) {
+                    "{0:N1} MB" -f ($usedBytes / 1MB)
+                } else {
+                    "0.0 GB"
                 }
 
                 [void]$seenKeys.Add($key)

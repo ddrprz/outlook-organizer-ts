@@ -896,19 +896,15 @@ impl Default for MailboxItem {
 impl MailboxItem {
     /// Devuelve el porcentaje de ocupación (0.0 .. 100.0)
     pub fn get_usage_percent(&self) -> f64 {
-        if let Some(pct) = self.usage_percent {
+        if let Some(pct) = self.usage_percent
+            && pct > 0.0
+        {
             return pct.clamp(0.0, 100.0);
         }
-        if let (Some(used), Some(total)) = (self.used_bytes, self.total_bytes)
-            && total > 0
-        {
-            return ((used as f64 / total as f64) * 100.0).clamp(0.0, 100.0);
-        }
-        if let Some(used_gb) = self.parse_size_in_gb() {
-            let total_gb = self.get_total_gb();
-            if total_gb > 0.0 {
-                return ((used_gb / total_gb) * 100.0).clamp(0.0, 100.0);
-            }
+        let total = self.get_total_gb();
+        let used = self.get_used_gb();
+        if total > 0.0 {
+            return ((used / total) * 100.0).clamp(0.0, 100.0);
         }
         0.0
     }
@@ -935,17 +931,19 @@ impl MailboxItem {
 
     /// Tamaño usado en GB
     pub fn get_used_gb(&self) -> f64 {
-        if let Some(used) = self.used_bytes {
+        if let Some(used) = self.used_bytes
+            && used > 0
+        {
             used as f64 / (1024.0 * 1024.0 * 1024.0)
         } else {
             self.parse_size_in_gb().unwrap_or(0.0)
         }
     }
 
-    /// Cuota total en GB (50 GB estándar para Exchange/SharedMailbox si no se especifica)
+    /// Cuota total en GB (49.5 GB estándar M365 para Exchange/SharedMailbox si no se especifica o si vino 0)
     pub fn get_total_gb(&self) -> f64 {
         if let Some(total) = self.total_bytes
-            && total > 0
+            && total >= (1024 * 1024 * 1024)
         {
             return total as f64 / (1024.0 * 1024.0 * 1024.0);
         }
@@ -955,12 +953,14 @@ impl MailboxItem {
             let s = q.trim();
             if s.ends_with("GB") {
                 let num = s.trim_end_matches("GB").trim().replace(',', "");
-                if let Ok(val) = num.parse::<f64>() {
+                if let Ok(val) = num.parse::<f64>()
+                    && val >= 1.0
+                {
                     return val;
                 }
             }
         }
-        50.0 // Cuota estándar M365 (50 GB)
+        49.5 // Cuota predeterminada en M365 (49.5 GB utilizables)
     }
 
     /// Espacio libre restante en GB
@@ -972,10 +972,12 @@ impl MailboxItem {
     pub fn get_quota_display(&self) -> String {
         if let Some(ref q) = self.quota_display
             && !q.trim().is_empty()
+            && q.trim() != "0 GB"
+            && q.trim() != "0.0 GB"
         {
             return q.clone();
         }
-        format!("{:.0} GB", self.get_total_gb())
+        format!("{:.1} GB", self.get_total_gb())
     }
 
     /// Estado de salud de capacidad del buzón
@@ -2374,6 +2376,21 @@ mod tests {
         };
         assert_eq!(item3.get_usage_percent(), 97.0);
         assert_eq!(item3.health_status().0, "Crítico");
+
+        let item_zero_quota = MailboxItem {
+            display_name: "fallback@empresa.com".to_string(),
+            store_type: "SharedMailbox".to_string(),
+            size_display: "24.40 GB".to_string(),
+            file_path: None,
+            selected: false,
+            used_bytes: None,
+            total_bytes: None,
+            quota_display: Some("0 GB".to_string()),
+            usage_percent: None,
+        };
+        assert_eq!(item_zero_quota.get_total_gb(), 49.5);
+        assert_eq!(item_zero_quota.get_quota_display(), "49.5 GB");
+        assert_eq!(item_zero_quota.get_free_gb(), 25.1);
     }
 
     #[test]
