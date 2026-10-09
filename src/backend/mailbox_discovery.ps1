@@ -88,103 +88,65 @@ try {
         $used = [int64]0
         try {
             $root = $store.GetRootFolder()
-            if ($root) {
-                $queue = [System.Collections.ArrayList]::new()
-                $seenFolderIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            if ($null -eq $root) { return [int64]0 }
 
-                # Priorizar carpetas por defecto críticas de MAPI
-                # (3 = Eliminados, 6 = Bandeja de entrada, 5 = Enviados, 16 = Borradores, 23 = Correo no deseado)
-                $defIds = @(3, 6, 5, 16, 23)
-                foreach ($did in $defIds) {
-                    try {
-                        $df = $store.GetDefaultFolder($did)
-                        if ($df) {
-                            $fid = ""
-                            try { $fid = $df.EntryID } catch {}
-                            if ($fid -and -not $seenFolderIds.Contains($fid)) {
-                                [void]$seenFolderIds.Add($fid)
-                                [void]$queue.Add($df)
-                            }
-                        }
-                    } catch {}
-                }
+            $seenFolderIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            $folderList = [System.Collections.ArrayList]::new()
 
-                # Agregar carpetas directas de la raíz del almacén
+            # 1. Priorizar carpetas por defecto críticas de MAPI
+            # (3 = Eliminados, 6 = Bandeja de entrada, 5 = Enviados, 16 = Borradores, 23 = Correo no deseado)
+            $defIds = @(3, 6, 5, 16, 23)
+            foreach ($did in $defIds) {
                 try {
-                    $rfFolders = $root.Folders
-                    if ($rfFolders) {
-                        for ($i = 1; $i -le $rfFolders.Count; $i++) {
-                            try {
-                                $f = $rfFolders.Item($i)
-                                $fid = ""
-                                try { $fid = $f.EntryID } catch {}
-                                if ($fid -and -not $seenFolderIds.Contains($fid)) {
-                                    [void]$seenFolderIds.Add($fid)
-                                    [void]$queue.Add($f)
-                                } elseif (-not $fid) {
-                                    [void]$queue.Add($f)
-                                }
-                            } catch {}
+                    $df = $store.GetDefaultFolder($did)
+                    if ($df) {
+                        $fid = ""
+                        try { $fid = $df.EntryID } catch {}
+                        if ($fid -and -not $seenFolderIds.Contains($fid)) {
+                            [void]$seenFolderIds.Add($fid)
+                            [void]$folderList.Add($df)
+                        } elseif (-not $fid) {
+                            [void]$folderList.Add($df)
                         }
                     }
                 } catch {}
+            }
 
-                # Procesar en anchura (BFS) sumando tamaños de forma ultra veloz
-                $idx = 0
-                while ($idx -lt $queue.Count -and $idx -lt 250) {
-                    $current = $queue[$idx]
-                    $idx++
-
-                    $fExtSize = [int64]0
-                    $fMsgSize = [int64]0
-
-                    # 1. Probar PR_EXTENDED_FOLDER_SIZE (0x36E40014: tamaño acumulado de carpeta + subcarpetas)
-                    try {
-                        $val = $current.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014")
-                        if ($val -and [int64]$val -gt 0) {
-                            $fExtSize = [int64]$val
-                        }
-                    } catch {}
-
-                    # 2. Probar PR_MESSAGE_SIZE_EXTENDED (0x0E080014: tamaño directo de mensajes en la carpeta)
-                    try {
-                        $val = $current.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
-                        if ($val -and [int64]$val -gt 0) {
-                            $fMsgSize = [int64]$val
-                        }
-                    } catch {}
-
-                    # Si tenemos tamaño extendido que abarca subcarpetas, lo sumamos y evitamos explorar hijos
-                    if ($fExtSize -gt 0 -and $fExtSize -ge $fMsgSize) {
-                        $used += $fExtSize
-                    } else {
-                        if ($fMsgSize -gt 0) {
-                            $used += $fMsgSize
-                        }
-
-                        # Encolar subcarpetas hijas para no omitir datos
+            # 2. Agregar carpetas de primer nivel del almacén (Inbox, Sent, carpetas de archivo anuales, etc.)
+            try {
+                $rfFolders = $root.Folders
+                if ($rfFolders) {
+                    $cnt = [Math]::Min($rfFolders.Count, 25)
+                    for ($i = 1; $i -le $cnt; $i++) {
                         try {
-                            $subs = $current.Folders
-                            if ($subs -and $subs.Count -gt 0) {
-                                for ($i = 1; $i -le $subs.Count; $i++) {
-                                    if ($queue.Count -lt 250) {
-                                        try {
-                                            $sf = $subs.Item($i)
-                                            $sfid = ""
-                                            try { $sfid = $sf.EntryID } catch {}
-                                            if ($sfid -and -not $seenFolderIds.Contains($sfid)) {
-                                                [void]$seenFolderIds.Add($sfid)
-                                                [void]$queue.Add($sf)
-                                            } elseif (-not $sfid) {
-                                                [void]$queue.Add($sf)
-                                            }
-                                        } catch {}
-                                    }
-                                }
+                            $f = $rfFolders.Item($i)
+                            $fid = ""
+                            try { $fid = $f.EntryID } catch {}
+                            if ($fid -and -not $seenFolderIds.Contains($fid)) {
+                                [void]$seenFolderIds.Add($fid)
+                                [void]$folderList.Add($f)
+                            } elseif (-not $fid) {
+                                [void]$folderList.Add($f)
                             }
                         } catch {}
                     }
                 }
+            } catch {}
+
+            # 3. Sumar el tamaño de cada carpeta de primer nivel de forma instantánea sin recursión profunda
+            foreach ($f in $folderList) {
+                $fSz = [int64]0
+                try {
+                    $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014")
+                    if ($val -and [int64]$val -gt 0) { $fSz = [int64]$val }
+                } catch {}
+                if ($fSz -le 0) {
+                    try {
+                        $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
+                        if ($val -and [int64]$val -gt 0) { $fSz = [int64]$val }
+                    } catch {}
+                }
+                $used += $fSz
             }
         } catch {}
 
@@ -192,7 +154,8 @@ try {
     }
 
     function Get-FastStoreQuota($store) {
-        $quotaBytes = [int64]53150220288 # 49.5 GB (cuota estándar Microsoft 365)
+        # Cuota estándar en Microsoft 365 para Exchange Online y Buzones Compartidos: exactamente 49.5 GB
+        $quotaBytes = [int64]53150220288 # 49.5 GB exactos (49.5 * 1024 * 1024 * 1024)
         $quotaDisplay = "49.5 GB"
         $isOverQuota = $false
         $excessBytes = [int64]0
@@ -201,6 +164,14 @@ try {
         try {
             $rf = $store.GetRootFolder()
             if ($rf) { $targets += $rf }
+        } catch {}
+        try {
+            $inbox = $store.GetDefaultFolder(6)
+            if ($inbox) { $targets += $inbox }
+        } catch {}
+        try {
+            $deleted = $store.GetDefaultFolder(3)
+            if ($deleted) { $targets += $deleted }
         } catch {}
 
         foreach ($obj in $targets) {
@@ -212,13 +183,13 @@ try {
                 try {
                     $excessKb = [int64]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x340E0003")
                     if ($excessKb -gt 0) {
-                        $excessBytes = $excessKb * 1024
+                        $excessBytes = [Math]::Max($excessBytes, ($excessKb * 1024))
                         $isOverQuota = $true
                     }
                 } catch {}
 
                 # 2. Comprobar restricción de almacenamiento (PR_STORAGE_RESTRICTION_STATE = 0x34130003)
-                # 1 = Warning, 2 = Warning, 3 = ProhibitSend, 4 = ProhibitReceive (Lleno total)
+                # 3 = ProhibitSend, 4 = ProhibitReceive (Buzón lleno al 100%)
                 try {
                     $state = [int]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34130003")
                     if ($state -ge 3) {
@@ -233,28 +204,6 @@ try {
                         $isOverQuota = $true
                     }
                 } catch {}
-
-                # 4. Leer límite de cuota (en KB)
-                $quotaTags = @(
-                    "http://schemas.microsoft.com/mapi/proptag/0x34040003",
-                    "http://schemas.microsoft.com/mapi/proptag/0x340D0003",
-                    "http://schemas.microsoft.com/mapi/proptag/0x341A0003",
-                    "http://schemas.microsoft.com/mapi/proptag/0x34070003"
-                )
-                foreach ($t in $quotaTags) {
-                    try {
-                        $val = [int64]$pa.GetProperty($t)
-                        if ($val -ge 10485760) { # al menos 10 GB en KB
-                            $candidate = $val * 1024
-                            $gb = [Math]::Round($candidate / 1GB, 1)
-                            if ($gb -ge 10.0) {
-                                $quotaBytes = $candidate
-                                $quotaDisplay = ("{0:N1} GB" -f $gb)
-                                break
-                            }
-                        }
-                    } catch {}
-                }
             } catch {}
         }
 
