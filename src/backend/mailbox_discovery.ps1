@@ -84,91 +84,127 @@ try {
         }
     }
 
-    function Get-FastStoreUsage($store) {
-        $used = [int64]0
-        try {
-            $root = $store.GetRootFolder()
-            if ($null -eq $root) { return [int64]0 }
+    function Get-FastStoreMetrics($store, $filePath) {
+        $pa = $null
+        try { $pa = $store.PropertyAccessor } catch {}
 
-            # En buzones de Exchange y Shared Mailboxes, las carpetas cuelgan directamente de RootFolder.
-            # Recorrerlas de forma plana sin recurrir a GetDefaultFolder (que causa bloqueos RPC en buzones compartidos).
-            $folders = $root.Folders
-            if ($folders) {
-                $count = [Math]::Min($folders.Count, 25)
-                for ($i = 1; $i -le $count; $i++) {
-                    try {
-                        $f = $folders.Item($i)
-                        $sz = [int64]0
-                        try {
-                            $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014")
-                            if ($val -and [int64]$val -gt 0) { $sz = [int64]$val }
-                        } catch {}
-                        if ($sz -le 0) {
-                            try {
-                                $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
-                                if ($val -and [int64]$val -gt 0) { $sz = [int64]$val }
-                            } catch {}
-                        }
-                        $used += $sz
-                    } catch {}
-                }
-            }
-        } catch {}
-
-        return $used
-    }
-
-    function Get-FastStoreQuota($store) {
-        # Cuota estándar en Microsoft 365 para Exchange Online y Buzones Compartidos: exactamente 49.5 GB
-        $quotaBytes = [int64]53150220288 # 49.5 GB exactos (49.5 * 1024 * 1024 * 1024)
-        $quotaDisplay = "49.5 GB"
-        $isOverQuota = $false
-        $excessBytes = [int64]0
-
-        $targets = @($store)
-        try {
-            $rf = $store.GetRootFolder()
-            if ($rf) { $targets += $rf }
-        } catch {}
-
-        foreach ($obj in $targets) {
+        # 1. Tamaño usado real reportado por Exchange (en bytes)
+        $usedBytes = [int64]0
+        if ($pa) {
             try {
-                $pa = $obj.PropertyAccessor
-                if ($null -eq $pa) { continue }
-
-                # 1. Comprobar exceso de almacenamiento (PR_EXCESS_STORAGE_USED = 0x340E0003, en KB)
+                $val = $pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014") # PR_MESSAGE_SIZE_EXTENDED
+                if ($val -and [int64]$val -gt 0) { $usedBytes = [int64]$val }
+            } catch {}
+            if ($usedBytes -le 0) {
                 try {
-                    $excessKb = [int64]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x340E0003")
-                    if ($excessKb -gt 0) {
-                        $excessBytes = [Math]::Max($excessBytes, ($excessKb * 1024))
-                        $isOverQuota = $true
-                    }
+                    $val = $pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080003") # PR_MESSAGE_SIZE (32-bit fallback)
+                    if ($val -and [int64]$val -gt 0) { $usedBytes = [int64]$val }
                 } catch {}
+            }
+        }
 
-                # 2. Comprobar restricción de almacenamiento (PR_STORAGE_RESTRICTION_STATE = 0x34130003)
-                # 3 = ProhibitSend, 4 = ProhibitReceive (Buzón lleno al 100%)
-                try {
-                    $state = [int]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34130003")
-                    if ($state -ge 3) {
-                        $isOverQuota = $true
+        # Si no se pudo obtener del almacén raíz, sumar carpetas de primer nivel
+        if ($usedBytes -le 0) {
+            try {
+                $rf = $store.GetRootFolder()
+                if ($rf -and $rf.Folders) {
+                    $count = [Math]::Min($rf.Folders.Count, 30)
+                    for ($i = 1; $i -le $count; $i++) {
+                        try {
+                            $f = $rf.Folders.Item($i)
+                            $fPa = $f.PropertyAccessor
+                            $fSz = [int64]0
+                            try { $fSz = [int64]$fPa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014") } catch {}
+                            if ($fSz -le 0) {
+                                try { $fSz = [int64]$fPa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014") } catch {}
+                            }
+                            if ($fSz -gt 0) { $usedBytes += $fSz }
+                        } catch {}
                     }
-                } catch {}
-
-                # 3. Comprobar bandera de sobrecuota del servidor (PR_SVR_OVER_QUOTA = 0x340F0003)
-                try {
-                    $svrOver = $pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x340F0003")
-                    if ($svrOver -eq $true -or [int]$svrOver -eq 1) {
-                        $isOverQuota = $true
-                    }
-                } catch {}
+                }
             } catch {}
         }
 
+        # Como último recurso (por ejemplo almacén desconectado), usar tamaño de archivo .ost
+        if ($usedBytes -le 0 -and $filePath -and (Test-Path $filePath)) {
+            try { $usedBytes = [int64](Get-Item $filePath).Length } catch {}
+        }
+
+        # 2. Cuota de almacenamiento dinámica reportada por Exchange (en KB)
+        $quotaKb = [int64]0
+        if ($pa) {
+            foreach ($qTag in @(
+                "http://schemas.microsoft.com/mapi/proptag/0x341C0003", # PR_QUOTA_SEND_THRESHOLD
+                "http://schemas.microsoft.com/mapi/proptag/0x341A0003", # PR_STORAGE_QUOTA_LIMIT
+                "http://schemas.microsoft.com/mapi/proptag/0x341B0003"  # PR_QUOTA_WARNING_THRESHOLD
+            )) {
+                try {
+                    $qVal = $pa.GetProperty($qTag)
+                    if ($qVal -and [int64]$qVal -gt $quotaKb) {
+                        $quotaKb = [int64]$qVal
+                    }
+                } catch {}
+            }
+        }
+
+        $totalBytes = [int64]0
+        if ($quotaKb -gt 0) {
+            $totalBytes = [int64]($quotaKb * 1024)
+        } else {
+            # Si Exchange no expone cuotas explícitas, inferir cuota dinámica según uso
+            if ($usedBytes -gt (50GB)) {
+                $totalBytes = [int64](100GB)
+            } else {
+                $totalBytes = [int64](50GB)
+            }
+        }
+
+        # Detección de restricción de almacenamiento (bloqueo real por cuota)
+        $isRestricted = $false
+        if ($pa) {
+            try {
+                $state = [int]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34130003")
+                if ($state -ge 3) { $isRestricted = $true }
+            } catch {}
+        }
+
+        if ($isRestricted -and $usedBytes -lt $totalBytes) {
+            $usedBytes = $totalBytes
+        }
+
+        # Porcentaje de ocupación
+        $usagePercent = 0.0
+        if ($totalBytes -gt 0) {
+            $usagePercent = [Math]::Round(([double]$usedBytes / [double]$totalBytes) * 100.0, 1)
+            if ($usagePercent -gt 100.0) { $usagePercent = 100.0 }
+            if ($usagePercent -lt 0.0) { $usagePercent = 0.0 }
+        }
+
+        $quotaDisplay = if ($totalBytes -ge 1GB) {
+            $gbVal = [Math]::Round($totalBytes / 1GB, 1)
+            if ($gbVal -eq [Math]::Floor($gbVal)) {
+                "{0:N0} GB" -f $gbVal
+            } else {
+                "{0:N1} GB" -f $gbVal
+            }
+        } else {
+            "{0:N0} MB" -f ($totalBytes / 1MB)
+        }
+
+        $sizeDisplay = if ($usedBytes -ge 1GB) {
+            "{0:N1} GB" -f ($usedBytes / 1GB)
+        } elseif ($usedBytes -ge 1MB) {
+            "{0:N1} MB" -f ($usedBytes / 1MB)
+        } else {
+            "0.0 GB"
+        }
+
         return @{
-            TotalBytes   = $quotaBytes
-            QuotaDisplay = $quotaDisplay
-            IsOverQuota  = $isOverQuota
-            ExcessBytes  = $excessBytes
+            used_bytes    = $usedBytes
+            total_bytes   = $totalBytes
+            size_display  = $sizeDisplay
+            quota_display = $quotaDisplay
+            usage_percent = $usagePercent
         }
     }
 
@@ -207,43 +243,8 @@ try {
             }
         }
 
-        # Cálculo de tamaño usado
-        $usedBytes = [int64]0
-        if ($filePath -and (Test-Path $filePath)) {
-            try { $usedBytes = [int64](Get-Item $filePath).Length } catch {}
-        }
-        if ($usedBytes -le 0) {
-            $usedBytes = Get-FastStoreUsage $s
-        }
-
-        # Cálculo de cuota y detección de sobrecuota
-        $quotaData = Get-FastStoreQuota $s
-        $totalBytes = $quotaData.TotalBytes
-        $quotaStr   = $quotaData.QuotaDisplay
-
-        if ($quotaData.IsOverQuota) {
-            if ($quotaData.ExcessBytes -gt 0) {
-                $usedBytes = [Math]::Max($usedBytes, ($totalBytes + $quotaData.ExcessBytes))
-            } else {
-                $usedBytes = [Math]::Max($usedBytes, $totalBytes)
-            }
-        }
-
-        # Porcentaje de ocupación
-        $usagePercent = 0.0
-        if ($totalBytes -gt 0) {
-            $usagePercent = [Math]::Round(($usedBytes / $totalBytes) * 100, 1)
-            if ($usagePercent -gt 100.0) { $usagePercent = 100.0 }
-            if ($usagePercent -lt 0.0) { $usagePercent = 0.0 }
-        }
-
-        $sizeStr = if ($usedBytes -ge 1GB) {
-            "{0:N1} GB" -f ($usedBytes / 1GB)
-        } elseif ($usedBytes -ge 1MB) {
-            "{0:N1} MB" -f ($usedBytes / 1MB)
-        } else {
-            "0.0 GB"
-        }
+        # Cálculo dinámico de tamaño y cuota
+        $metrics = Get-FastStoreMetrics $s $filePath
 
         $key = if ($dispName) { $dispName.ToLower() } else { $filePath.ToLower() }
         if ($key -and -not $seenKeys.Contains($key)) {
@@ -252,11 +253,11 @@ try {
                 display_name  = $dispName
                 file_path     = if ($filePath) { $filePath } else { $null }
                 store_type    = $type
-                size_display  = $sizeStr
-                used_bytes    = $usedBytes
-                total_bytes   = $totalBytes
-                quota_display = $quotaStr
-                usage_percent = $usagePercent
+                size_display  = $metrics.size_display
+                used_bytes    = $metrics.used_bytes
+                total_bytes   = $metrics.total_bytes
+                quota_display = $metrics.quota_display
+                usage_percent = $metrics.usage_percent
             })
         }
     }
@@ -289,39 +290,16 @@ try {
                     "ExchangeOnline"
                 }
 
-                $usedBytes = [int64]0
-                if ($delFilePath -and (Test-Path $delFilePath)) {
-                    try { $usedBytes = [int64](Get-Item $delFilePath).Length } catch {}
-                }
-                if ($delStore -and $usedBytes -le 0) {
-                    $usedBytes = Get-FastStoreUsage $delStore
-                }
-
-                $quotaData = if ($delStore) { Get-FastStoreQuota $delStore } else { @{ TotalBytes = [int64]53150220288; QuotaDisplay = "49.5 GB"; IsOverQuota = $false; ExcessBytes = [int64]0 } }
-                $totalBytes = $quotaData.TotalBytes
-                $quotaStr   = $quotaData.QuotaDisplay
-
-                if ($quotaData.IsOverQuota) {
-                    if ($quotaData.ExcessBytes -gt 0) {
-                        $usedBytes = [Math]::Max($usedBytes, ($totalBytes + $quotaData.ExcessBytes))
-                    } else {
-                        $usedBytes = [Math]::Max($usedBytes, $totalBytes)
-                    }
-                }
-
-                $usagePercent = 0.0
-                if ($totalBytes -gt 0) {
-                    $usagePercent = [Math]::Round(($usedBytes / $totalBytes) * 100, 1)
-                    if ($usagePercent -gt 100.0) { $usagePercent = 100.0 }
-                    if ($usagePercent -lt 0.0) { $usagePercent = 0.0 }
-                }
-
-                $sizeStr = if ($usedBytes -ge 1GB) {
-                    "{0:N1} GB" -f ($usedBytes / 1GB)
-                } elseif ($usedBytes -ge 1MB) {
-                    "{0:N1} MB" -f ($usedBytes / 1MB)
+                $metrics = if ($delStore) {
+                    Get-FastStoreMetrics $delStore $delFilePath
                 } else {
-                    "0.0 GB"
+                    @{
+                        used_bytes    = [int64]0
+                        total_bytes   = [int64]107374182400
+                        size_display  = "0.0 GB"
+                        quota_display = "100 GB"
+                        usage_percent = 0.0
+                    }
                 }
 
                 [void]$seenKeys.Add($key)
@@ -329,11 +307,11 @@ try {
                     display_name  = $nameToUse
                     file_path     = $delFilePath
                     store_type    = $delType
-                    size_display  = $sizeStr
-                    used_bytes    = $usedBytes
-                    total_bytes   = $totalBytes
-                    quota_display = $quotaStr
-                    usage_percent = $usagePercent
+                    size_display  = $metrics.size_display
+                    used_bytes    = $metrics.used_bytes
+                    total_bytes   = $metrics.total_bytes
+                    quota_display = $metrics.quota_display
+                    usage_percent = $metrics.usage_percent
                 })
             }
         }

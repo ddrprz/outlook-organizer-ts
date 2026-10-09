@@ -897,7 +897,7 @@ impl MailboxItem {
     /// Devuelve el porcentaje de ocupación (0.0 .. 100.0)
     pub fn get_usage_percent(&self) -> f64 {
         if let Some(pct) = self.usage_percent
-            && pct > 0.0
+            && pct >= 0.0
         {
             return pct.clamp(0.0, 100.0);
         }
@@ -940,15 +940,12 @@ impl MailboxItem {
         }
     }
 
-    /// Cuota total en GB (49.5 GB estándar M365 para Exchange/SharedMailbox)
+    /// Cuota total en GB (dinámica según la cuota asignada en Exchange / M365)
     pub fn get_total_gb(&self) -> f64 {
         if let Some(total) = self.total_bytes
-            && total >= (1024 * 1024 * 1024)
+            && total >= (1024 * 1024)
         {
-            let gb = total as f64 / (1024.0 * 1024.0 * 1024.0);
-            if (40.0..=55.0).contains(&gb) {
-                return gb;
-            }
+            return total as f64 / (1024.0 * 1024.0 * 1024.0);
         }
         if let Some(ref q) = self.quota_display
             && !q.trim().is_empty()
@@ -957,13 +954,20 @@ impl MailboxItem {
             if s.ends_with("GB") {
                 let num = s.trim_end_matches("GB").trim().replace(',', "");
                 if let Ok(val) = num.parse::<f64>()
-                    && (40.0..=55.0).contains(&val)
+                    && val > 0.0
                 {
                     return val;
                 }
+            } else if s.ends_with("MB") {
+                let num = s.trim_end_matches("MB").trim().replace(',', "");
+                if let Ok(val) = num.parse::<f64>()
+                    && val > 0.0
+                {
+                    return val / 1024.0;
+                }
             }
         }
-        49.5 // Cuota predeterminada en M365 (49.5 GB utilizables)
+        50.0 // Cuota de reserva genérica solo si Exchange no expone metadatos
     }
 
     /// Espacio libre restante en GB
@@ -971,15 +975,27 @@ impl MailboxItem {
         (self.get_total_gb() - self.get_used_gb()).max(0.0)
     }
 
-    /// Cuota formateada para visualización (siempre normalizada a 49.5 GB)
+    /// Cuota formateada para visualización
     pub fn get_quota_display(&self) -> String {
-        format!("{:.1} GB", self.get_total_gb())
+        if let Some(ref q) = self.quota_display
+            && !q.trim().is_empty()
+            && q.trim() != "0 GB"
+            && q.trim() != "0.0 GB"
+        {
+            return q.trim().to_string();
+        }
+        let total = self.get_total_gb();
+        if total.fract() == 0.0 {
+            format!("{:.0} GB", total)
+        } else {
+            format!("{:.1} GB", total)
+        }
     }
 
     /// Estado de salud de capacidad del buzón
     pub fn health_status(&self) -> (&'static str, ratatui::style::Color) {
         let pct = self.get_usage_percent();
-        if pct >= 99.0 || self.get_free_gb() <= 0.001 {
+        if pct >= 99.0 || (self.get_total_gb() > 0.0 && self.get_free_gb() <= 0.001) {
             ("Lleno", crate::ui::theme::Theme::DANGER)
         } else if pct >= 90.0 {
             ("Crítico", crate::ui::theme::Theme::DANGER)
@@ -2386,9 +2402,42 @@ mod tests {
             quota_display: Some("0 GB".to_string()),
             usage_percent: None,
         };
-        assert_eq!(item_zero_quota.get_total_gb(), 49.5);
-        assert_eq!(item_zero_quota.get_quota_display(), "49.5 GB");
-        assert_eq!(item_zero_quota.get_free_gb(), 25.1);
+        assert_eq!(item_zero_quota.get_total_gb(), 50.0);
+        assert_eq!(item_zero_quota.get_quota_display(), "50 GB");
+        assert_eq!(item_zero_quota.get_free_gb(), 25.6);
+
+        // Buzón de 100 GB (Exchange Plan 2 / M365 E3/E5)
+        let item_100gb = MailboxItem {
+            display_name: "soporte@timeless.com.pe".to_string(),
+            store_type: "SharedMailbox".to_string(),
+            size_display: "1.74 GB".to_string(),
+            file_path: None,
+            selected: true,
+            used_bytes: Some(1_867_222_345),
+            total_bytes: Some(107_374_182_400),
+            quota_display: Some("100 GB".to_string()),
+            usage_percent: Some(1.7),
+        };
+        assert_eq!(item_100gb.get_total_gb(), 100.0);
+        assert_eq!(item_100gb.get_quota_display(), "100 GB");
+        assert_eq!(item_100gb.get_usage_percent(), 1.7);
+        assert_eq!(item_100gb.health_status().0, "Normal");
+
+        // Buzón de 2 GB (Exchange Kiosk)
+        let item_kiosk = MailboxItem {
+            display_name: "kiosk@empresa.com".to_string(),
+            store_type: "ExchangeOnline".to_string(),
+            size_display: "1.50 GB".to_string(),
+            file_path: None,
+            selected: false,
+            used_bytes: Some(1_610_612_736),
+            total_bytes: Some(2_147_483_648),
+            quota_display: Some("2 GB".to_string()),
+            usage_percent: Some(75.0),
+        };
+        assert_eq!(item_kiosk.get_total_gb(), 2.0);
+        assert_eq!(item_kiosk.get_quota_display(), "2 GB");
+        assert_eq!(item_kiosk.health_status().0, "Atención");
     }
 
     #[test]
