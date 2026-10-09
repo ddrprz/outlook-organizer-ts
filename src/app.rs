@@ -185,30 +185,95 @@ pub struct PstItem {
     pub selected: bool,
 }
 
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + serde::Deserialize<'de>,
+{
+    use serde::Deserialize;
+    let opt = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
+fn deserialize_vec_null_default<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    use serde::Deserialize;
+    let opt_vec: Option<Vec<Option<T>>> = Option::deserialize(deserializer)?;
+    match opt_vec {
+        Some(vec) => Ok(vec.into_iter().flatten().collect()),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn deserialize_map_null_default<'de, D, V>(deserializer: D) -> Result<std::collections::BTreeMap<String, V>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    V: Default + serde::Deserialize<'de>,
+{
+    use serde::Deserialize;
+    let opt_map: Option<std::collections::BTreeMap<String, Option<V>>> = Option::deserialize(deserializer)?;
+    match opt_map {
+        Some(map) => {
+            let mut result = std::collections::BTreeMap::new();
+            for (k, v) in map {
+                result.insert(k, v.unwrap_or_default());
+            }
+            Ok(result)
+        }
+        None => Ok(std::collections::BTreeMap::new()),
+    }
+}
+
+fn deserialize_year_months<'de, D>(deserializer: D) -> Result<std::collections::BTreeMap<String, Vec<u32>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let opt_map: Option<std::collections::BTreeMap<String, Option<Vec<Option<u32>>>>> = Option::deserialize(deserializer)?;
+    match opt_map {
+        Some(map) => {
+            let mut result = std::collections::BTreeMap::new();
+            for (k, v_opt) in map {
+                let months = match v_opt {
+                    Some(list) => list.into_iter().flatten().collect(),
+                    None => Vec::new(),
+                };
+                result.insert(k, months);
+            }
+            Ok(result)
+        }
+        None => Ok(std::collections::BTreeMap::new()),
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct PstFolderDetail {
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub count: usize,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub path: String,
     #[serde(default)]
     pub parent_path: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub size_mb: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub has_children: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_vec_null_default")]
     pub years: Vec<u32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_year_months")]
     pub year_months: std::collections::BTreeMap<String, Vec<u32>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub counts_by_year: std::collections::BTreeMap<String, usize>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub counts_by_month: std::collections::BTreeMap<String, usize>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub sizes_by_year_mb: std::collections::BTreeMap<String, f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub sizes_by_month_mb: std::collections::BTreeMap<String, f64>,
 }
 
@@ -233,34 +298,32 @@ impl Default for PstFolderDetail {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub struct PstDetail {
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub file_name: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub file_path: String,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub size_mb: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub total_items: usize,
+    #[serde(default)]
     pub last_email_date: Option<String>,
+    #[serde(default)]
     pub first_email_date: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_vec_null_default")]
     pub folders: Vec<PstFolderDetail>,
+    #[serde(default, deserialize_with = "deserialize_vec_null_default")]
     pub years: Vec<u32>,
+    #[serde(default, deserialize_with = "deserialize_year_months")]
     pub year_months: std::collections::BTreeMap<String, Vec<u32>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub counts_by_year: std::collections::BTreeMap<String, usize>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub counts_by_month: std::collections::BTreeMap<String, usize>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub sizes_by_year_mb: std::collections::BTreeMap<String, f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_map_null_default")]
     pub sizes_by_month_mb: std::collections::BTreeMap<String, f64>,
-}
-
-fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Default + serde::Deserialize<'de>,
-{
-    use serde::Deserialize;
-    let opt = Option::deserialize(deserializer)?;
-    Ok(opt.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
@@ -3123,6 +3186,21 @@ mod tests {
         assert_eq!(d.folders.len(), 1);
         assert_eq!(d.folders[0].name, "Bandeja de entrada");
         assert_eq!(d.folders[0].years, vec![2026]);
+    }
+
+    #[test]
+    fn test_pst_detail_deserialization_with_nulls_realistic() {
+        let json_str = r#"{"file_path":"F:\\PST OPERACIONES3\\BCK MAR 2021 I OPERACIONES3.pst","year_months":{"2022":[1,2],"2021":[null,5]},"last_email_date":null,"size_mb":null,"years":[2022,null,2021],"first_email_date":null,"file_name":"BCK MAR 2021 I OPERACIONES3.pst","counts_by_month":{"2022-01":null,"2021-05":10},"folders":[{"path":"Bandeja de entrada","parent_path":null,"years":null,"counts_by_year":{"2021":null},"has_children":null,"year_months":null,"count":null,"name":"Bandeja de entrada","sizes_by_year_mb":null,"size_mb":null,"sizes_by_month_mb":null,"counts_by_month":null}],"sizes_by_year_mb":null,"sizes_by_month_mb":null,"total_items":null,"counts_by_year":{"2021":null}}"#;
+        let detail: Result<PstDetail, _> = serde_json::from_str(json_str);
+        assert!(detail.is_ok(), "Deserialization with nulls should succeed without errors: {:?}", detail.err());
+        let d = detail.unwrap();
+        assert_eq!(d.file_name, "BCK MAR 2021 I OPERACIONES3.pst");
+        assert_eq!(d.total_items, 0);
+        assert_eq!(d.folders.len(), 1);
+        assert_eq!(d.folders[0].count, 0);
+        assert_eq!(d.folders[0].counts_by_year.get("2021"), Some(&0));
+        assert_eq!(d.counts_by_month.get("2022-01"), Some(&0));
+        assert_eq!(d.years, vec![2022, 2021]);
     }
 
     #[test]

@@ -93,10 +93,21 @@ try {
         $fName = $folder.Name
         $relPath = if ($parentPath) { "$parentPath\$fName" } else { $fName }
         $fCount = 0
-        try { $fCount = $folder.Items.Count } catch {}
+        try {
+            if ($null -ne $folder.Items) {
+                $fCount = [int]$folder.Items.Count
+            }
+        } catch { $fCount = 0 }
+        if ($null -eq $fCount) { $fCount = 0 }
+
         $subCount = 0
-        try { $subCount = $folder.Folders.Count } catch {}
-        $hasChildren = ($subCount -gt 0)
+        try {
+            if ($null -ne $folder.Folders) {
+                $subCount = [int]$folder.Folders.Count
+            }
+        } catch { $subCount = 0 }
+        if ($null -eq $subCount) { $subCount = 0 }
+        $hasChildren = [bool]($subCount -gt 0)
 
         $folderSizeBytes = 0
         $fCountsByYear = @{}
@@ -182,27 +193,27 @@ try {
         $fSizesByMonthRounded = @{}
         foreach ($k in $fSizesByMonth.Keys) { $fSizesByMonthRounded[$k] = [math]::Round($fSizesByMonth[$k], 2) }
 
-        $fSortedYears = $fYearsSet.Keys | ForEach-Object { [int]$_ } | Sort-Object
+        $fSortedYears = @($fYearsSet.Keys | Where-Object { $_ -ne $null } | ForEach-Object { [int]$_ } | Sort-Object)
         $fFinalYearMonths = @{}
         foreach ($y in $fSortedYears) {
             $yStr = "$y"
             if ($fYearMonths.ContainsKey($yStr)) {
-                $mList = $fYearMonths[$yStr].Keys | ForEach-Object { [int]$_ } | Sort-Object
-                $fFinalYearMonths[$yStr] = @($mList)
+                $mList = @($fYearMonths[$yStr].Keys | Where-Object { $_ -ne $null } | ForEach-Object { [int]$_ } | Sort-Object)
+                $fFinalYearMonths[$yStr] = $mList
             } else {
                 $fFinalYearMonths[$yStr] = @()
             }
         }
 
-        $script:totalItems += $fCount
+        $script:totalItems += [int]$fCount
         $script:foldersList += @{
-            name              = $fName
-            path              = $relPath
-            parent_path       = if ($parentPath) { $parentPath } else { $null }
-            count             = $fCount
-            size_mb           = [math]::Round($folderSizeBytes / 1MB, 2)
-            has_children      = $hasChildren
-            years             = @($fSortedYears)
+            name              = if ($fName) { [string]$fName } else { "(Sin Nombre)" }
+            path              = if ($relPath) { [string]$relPath } else { "" }
+            parent_path       = if ($parentPath) { [string]$parentPath } else { $null }
+            count             = [int]$fCount
+            size_mb           = [math]::Round([double]$folderSizeBytes / 1MB, 2)
+            has_children      = [bool]$hasChildren
+            years             = $fSortedYears
             year_months       = $fFinalYearMonths
             counts_by_year    = $fCountsByYear
             counts_by_month   = $fCountsByMonth
@@ -223,22 +234,22 @@ try {
     }
 
     # Estructurar resultado global
-    $sortedYears = $yearsSet.Keys | ForEach-Object { [int]$_ } | Sort-Object
+    $sortedYears = @($yearsSet.Keys | Where-Object { $_ -ne $null } | ForEach-Object { [int]$_ } | Sort-Object)
     $finalYearMonths = @{}
     foreach ($y in $sortedYears) {
         $yStr = "$y"
         if ($yearMonthsMap.ContainsKey($yStr)) {
-            $mList = $yearMonthsMap[$yStr].Keys | ForEach-Object { [int]$_ } | Sort-Object
-            $finalYearMonths[$yStr] = @($mList)
+            $mList = @($yearMonthsMap[$yStr].Keys | Where-Object { $_ -ne $null } | ForEach-Object { [int]$_ } | Sort-Object)
+            $finalYearMonths[$yStr] = $mList
         } else {
             $finalYearMonths[$yStr] = @()
         }
     }
 
     $globalSizesByYearRounded = @{}
-    foreach ($k in $script:globalSizesByYear.Keys) { $globalSizesByYearRounded[$k] = [math]::Round($script:globalSizesByYear[$k], 2) }
+    foreach ($k in $script:globalSizesByYear.Keys) { $globalSizesByYearRounded[$k] = [math]::Round([double]$script:globalSizesByYear[$k], 2) }
     $globalSizesByMonthRounded = @{}
-    foreach ($k in $script:globalSizesByMonth.Keys) { $globalSizesByMonthRounded[$k] = [math]::Round($script:globalSizesByMonth[$k], 2) }
+    foreach ($k in $script:globalSizesByMonth.Keys) { $globalSizesByMonthRounded[$k] = [math]::Round([double]$script:globalSizesByMonth[$k], 2) }
 
     $lastDateStr = if ($maxDate -gt [DateTime]::MinValue) { $maxDate.ToString("yyyy-MM-dd HH:mm:ss") } else { $null }
     $firstDateStr = if ($minDate -lt [DateTime]::MaxValue) { $minDate.ToString("yyyy-MM-dd HH:mm:ss") } else { $null }
@@ -253,14 +264,14 @@ try {
     }
 
     $result = @{
-        file_name         = $fileName
-        file_path         = $PstPath
-        size_mb           = $sizeMb
-        total_items       = $totalItems
+        file_name         = [string]$fileName
+        file_path         = [string]$PstPath
+        size_mb           = [double]$sizeMb
+        total_items       = [int]$totalItems
         last_email_date   = $lastDateStr
         first_email_date  = $firstDateStr
-        folders           = $foldersList
-        years             = @($sortedYears)
+        folders           = @($foldersList)
+        years             = $sortedYears
         year_months       = $finalYearMonths
         counts_by_year    = $script:globalCountsByYear
         counts_by_month   = $script:globalCountsByMonth
