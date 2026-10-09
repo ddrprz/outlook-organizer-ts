@@ -536,6 +536,7 @@ mod tests {
             size_display: "10 MB".to_string(),
             file_path: None,
             selected: true,
+            ..Default::default()
         }];
 
         let backend = TestBackend::new(100, 30);

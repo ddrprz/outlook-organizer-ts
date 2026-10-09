@@ -121,9 +121,15 @@ try {
 
         # Cálculo de tamaño o estado Online
         $sizeStr = "Online (Nube)"
+        $usedBytes = $null
+        $totalBytes = 53687091200 # 50 GB estándar M365 (50 * 1024^3)
+        $quotaStr = "50 GB"
+        $usagePercent = 0.0
+
         if ($filePath -and (Test-Path $filePath)) {
             try {
                 $len = (Get-Item $filePath).Length
+                $usedBytes = [int64]$len
                 if ($len -ge 1GB) {
                     $sizeStr = "{0:N2} GB" -f ($len / 1GB)
                 } elseif ($len -ge 1MB) {
@@ -136,14 +142,55 @@ try {
             }
         }
 
+        # Intentar consultar cuota MAPI en el Store si está expuesta (PR_STORAGE_QUOTA_LIMIT = 0x34040003 en KB)
+        try {
+            $quotaKb = $s.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34040003")
+            if ($quotaKb -and $quotaKb -gt 0) {
+                $totalBytes = [int64]$quotaKb * 1024
+                $quotaStr = "{0:N0} GB" -f ($totalBytes / 1GB)
+            }
+        } catch {}
+
+        # Si aún no tenemos bytes usados (modo online sin OST local), intentar consultar tamaño de la raíz (PR_MESSAGE_SIZE_EXTENDED = 0x0E080014)
+        if ($null -eq $usedBytes) {
+            try {
+                $rootFolder = $s.GetRootFolder()
+                if ($rootFolder) {
+                    try {
+                        $storeSize = $rootFolder.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
+                        if ($storeSize -and $storeSize -gt 0) {
+                            $usedBytes = [int64]$storeSize
+                            if ($usedBytes -ge 1GB) {
+                                $sizeStr = "{0:N2} GB" -f ($usedBytes / 1GB)
+                            } elseif ($usedBytes -ge 1MB) {
+                                $sizeStr = "{0:N2} MB" -f ($usedBytes / 1MB)
+                            } else {
+                                $sizeStr = "{0} Bytes" -f $usedBytes
+                            }
+                        }
+                    } catch {}
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootFolder) | Out-Null } catch {}
+                }
+            } catch {}
+        }
+
+        if ($usedBytes -and $totalBytes -gt 0) {
+            $usagePercent = [Math]::Round(($usedBytes / $totalBytes) * 100, 1)
+            if ($usagePercent -gt 100.0) { $usagePercent = 100.0 }
+        }
+
         $key = if ($dispName) { $dispName.ToLower() } else { $filePath.ToLower() }
         if ($key -and -not $seenKeys.Contains($key)) {
             [void]$seenKeys.Add($key)
             $discovered.Add(@{
-                display_name = $dispName
-                file_path    = if ($filePath) { $filePath } else { $null }
-                store_type   = $type
-                size_display = $sizeStr
+                display_name  = $dispName
+                file_path     = if ($filePath) { $filePath } else { $null }
+                store_type    = $type
+                size_display  = $sizeStr
+                used_bytes    = $usedBytes
+                total_bytes   = $totalBytes
+                quota_display = $quotaStr
+                usage_percent = $usagePercent
             })
         }
     }
@@ -177,9 +224,15 @@ try {
                 }
 
                 $sizeStr = "Online (Nube)"
+                $usedBytes = $null
+                $totalBytes = 53687091200
+                $quotaStr = "50 GB"
+                $usagePercent = 0.0
+
                 if ($delFilePath -and (Test-Path $delFilePath)) {
                     try {
                         $len = (Get-Item $delFilePath).Length
+                        $usedBytes = [int64]$len
                         if ($len -ge 1GB) {
                             $sizeStr = "{0:N2} GB" -f ($len / 1GB)
                         } elseif ($len -ge 1MB) {
@@ -190,12 +243,31 @@ try {
                     } catch {}
                 }
 
+                if ($delStore) {
+                    try {
+                        $quotaKb = $delStore.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34040003")
+                        if ($quotaKb -and $quotaKb -gt 0) {
+                            $totalBytes = [int64]$quotaKb * 1024
+                            $quotaStr = "{0:N0} GB" -f ($totalBytes / 1GB)
+                        }
+                    } catch {}
+                }
+
+                if ($usedBytes -and $totalBytes -gt 0) {
+                    $usagePercent = [Math]::Round(($usedBytes / $totalBytes) * 100, 1)
+                    if ($usagePercent -gt 100.0) { $usagePercent = 100.0 }
+                }
+
                 [void]$seenKeys.Add($key)
                 $discovered.Add(@{
-                    display_name = $nameToUse
-                    file_path    = $delFilePath
-                    store_type   = $delType
-                    size_display = $sizeStr
+                    display_name  = $nameToUse
+                    file_path     = $delFilePath
+                    store_type    = $delType
+                    size_display  = $sizeStr
+                    used_bytes    = $usedBytes
+                    total_bytes   = $totalBytes
+                    quota_display = $quotaStr
+                    usage_percent = $usagePercent
                 })
             }
         }
