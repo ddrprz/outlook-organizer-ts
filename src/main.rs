@@ -75,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     speed_mps,
                     eta_seconds,
                     imported,
+                    imported_bytes,
                     duplicates,
                     errors,
                 } => {
@@ -88,6 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.progress.speed_mps = speed_mps;
                     state.progress.eta_seconds = eta_seconds;
                     state.progress.imported_count = imported;
+                    if imported_bytes > 0 {
+                        state.progress.imported_bytes = imported_bytes;
+                    }
                     state.progress.duplicates_skipped = duplicates;
                     state.progress.error_count = errors;
                 }
@@ -100,10 +104,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 BackendMessage::Finished {
                     status,
                     imported,
+                    imported_bytes,
                     duplicates,
                     errors,
                 } => {
                     state.progress.imported_count = imported;
+                    if imported_bytes > 0 {
+                        state.progress.imported_bytes = imported_bytes;
+                    }
                     state.progress.duplicates_skipped = duplicates;
                     state.progress.error_count = errors;
                     state.load_processed_items_from_temp();

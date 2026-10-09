@@ -1302,6 +1302,7 @@ pub struct ProgressState {
     pub speed_mps: f64,
     pub eta_seconds: u64,
     pub imported_count: u64,
+    pub imported_bytes: u64,
     pub duplicates_skipped: u64,
     pub error_count: u64,
     pub throttling_active: bool,
@@ -1322,6 +1323,7 @@ impl Default for ProgressState {
             speed_mps: 0.0,
             eta_seconds: 0,
             imported_count: 0,
+            imported_bytes: 0,
             duplicates_skipped: 0,
             error_count: 0,
             throttling_active: false,
@@ -1770,7 +1772,17 @@ impl AppState {
 
     /// Calcula el tamaño total en MB de correos importados exitosamente
     pub fn total_imported_size_mb(&self) -> f64 {
-        // 1. Sumar tamaño de correos individuales procesados con estado "Importado"
+        // Si no se importó ningún correo, el volumen transferido es estrictamente 0.0 MB
+        if self.progress.imported_count == 0 {
+            return 0.0;
+        }
+
+        // 1. Usar bytes reportados directamente por el worker MAPI en tiempo real
+        if self.progress.imported_bytes > 0 {
+            return self.progress.imported_bytes as f64 / (1024.0 * 1024.0);
+        }
+
+        // 2. Sumar tamaño de correos individuales procesados con estado "Importado"
         let from_emails: f64 = self
             .processed_items
             .iter()
@@ -1781,27 +1793,17 @@ impl AppState {
             return from_emails;
         }
 
-        // 2. Sumar tamaño de carpetas importadas si están disponibles
-        let from_folders: f64 = self
-            .get_imported_folders_summary()
-            .iter()
-            .map(|f| f.size_mb)
-            .sum();
-        if from_folders > 0.0 {
-            return from_folders;
-        }
-
-        // 3. Proporción del tamaño total de PSTs según los correos importados
+        // 3. Estimación proporcional basada en correos importados vs total de correos candidatos del PST
         let total_pst_mb = self.total_selected_psts_size_mb();
         if total_pst_mb > 0.0 {
             let total_items = (self.progress.imported_count
                 + self.progress.duplicates_skipped
                 + self.progress.error_count) as f64;
-            if total_items > 0.0 && self.progress.imported_count > 0 {
+            if total_items > 0.0 {
                 return (self.progress.imported_count as f64 / total_items) * total_pst_mb;
             }
-            return total_pst_mb;
         }
+
         0.0
     }
 
@@ -1839,6 +1841,28 @@ impl AppState {
                 let used_before_gb = m.get_used_gb();
                 let free_before_gb = m.get_free_gb();
                 let percent_before = m.get_usage_percent();
+                let health_before = m.health_status().0.to_string();
+
+                if self.progress.imported_count == 0 {
+                    return MailboxStorageImpact {
+                        display_name: m.display_name.clone(),
+                        store_type: m.store_type.clone(),
+                        quota_display: m.get_quota_display(),
+                        total_gb,
+                        used_before_gb,
+                        free_before_gb,
+                        percent_before,
+                        used_after_gb: used_before_gb,
+                        free_after_gb: free_before_gb,
+                        percent_after: percent_before,
+                        imported_gb: 0.0,
+                        imported_items: 0,
+                        delta_gb: 0.0,
+                        delta_percent: 0.0,
+                        health_before: health_before.clone(),
+                        health_after: health_before,
+                    };
+                }
 
                 let imported_gb = per_mbx_imported_gb;
                 let used_after_gb = if total_gb > 0.0 {
@@ -1860,7 +1884,6 @@ impl AppState {
                 let delta_gb = (used_after_gb - used_before_gb).max(0.0);
                 let delta_percent = (percent_after - percent_before).max(0.0);
 
-                let health_before = m.health_status().0.to_string();
                 let health_after = if percent_after >= 99.0 || (total_gb > 0.0 && free_after_gb <= 0.001) {
                     "Lleno".to_string()
                 } else if percent_after >= 90.0 {
@@ -2623,6 +2646,118 @@ mod tests {
         assert!(impact.free_after_gb < impact.free_before_gb);
         assert_eq!(impact.health_before, "Normal");
         assert_eq!(impact.health_after, "Normal");
+    }
+
+    #[test]
+    fn test_mailbox_storage_impacts_zero_imported() {
+        let mut state = AppState::new();
+        state.discovered_mailboxes = vec![MailboxItem {
+            display_name: "bck.operaciones3.2020@pluscargoperu.com".to_string(),
+            store_type: "SharedMailbox".to_string(),
+            size_display: "24.31 GB".to_string(),
+            file_path: None,
+            selected: true,
+            used_bytes: Some(26_102_546_432), // ~24.31 GB
+            total_bytes: Some(53_687_091_200), // 50 GB
+            quota_display: Some("50 GB".to_string()),
+            usage_percent: Some(48.6),
+        }];
+        state.progress.imported_count = 0;
+        state.progress.duplicates_skipped = 28_000;
+        state.progress.error_count = 0;
+        state.discovered_psts = vec![PstItem {
+            name: "BCK MAR 2020 I OPERACIONES3.pst".to_string(),
+            path: r"D:\BCK MAR 2020 I OPERACIONES3.pst".to_string(),
+            size_mb: 22_589.44, // 22.06 GB
+            selected: true,
+        }];
+        // Añadir carpetas seleccionadas en el árbol para comprobar que NO se sumen como tamaño importado
+        state.folder_tree.nodes.push(crate::app::FolderTreeNode {
+            name: "Bandeja de entrada".to_string(),
+            path: "Bandeja de entrada".to_string(),
+            parent_path: None,
+            count: 28000,
+            size_mb: 19_312.64, // 18.86 GB
+            selected: true,
+            expanded: false,
+            level: 0,
+            has_children: false,
+        });
+
+        assert_eq!(state.total_imported_size_mb(), 0.0);
+        let impacts = state.get_mailbox_storage_impacts();
+        assert_eq!(impacts.len(), 1);
+        let impact = &impacts[0];
+        assert_eq!(impact.imported_gb, 0.0);
+        assert_eq!(impact.delta_gb, 0.0);
+        assert_eq!(impact.used_after_gb, impact.used_before_gb);
+        assert_eq!(impact.free_after_gb, impact.free_before_gb);
+        assert_eq!(impact.health_after, "Normal");
+    }
+
+    #[test]
+    fn test_mailbox_storage_impacts_mostly_duplicates_realistic() {
+        let mut state = AppState::new();
+        state.discovered_mailboxes = vec![MailboxItem {
+            display_name: "bck.operaciones3.2020@pluscargoperu.com".to_string(),
+            store_type: "SharedMailbox".to_string(),
+            size_display: "24.31 GB".to_string(),
+            file_path: None,
+            selected: true,
+            used_bytes: Some(26_102_546_432), // ~24.31 GB
+            total_bytes: Some(53_687_091_200), // 50 GB
+            quota_display: Some("50 GB".to_string()),
+            usage_percent: Some(48.6),
+        }];
+        // Escenario del usuario: 41 importados, 28849 duplicados omitidos, 1 error
+        state.progress.imported_count = 41;
+        state.progress.duplicates_skipped = 28_849;
+        state.progress.error_count = 1;
+        state.discovered_psts = vec![PstItem {
+            name: "BCK MAR 2020 I OPERACIONES3.pst".to_string(),
+            path: r"D:\BCK MAR 2020 I OPERACIONES3.pst".to_string(),
+            size_mb: 22_589.44, // 22.06 GB
+            selected: true,
+        }];
+        // Carpeta en el PST de 18.86 GB
+        state.folder_tree.nodes.push(crate::app::FolderTreeNode {
+            name: "Bandeja de entrada".to_string(),
+            path: "Bandeja de entrada".to_string(),
+            parent_path: None,
+            count: 28891,
+            size_mb: 19_312.64, // 18.86 GB
+            selected: true,
+            expanded: false,
+            level: 0,
+            has_children: false,
+        });
+
+        // El cálculo proporcional de 41 correos de 28891 en un PST de 22.06 GB debe ser ~32 MB, NUNCA 18.86 GB
+        let imported_mb = state.total_imported_size_mb();
+        assert!(imported_mb > 10.0 && imported_mb < 60.0, "imported_mb ({}) debe ser aprox 32 MB y no 18.86 GB", imported_mb);
+
+        let impacts = state.get_mailbox_storage_impacts();
+        let impact = &impacts[0];
+        assert!(impact.imported_gb < 0.1, "El espacio importado debe ser menor a 0.1 GB");
+        assert!(impact.used_after_gb < 24.5, "El espacio final debe ser aprox 24.34 GB, no 43.17 GB");
+        assert!(impact.free_after_gb > 25.5, "El espacio libre debe ser aprox 25.66 GB, no 6.83 GB");
+        assert_eq!(impact.health_after, "Normal", "La salud debe mantenerse Normal");
+    }
+
+    #[test]
+    fn test_total_imported_size_with_live_imported_bytes() {
+        let mut state = AppState::new();
+        state.progress.imported_count = 41;
+        // 15 MB exactos reportados en bytes desde el worker MAPI
+        state.progress.imported_bytes = 15 * 1024 * 1024;
+        state.discovered_psts = vec![PstItem {
+            name: "test.pst".to_string(),
+            path: "test.pst".to_string(),
+            size_mb: 5000.0,
+            selected: true,
+        }];
+
+        assert_eq!(state.total_imported_size_mb(), 15.0);
     }
 
     #[test]
