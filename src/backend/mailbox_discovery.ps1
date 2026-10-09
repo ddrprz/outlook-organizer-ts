@@ -90,63 +90,28 @@ try {
             $root = $store.GetRootFolder()
             if ($null -eq $root) { return [int64]0 }
 
-            $seenFolderIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-            $folderList = [System.Collections.ArrayList]::new()
-
-            # 1. Priorizar carpetas por defecto críticas de MAPI
-            # (3 = Eliminados, 6 = Bandeja de entrada, 5 = Enviados, 16 = Borradores, 23 = Correo no deseado)
-            $defIds = @(3, 6, 5, 16, 23)
-            foreach ($did in $defIds) {
-                try {
-                    $df = $store.GetDefaultFolder($did)
-                    if ($df) {
-                        $fid = ""
-                        try { $fid = $df.EntryID } catch {}
-                        if ($fid -and -not $seenFolderIds.Contains($fid)) {
-                            [void]$seenFolderIds.Add($fid)
-                            [void]$folderList.Add($df)
-                        } elseif (-not $fid) {
-                            [void]$folderList.Add($df)
-                        }
-                    }
-                } catch {}
-            }
-
-            # 2. Agregar carpetas de primer nivel del almacén (Inbox, Sent, carpetas de archivo anuales, etc.)
-            try {
-                $rfFolders = $root.Folders
-                if ($rfFolders) {
-                    $cnt = [Math]::Min($rfFolders.Count, 25)
-                    for ($i = 1; $i -le $cnt; $i++) {
-                        try {
-                            $f = $rfFolders.Item($i)
-                            $fid = ""
-                            try { $fid = $f.EntryID } catch {}
-                            if ($fid -and -not $seenFolderIds.Contains($fid)) {
-                                [void]$seenFolderIds.Add($fid)
-                                [void]$folderList.Add($f)
-                            } elseif (-not $fid) {
-                                [void]$folderList.Add($f)
-                            }
-                        } catch {}
-                    }
-                }
-            } catch {}
-
-            # 3. Sumar el tamaño de cada carpeta de primer nivel de forma instantánea sin recursión profunda
-            foreach ($f in $folderList) {
-                $fSz = [int64]0
-                try {
-                    $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014")
-                    if ($val -and [int64]$val -gt 0) { $fSz = [int64]$val }
-                } catch {}
-                if ($fSz -le 0) {
+            # En buzones de Exchange y Shared Mailboxes, las carpetas cuelgan directamente de RootFolder.
+            # Recorrerlas de forma plana sin recurrir a GetDefaultFolder (que causa bloqueos RPC en buzones compartidos).
+            $folders = $root.Folders
+            if ($folders) {
+                $count = [Math]::Min($folders.Count, 25)
+                for ($i = 1; $i -le $count; $i++) {
                     try {
-                        $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
-                        if ($val -and [int64]$val -gt 0) { $fSz = [int64]$val }
+                        $f = $folders.Item($i)
+                        $sz = [int64]0
+                        try {
+                            $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014")
+                            if ($val -and [int64]$val -gt 0) { $sz = [int64]$val }
+                        } catch {}
+                        if ($sz -le 0) {
+                            try {
+                                $val = $f.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014")
+                                if ($val -and [int64]$val -gt 0) { $sz = [int64]$val }
+                            } catch {}
+                        }
+                        $used += $sz
                     } catch {}
                 }
-                $used += $fSz
             }
         } catch {}
 
@@ -165,14 +130,47 @@ try {
             $rf = $store.GetRootFolder()
             if ($rf) { $targets += $rf }
         } catch {}
-        try {
-            $inbox = $store.GetDefaultFolder(6)
-            if ($inbox) { $targets += $inbox }
-        } catch {}
-        try {
-            $deleted = $store.GetDefaultFolder(3)
-            if ($deleted) { $targets += $deleted }
-        } catch {}
+
+        foreach ($obj in $targets) {
+            try {
+                $pa = $obj.PropertyAccessor
+                if ($null -eq $pa) { continue }
+
+                # 1. Comprobar exceso de almacenamiento (PR_EXCESS_STORAGE_USED = 0x340E0003, en KB)
+                try {
+                    $excessKb = [int64]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x340E0003")
+                    if ($excessKb -gt 0) {
+                        $excessBytes = [Math]::Max($excessBytes, ($excessKb * 1024))
+                        $isOverQuota = $true
+                    }
+                } catch {}
+
+                # 2. Comprobar restricción de almacenamiento (PR_STORAGE_RESTRICTION_STATE = 0x34130003)
+                # 3 = ProhibitSend, 4 = ProhibitReceive (Buzón lleno al 100%)
+                try {
+                    $state = [int]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34130003")
+                    if ($state -ge 3) {
+                        $isOverQuota = $true
+                    }
+                } catch {}
+
+                # 3. Comprobar bandera de sobrecuota del servidor (PR_SVR_OVER_QUOTA = 0x340F0003)
+                try {
+                    $svrOver = $pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x340F0003")
+                    if ($svrOver -eq $true -or [int]$svrOver -eq 1) {
+                        $isOverQuota = $true
+                    }
+                } catch {}
+            } catch {}
+        }
+
+        return @{
+            TotalBytes   = $quotaBytes
+            QuotaDisplay = $quotaDisplay
+            IsOverQuota  = $isOverQuota
+            ExcessBytes  = $excessBytes
+        }
+    }
 
         foreach ($obj in $targets) {
             try {
