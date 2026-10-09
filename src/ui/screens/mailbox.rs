@@ -277,13 +277,21 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             // Proyección de PSTs seleccionados
             let total_pst_mb = state.total_selected_psts_size_mb();
             let total_pst_gb = total_pst_mb / 1024.0;
-            let line3 = if total_pst_mb > 0.0 {
+            let line3 = if free_gb <= 0.001 || item.get_usage_percent() >= 99.0 {
+                Line::from(vec![
+                    Span::styled("⛔ BUZÓN LLENO / SIN ESPACIO: ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "El buzón alcanzó el límite máximo de almacenamiento (0.00 GB libres). No es posible transferir correos adicionales.",
+                        Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            } else if total_pst_mb > 0.0 {
                 if total_pst_gb > free_gb {
                     Line::from(vec![
                         Span::styled("⚠️ ALERTA DE CUOTA: ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
                         Span::styled(
                             format!(
-                                "Los PSTs seleccionados ({:.2} GB) exceden el espacio libre restante ({:.2} GB). Riesgo de rebose del buzón.",
+                                "Los PSTs seleccionados ({:.2} GB) exceden el espacio libre restante ({:.2} GB). Riesgo inminente de rebose.",
                                 total_pst_gb, free_gb
                             ),
                             Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD),

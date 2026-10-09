@@ -983,7 +983,9 @@ impl MailboxItem {
     /// Estado de salud de capacidad del buzón
     pub fn health_status(&self) -> (&'static str, ratatui::style::Color) {
         let pct = self.get_usage_percent();
-        if pct >= 90.0 {
+        if pct >= 99.0 || self.get_free_gb() <= 0.001 {
+            ("Lleno", crate::ui::theme::Theme::DANGER)
+        } else if pct >= 90.0 {
             ("Crítico", crate::ui::theme::Theme::DANGER)
         } else if pct >= 75.0 {
             ("Atención", crate::ui::theme::Theme::WARNING)
