@@ -23,6 +23,8 @@ pub enum BackendMessage {
         #[serde(default)]
         imported: u64,
         #[serde(default)]
+        imported_bytes: u64,
+        #[serde(default)]
         duplicates: u64,
         #[serde(default)]
         errors: u64,
@@ -42,6 +44,8 @@ pub enum BackendMessage {
     Finished {
         status: String, // "completed", "cancelled", "failed"
         imported: u64,
+        #[serde(default)]
+        imported_bytes: u64,
         duplicates: u64,
         errors: u64,
     },

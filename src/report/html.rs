@@ -134,6 +134,21 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
     Ok(target_path)
 }
 
+fn format_storage_delta_display(delta_gb: f64) -> String {
+    if delta_gb >= 0.01 {
+        format!("+{:.2} GB", delta_gb)
+    } else if delta_gb > 0.0 {
+        let mb = delta_gb * 1024.0;
+        if mb >= 0.1 {
+            format!("+{:.1} MB", mb)
+        } else {
+            format!("+{:.2} MB", mb)
+        }
+    } else {
+        "+0.00 GB".to_string()
+    }
+}
+
 fn build_storage_impact_html(state: &AppState) -> String {
     let impacts = state.get_mailbox_storage_impacts();
     if impacts.is_empty() {
@@ -215,7 +230,7 @@ fn build_storage_impact_html(state: &AppState) -> String {
           <div class="comparison-arrow-col">
             <div class="delta-badge">
               <span class="delta-title">TRANSFERIDO</span>
-              <span class="delta-value">+{:.2} GB</span>
+              <span class="delta-value">{}</span>
               <span class="delta-sub">+{:.1}% incremento</span>
               <span class="delta-items">{} correos</span>
             </div>
@@ -274,7 +289,7 @@ fn build_storage_impact_html(state: &AppState) -> String {
             item.percent_before,
             item.percent_before,
             item.free_before_gb,
-            item.delta_gb,
+            format_storage_delta_display(item.delta_gb),
             item.delta_percent,
             item.imported_items,
             health_color_after,
@@ -295,7 +310,7 @@ fn build_storage_impact_html(state: &AppState) -> String {
           <td><strong>{}</strong></td>
           <td>{:.2} GB <span class="muted-cell">({:.1}%)</span></td>
           <td><span style="color: #34d399; font-weight: 700;">{:.2} GB libres</span></td>
-          <td><span class="badge badge-duplicate">+{:.2} GB</span></td>
+          <td><span class="badge badge-duplicate">{}</span></td>
           <td><strong>{:.2} GB</strong> <span class="muted-cell">({:.1}%)</span></td>
           <td><strong style="color: var(--cyan);">{:.2} GB libres</strong></td>
           <td><span class="health-pill" style="color: {};">● {}</span></td>
@@ -306,7 +321,7 @@ fn build_storage_impact_html(state: &AppState) -> String {
             item.used_before_gb,
             item.percent_before,
             item.free_before_gb,
-            item.delta_gb,
+            format_storage_delta_display(item.delta_gb),
             item.used_after_gb,
             item.percent_after,
             item.free_after_gb,
@@ -347,7 +362,7 @@ fn build_storage_impact_html(state: &AppState) -> String {
         </div>
         <div class="storage-kpi-box delta-box">
           <span class="kpi-label">Volumen Transferido (Delta)</span>
-          <span class="kpi-val green">+{:.2} GB</span>
+          <span class="kpi-val green">{}</span>
           <span class="kpi-hint">+{} correos importados</span>
         </div>
         <div class="storage-kpi-box">
@@ -390,7 +405,7 @@ fn build_storage_impact_html(state: &AppState) -> String {
         impacts_count,
         total_quota_gb,
         total_used_before_gb,
-        total_imported_gb,
+        format_storage_delta_display(total_imported_gb),
         total_imported_items,
         total_used_after_gb,
         total_free_after_gb,

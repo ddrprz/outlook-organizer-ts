@@ -44,17 +44,18 @@ function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$p
         $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
 
         Send-Telemetry @{
-            type         = "progress"
-            pst_index    = $currentPstIdx
-            pst_total    = $totalPsts
-            pst_name     = $pstName
-            item_current = $currentItems
-            item_total   = $totalItems
-            speed_mps    = $speed
-            eta_seconds  = $eta
-            imported     = $script:totalImported
-            duplicates   = $script:totalDuplicates
-            errors       = $script:totalErrors
+            type           = "progress"
+            pst_index      = $currentPstIdx
+            pst_total      = $totalPsts
+            pst_name       = $pstName
+            item_current   = $currentItems
+            item_total     = $totalItems
+            speed_mps      = $speed
+            eta_seconds    = $eta
+            imported       = $script:totalImported
+            imported_bytes = $script:totalImportedBytes
+            duplicates     = $script:totalDuplicates
+            errors         = $script:totalErrors
         }
         $script:lastTelemetryTime = $now
     } catch {}
@@ -374,6 +375,7 @@ $outlook = $null
 $namespace = $null
 $storesToUnmount = @()
 $totalImported = 0
+$totalImportedBytes = [int64]0
 $totalDuplicates = 0
 $totalErrors = 0
 $isAborted = $false
@@ -386,6 +388,7 @@ $destFolderCache = @{}
 $dateFolderCache = @{}
 $consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
+$duplicateSampleCount = 0
 
 $weStartedOutlook = $false
 try {
@@ -575,17 +578,18 @@ try {
         Log-Message "PST '$pstName': $totalPstItems correos encontrados en carpetas seleccionadas."
 
         Send-Telemetry @{
-            type         = "progress"
-            pst_index    = $pIdx + 1
-            pst_total    = $totalPsts
-            pst_name     = $pstName
-            item_current = 0
-            item_total   = $totalPstItems
-            speed_mps    = 0.0
-            eta_seconds  = 0
-            imported     = $totalImported
-            duplicates   = $totalDuplicates
-            errors       = $totalErrors
+            type           = "progress"
+            pst_index      = $pIdx + 1
+            pst_total      = $totalPsts
+            pst_name       = $pstName
+            item_current   = 0
+            item_total     = $totalPstItems
+            speed_mps      = 0.0
+            eta_seconds    = 0
+            imported       = $totalImported
+            imported_bytes = $totalImportedBytes
+            duplicates     = $totalDuplicates
+            errors         = $totalErrors
         }
 
         $pstProcessedCount = 0
@@ -751,7 +755,8 @@ try {
                     if ($isDuplicate) {
                         $totalDuplicates++
                         $pstProcessedCount++
-                        if ($processedItemsList.Count -lt 5000) {
+                        if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
+                            $script:duplicateSampleCount++
                             $itemKb = 0.0
                             if ($entry.Size) { try { $itemKb = [math]::Round([double]$entry.Size / 1024.0, 1) } catch {} }
                             $processedItemsList.Add(@{
@@ -775,6 +780,10 @@ try {
                     try {
                         $item = $namespace.GetItemFromID($entry.EntryID, $pstStore.StoreID)
                         if ($null -ne $item) {
+                            $itemBytes = [int64]0
+                            if ($entry.Size) { try { $itemBytes = [int64]$entry.Size } catch {} }
+                            elseif ($item.Size) { try { $itemBytes = [int64]$item.Size } catch {} }
+
                             if ($config -and $config.transfer_mode -eq "Move") {
                                 $item.Move($finalDest) | Out-Null
                             } else {
@@ -785,6 +794,7 @@ try {
                                 }
                             }
                             $totalImported++
+                            $totalImportedBytes += $itemBytes
                             $pstProcessedCount++
 
                             [void]$folderSet.Add($cKey)
@@ -793,8 +803,7 @@ try {
                             }
 
                             if ($processedItemsList.Count -lt 5000) {
-                                $itemKb = 0.0
-                                if ($entry.Size) { try { $itemKb = [math]::Round([double]$entry.Size / 1024.0, 1) } catch {} }
+                                $itemKb = [math]::Round([double]$itemBytes / 1024.0, 1)
                                 $processedItemsList.Add(@{
                                     subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
                                     sender        = if ($sender) { $sender } else { "(Desconocido)" }
@@ -954,7 +963,8 @@ try {
                     if ($isDuplicate) {
                         $totalDuplicates++
                         $pstProcessedCount++
-                        if ($processedItemsList.Count -lt 5000) {
+                        if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
+                            $script:duplicateSampleCount++
                             $itemKb = 0.0
                             try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
                             $processedItemsList.Add(@{
@@ -970,12 +980,14 @@ try {
                         }
                     } else {
                         # Transferencia: Copiar (predeterminado) o Mover
-                        $itemKb = 0.0
-                        try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
+                        $itemBytes = [int64]0
+                        try { if ($item.Size) { $itemBytes = [int64]$item.Size } } catch {}
+                        $itemKb = [math]::Round([double]$itemBytes / 1024.0, 1)
 
                         if ($config -and $config.transfer_mode -eq "Move") {
                             $item.Move($finalDest) | Out-Null
                             $totalImported++
+                            $totalImportedBytes += $itemBytes
                             $pstProcessedCount++
                         } else {
                             $copy = $item.Copy()
@@ -984,6 +996,7 @@ try {
                                 try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
                             }
                             $totalImported++
+                            $totalImportedBytes += $itemBytes
                             $pstProcessedCount++
                         }
 
@@ -1129,22 +1142,24 @@ try {
 
     $finalStatus = if ($isAborted) { "aborted" } else { "completed" }
     Send-Telemetry @{
-        type       = "finished"
-        status     = $finalStatus
-        imported   = $totalImported
-        duplicates = $totalDuplicates
-        errors     = $totalErrors
+        type           = "finished"
+        status         = $finalStatus
+        imported       = $totalImported
+        imported_bytes = $totalImportedBytes
+        duplicates     = $totalDuplicates
+        errors         = $totalErrors
     }
     Log-Message "Operación finalizada con estado: $finalStatus. Total importados: $totalImported, Duplicados: $totalDuplicates, Errores: $totalErrors."
 }
 catch {
     Log-Message "Error fatal en automatización COM: $_" "ERROR"
     Send-Telemetry @{
-        type       = "finished"
-        status     = "failed"
-        imported   = $totalImported
-        duplicates = $totalDuplicates
-        errors     = ($totalErrors + 1)
+        type           = "finished"
+        status         = "failed"
+        imported       = $totalImported
+        imported_bytes = $totalImportedBytes
+        duplicates     = $totalDuplicates
+        errors         = ($totalErrors + 1)
     }
 }
 finally {
