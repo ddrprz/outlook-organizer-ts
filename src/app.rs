@@ -867,6 +867,128 @@ pub struct MailboxItem {
     pub file_path: Option<String>,
     #[serde(default)]
     pub selected: bool,
+    #[serde(default)]
+    pub used_bytes: Option<u64>,
+    #[serde(default)]
+    pub total_bytes: Option<u64>,
+    #[serde(default)]
+    pub quota_display: Option<String>,
+    #[serde(default)]
+    pub usage_percent: Option<f64>,
+}
+
+impl Default for MailboxItem {
+    fn default() -> Self {
+        Self {
+            display_name: String::new(),
+            store_type: "ExchangeOnline".to_string(),
+            size_display: "0 Bytes".to_string(),
+            file_path: None,
+            selected: false,
+            used_bytes: None,
+            total_bytes: None,
+            quota_display: None,
+            usage_percent: None,
+        }
+    }
+}
+
+impl MailboxItem {
+    /// Devuelve el porcentaje de ocupación (0.0 .. 100.0)
+    pub fn get_usage_percent(&self) -> f64 {
+        if let Some(pct) = self.usage_percent {
+            return pct.clamp(0.0, 100.0);
+        }
+        if let (Some(used), Some(total)) = (self.used_bytes, self.total_bytes)
+            && total > 0
+        {
+            return ((used as f64 / total as f64) * 100.0).clamp(0.0, 100.0);
+        }
+        if let Some(used_gb) = self.parse_size_in_gb() {
+            let total_gb = self.get_total_gb();
+            if total_gb > 0.0 {
+                return ((used_gb / total_gb) * 100.0).clamp(0.0, 100.0);
+            }
+        }
+        0.0
+    }
+
+    /// Intenta parsear el tamaño en GB desde el texto `size_display` si no hay bytes exactos
+    pub fn parse_size_in_gb(&self) -> Option<f64> {
+        let s = self.size_display.trim();
+        if s.ends_with("GB") {
+            let num = s.trim_end_matches("GB").trim().replace(',', "");
+            num.parse::<f64>().ok()
+        } else if s.ends_with("MB") {
+            let num = s.trim_end_matches("MB").trim().replace(',', "");
+            num.parse::<f64>().ok().map(|mb| mb / 1024.0)
+        } else if s.ends_with("KB") {
+            let num = s.trim_end_matches("KB").trim().replace(',', "");
+            num.parse::<f64>().ok().map(|kb| kb / (1024.0 * 1024.0))
+        } else if s.ends_with("Bytes") {
+            let num = s.trim_end_matches("Bytes").trim().replace(',', "");
+            num.parse::<f64>().ok().map(|b| b / (1024.0 * 1024.0 * 1024.0))
+        } else {
+            None
+        }
+    }
+
+    /// Tamaño usado en GB
+    pub fn get_used_gb(&self) -> f64 {
+        if let Some(used) = self.used_bytes {
+            used as f64 / (1024.0 * 1024.0 * 1024.0)
+        } else {
+            self.parse_size_in_gb().unwrap_or(0.0)
+        }
+    }
+
+    /// Cuota total en GB (50 GB estándar para Exchange/SharedMailbox si no se especifica)
+    pub fn get_total_gb(&self) -> f64 {
+        if let Some(total) = self.total_bytes
+            && total > 0
+        {
+            return total as f64 / (1024.0 * 1024.0 * 1024.0);
+        }
+        if let Some(ref q) = self.quota_display
+            && !q.trim().is_empty()
+        {
+            let s = q.trim();
+            if s.ends_with("GB") {
+                let num = s.trim_end_matches("GB").trim().replace(',', "");
+                if let Ok(val) = num.parse::<f64>() {
+                    return val;
+                }
+            }
+        }
+        50.0 // Cuota estándar M365 (50 GB)
+    }
+
+    /// Espacio libre restante en GB
+    pub fn get_free_gb(&self) -> f64 {
+        (self.get_total_gb() - self.get_used_gb()).max(0.0)
+    }
+
+    /// Cuota formateada para visualización
+    pub fn get_quota_display(&self) -> String {
+        if let Some(ref q) = self.quota_display
+            && !q.trim().is_empty()
+        {
+            return q.clone();
+        }
+        format!("{:.0} GB", self.get_total_gb())
+    }
+
+    /// Estado de salud de capacidad del buzón
+    pub fn health_status(&self) -> (&'static str, ratatui::style::Color) {
+        let pct = self.get_usage_percent();
+        if pct >= 90.0 {
+            ("Crítico", crate::ui::theme::Theme::DANGER)
+        } else if pct >= 75.0 {
+            ("Atención", crate::ui::theme::Theme::WARNING)
+        } else {
+            ("Normal", crate::ui::theme::Theme::SUCCESS)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1269,9 +1391,13 @@ pub fn default_fallback_mailboxes() -> Vec<MailboxItem> {
         MailboxItem {
             display_name: "buzon.personal@empresa.com".to_string(),
             store_type: "ExchangeOnline".to_string(),
-            size_display: "0 Bytes".to_string(),
+            size_display: "12.40 GB".to_string(),
             file_path: None,
             selected: true,
+            used_bytes: Some(13_314_398_617),
+            total_bytes: Some(53_687_091_200),
+            quota_display: Some("50 GB".to_string()),
+            usage_percent: Some(24.8),
         },
     ]
 }
@@ -1570,6 +1696,10 @@ impl AppState {
 
     pub fn selected_psts(&self) -> Vec<&PstItem> {
         self.discovered_psts.iter().filter(|p| p.selected).collect()
+    }
+
+    pub fn total_selected_psts_size_mb(&self) -> f64 {
+        self.selected_psts().iter().map(|p| p.size_mb).sum()
     }
 
     pub fn is_inspecting_selected_psts(&self) -> bool {
@@ -2183,6 +2313,7 @@ mod tests {
             size_display: "500 MB".to_string(),
             file_path: None,
             selected: true,
+            ..Default::default()
         });
 
         assert_eq!(state.selected_mailboxes().len(), 2);
@@ -2195,6 +2326,54 @@ mod tests {
         state.discovered_mailboxes[1].selected = false;
         assert_eq!(state.selected_mailboxes().len(), 0);
         assert_eq!(state.selected_mailboxes_display(), "Ninguno seleccionado");
+    }
+
+    #[test]
+    fn test_mailbox_metrics_and_storage_calculations() {
+        let item1 = MailboxItem {
+            display_name: "test1@empresa.com".to_string(),
+            store_type: "ExchangeOnline".to_string(),
+            size_display: "10.00 GB".to_string(),
+            file_path: None,
+            selected: false,
+            used_bytes: Some(10_737_418_240), // 10 GB
+            total_bytes: Some(53_687_091_200), // 50 GB
+            quota_display: Some("50 GB".to_string()),
+            usage_percent: Some(20.0),
+        };
+        assert_eq!(item1.get_usage_percent(), 20.0);
+        assert_eq!(item1.get_used_gb(), 10.0);
+        assert_eq!(item1.get_total_gb(), 50.0);
+        assert_eq!(item1.get_free_gb(), 40.0);
+        assert_eq!(item1.health_status().0, "Normal");
+
+        let item2 = MailboxItem {
+            display_name: "alerta@empresa.com".to_string(),
+            store_type: "SharedMailbox".to_string(),
+            size_display: "42.00 GB".to_string(),
+            file_path: None,
+            selected: false,
+            used_bytes: None,
+            total_bytes: None,
+            quota_display: None,
+            usage_percent: Some(84.0),
+        };
+        assert_eq!(item2.get_usage_percent(), 84.0);
+        assert_eq!(item2.health_status().0, "Atención");
+
+        let item3 = MailboxItem {
+            display_name: "critico@empresa.com".to_string(),
+            store_type: "SharedMailbox".to_string(),
+            size_display: "48.50 GB".to_string(),
+            file_path: None,
+            selected: false,
+            used_bytes: None,
+            total_bytes: None,
+            quota_display: None,
+            usage_percent: Some(97.0),
+        };
+        assert_eq!(item3.get_usage_percent(), 97.0);
+        assert_eq!(item3.health_status().0, "Crítico");
     }
 
     #[test]
