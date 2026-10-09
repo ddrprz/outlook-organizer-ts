@@ -172,47 +172,6 @@ try {
         }
     }
 
-        foreach ($obj in $targets) {
-            try {
-                $pa = $obj.PropertyAccessor
-                if ($null -eq $pa) { continue }
-
-                # 1. Comprobar exceso de almacenamiento (PR_EXCESS_STORAGE_USED = 0x340E0003, en KB)
-                try {
-                    $excessKb = [int64]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x340E0003")
-                    if ($excessKb -gt 0) {
-                        $excessBytes = [Math]::Max($excessBytes, ($excessKb * 1024))
-                        $isOverQuota = $true
-                    }
-                } catch {}
-
-                # 2. Comprobar restricción de almacenamiento (PR_STORAGE_RESTRICTION_STATE = 0x34130003)
-                # 3 = ProhibitSend, 4 = ProhibitReceive (Buzón lleno al 100%)
-                try {
-                    $state = [int]$pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x34130003")
-                    if ($state -ge 3) {
-                        $isOverQuota = $true
-                    }
-                } catch {}
-
-                # 3. Comprobar bandera de sobrecuota del servidor (PR_SVR_OVER_QUOTA = 0x340F0003)
-                try {
-                    $svrOver = $pa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x340F0003")
-                    if ($svrOver -eq $true -or [int]$svrOver -eq 1) {
-                        $isOverQuota = $true
-                    }
-                } catch {}
-            } catch {}
-        }
-
-        return @{
-            TotalBytes   = $quotaBytes
-            QuotaDisplay = $quotaDisplay
-            IsOverQuota  = $isOverQuota
-            ExcessBytes  = $excessBytes
-        }
-    }
-
     $discovered = [System.Collections.Generic.List[hashtable]]::new()
     $seenKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
