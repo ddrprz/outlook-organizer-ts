@@ -21,6 +21,7 @@ pub struct AuditReport {
     pub duplicates_skipped: u64,
     pub error_count: u64,
     pub psts_processed: Vec<String>,
+    pub storage_impact: Vec<crate::app::MailboxStorageImpact>,
 }
 
 /// Genera automáticamente la auditoría JSON según las directrices:
@@ -71,6 +72,7 @@ pub fn generate_audit_json(state: &AppState, status: &str) -> Result<Option<Path
             .filter(|p| p.selected)
             .map(|p| p.name.clone())
             .collect(),
+        storage_impact: state.get_mailbox_storage_impacts(),
     };
 
     let json_content = serde_json::to_string_pretty(&report)?;
