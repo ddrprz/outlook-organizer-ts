@@ -76,7 +76,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else if progress.is_paused {
         Span::styled(
-            " ⏸ EN PAUSA [P: Reanudar] ",
+            " ❚❚ EN PAUSA [P: Reanudar] ",
             Style::default()
                 .bg(Theme::WARNING)
                 .fg(Color::Black)
@@ -397,7 +397,7 @@ fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Theme::WARNING))
-        .title(" ⚠ Parada Segura ⚠ ");
+        .title(" ▲ Parada Segura ▲ ");
     let inner = modal_block.inner(modal_rect);
     f.render_widget(modal_block, modal_rect);
 

@@ -10,7 +10,7 @@ use crate::ui::theme::Theme;
 
 /// Renderiza el pie de página con atajos de navegación y la marca de agua corporativa
 /// fija en la esquina inferior derecha:
-///   ⏳ TIMELESS
+///   ◈ TIMELESS
 ///      SUPPORT
 pub fn render_footer(f: &mut Frame, area: Rect, shortcuts: &[(&str, &str)]) {
     // Bloque exterior del footer con bordes sutiles

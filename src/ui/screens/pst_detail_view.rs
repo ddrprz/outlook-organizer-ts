@@ -53,7 +53,7 @@ fn render_loading(
     let mut content = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("  ⏳ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("  ⧗ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(
                 "Analizando estructura interna MAPI, carpetas y métricas temporales...",
                 Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD),
@@ -94,7 +94,7 @@ fn render_error(f: &mut Frame, area: Rect, pst_name: &str, message: &str) {
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Theme::DANGER))
-        .title(format!(" ⚠ Error al Inspeccionar: {} ", pst_name));
+        .title(format!(" ▲ Error al Inspeccionar: {} ", pst_name));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -155,7 +155,7 @@ fn render_header_card(f: &mut Frame, area: Rect, detail: &PstDetail) {
     let lines = vec![
         Line::from(vec![
             Span::styled("Ruta: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled(format!("📁 {} ", detail.file_path), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("▸ {} ", detail.file_path), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(" | Peso Total: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format_size_mb(detail.size_mb), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
             Span::styled(" | Total de Correos: ", Style::default().fg(Theme::TEXT_MUTED)),
@@ -179,7 +179,7 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: 
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" 📁 Jerarquía de Carpetas (Menús Desplegables) ");
+        .title(" ◈ Jerarquía de Carpetas (Menús Desplegables) ");
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -225,11 +225,11 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: 
 
                 let indent = "   ".repeat(node.level);
                 let icon_str = if node.has_children {
-                    if node.expanded { "▼ 📁 " } else { "▶ 📁 " }
+                    if node.expanded { "▼ ▸ " } else { "▶ ▸ " }
                 } else if node.level > 0 {
-                    "└─ 📁 "
+                    "└─ ▸ "
                 } else {
-                    "📁 "
+                    "▸ "
                 };
 
                 let name_text = format!("{}{}{}", indent, icon_str, node.name);
@@ -310,7 +310,7 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
 
     if let Some(folder) = selected_folder {
         // --- CASO 1: Carpeta Seleccionada con Espacio ---
-        let block_title = format!(" 📂 Detalle de Carpeta: {} ", folder.name);
+        let block_title = format!(" ◈ Detalle de Carpeta: {} ", folder.name);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -365,7 +365,7 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-            .title(format!(" 🌐 Métricas Consolidadas del PST: {} ", detail.file_name));
+            .title(format!(" ◈ Métricas Consolidadas del PST: {} ", detail.file_name));
 
         let inner = block.inner(chunks[0]);
         f.render_widget(block, chunks[0]);

@@ -90,7 +90,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  💡 Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  ※ Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[O]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(" para modificar la ruta de destino de los nuevos archivos PST.", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
@@ -125,7 +125,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     if is_move {
         action_lines.push(Line::from(""));
         action_lines.push(Line::from(vec![
-            Span::styled("  ⚠️ ADVERTENCIA: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled("  ▲ ADVERTENCIA: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
             Span::styled("El archivo PST de origen se modificará. Asegúrate de tener una copia de respaldo antes de continuar.", Style::default().fg(Theme::WARNING)),
         ]));
     }

@@ -170,7 +170,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-        .title(" ⚡ Duplicados ");
+        .title(" ⧉ Duplicados ");
     let card2_text = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("{} ", state.progress.duplicates_skipped),
@@ -195,7 +195,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(card3_color))
-        .title(" ⚠ Errores ");
+        .title(" ▲ Errores ");
     let card3_val_color = if has_errors {
         Theme::DANGER
     } else {
@@ -220,7 +220,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" 📊 Total Analizado ");
+        .title(" ◈ Total Analizado ");
     let card4_text = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("{} ", total_analyzed),

@@ -86,7 +86,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let selected_mailboxes = state.selected_mailboxes();
     let mailbox_summary_str = if selected_mailboxes.is_empty() {
-        "Ninguno seleccionado (⚠️ Se requiere al menos uno)".to_string()
+        "Ninguno seleccionado (▲ Se requiere al menos uno)".to_string()
     } else if selected_mailboxes.len() == 1 {
         format!("{} ({})", selected_mailboxes[0].display_name, selected_mailboxes[0].store_type)
     } else {
