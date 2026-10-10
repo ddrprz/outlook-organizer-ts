@@ -42,44 +42,44 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
     };
 
     let transfer_mode_str = match state.transfer_mode {
-        TransferMode::Copy => "Copiar (No destructivo - PST original intacto)",
-        TransferMode::Move => "Mover (Transferir y remover del PST)",
+        TransferMode::Copy => "Copy (Non-destructive - original PST remains intact)",
+        TransferMode::Move => "Move (Transfer and remove from PST)",
     };
 
     let routing_str = if state.routing_enabled {
         match state.routing_granularity {
-            RoutingGranularity::Mirror => "Estructura Espejo (Idéntica al PST original)",
-            RoutingGranularity::Years => "Agrupación Temporal por Años (Bandeja / YYYY)",
-            RoutingGranularity::YearsAndMonths => "Agrupación por Años y Meses (Bandeja / YYYY / MM-Mes)",
+            RoutingGranularity::Mirror => "Mirror Structure (Identical to original PST)",
+            RoutingGranularity::Years => "Temporal Grouping by Years (Inbox / YYYY)",
+            RoutingGranularity::YearsAndMonths => "Grouping by Years and Months (Inbox / YYYY / MM-Month)",
         }
     } else {
-        "Directo (Sin enrutamiento jerárquico)"
+        "Direct (No hierarchical routing)"
     };
 
     let dedup_str = if state.deduplication_enabled {
         if state.deep_scan_enabled {
-            "Activa (Message-ID / Clave compuesta + Revisión Profunda recursiva)"
+            "Enabled (Message-ID / Composite Key + Recursive Deep Scan)"
         } else {
-            "Activa (Estándar en carpeta destino)"
+            "Enabled (Standard in destination folder)"
         }
     } else {
-        "Desactivada"
+        "Disabled"
     };
 
     let throttling_str = if state.adaptive_throttling_enabled {
-        "Activo (Protección Anti-Throttling Exchange MAPI)"
+        "Enabled (Exchange MAPI Anti-Throttling Protection)"
     } else {
-        "Desactivado (Velocidad máxima directa)"
+        "Disabled (Direct maximum speed)"
     };
 
     let profile_str = if state.use_default_profile {
-        "Perfil MAPI predeterminado de Windows / Outlook".to_string()
+        "Default Windows / Outlook MAPI profile".to_string()
     } else {
-        format!("Perfil MAPI personalizado: {}", state.custom_profile_name)
+        format!("Custom MAPI profile: {}", state.custom_profile_name)
     };
 
     let date_filter_str = if state.routing_all_years && state.routing_all_months {
-        "Historial Completo (Sin filtro de fecha)".to_string()
+        "Full History (No date filter)".to_string()
     } else {
         format!("{} | {}", state.format_years_filter_display(), state.format_months_filter_display())
     };
@@ -90,7 +90,7 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
         .filter(|p| p.selected)
         .map(|p| {
             format!(
-                r#"<tr><td><svg class="cell-svg" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> <strong>{}</strong></td><td class="muted-cell">{}</td><td>{}</td><td><span class="badge badge-success"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Procesado</span></td></tr>"#,
+                r#"<tr><td><svg class="cell-svg" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> <strong>{}</strong></td><td class="muted-cell">{}</td><td>{}</td><td><span class="badge badge-success"><svg class="badge-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Processed</span></td></tr>"#,
                 p.name, p.path, crate::ui::format::format_size_mb(p.size_mb)
             )
         })

@@ -36,21 +36,21 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" Ubicación de Búsqueda ");
+        .title(" Search Location ");
 
     let source_inner = source_block.inner(chunks[0]);
     f.render_widget(source_block, chunks[0]);
 
     let source_lines = vec![
         Line::from(vec![
-            Span::styled("Ruta actual de escaneo: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Current scan path: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format!("▸ {}", state.pst_scan_path), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" (Ruta por defecto C:\\Correo)", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" (Default path C:\\Correo)", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
         Line::from(vec![
-            Span::styled("Archivos detectados: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Detected files: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format!("{}", state.discovered_psts.len()), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled(" | Marcados para importar: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" | Selected for import: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 format!("{}", state.discovered_psts.iter().filter(|p| p.selected).count()),
                 Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
@@ -60,7 +60,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(Paragraph::new(source_lines), source_inner);
 
     // 2. Tabla de PSTs interactiva
-    let header_cells = ["Sel", "Nombre del Archivo", "Tamaño (MB)", "Ruta Completa"]
+    let header_cells = ["Sel", "File Name", "Size (MB)", "Full Path"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)));
     let header = Row::new(header_cells).height(1).bottom_margin(1);
@@ -101,7 +101,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-            .title(" Archivos PST Encontrados (Marca con Espacio los que deseas importar) "),
+            .title(" Discovered PST Files (Press Space to toggle items to import) "),
     );
 
     f.render_widget(table, chunks[1]);
@@ -124,17 +124,17 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // 4. Atajos
     let help_line = Line::from(vec![
         Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Navegar fila   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[Espacio] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Marcar/Desmarcar   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Navigate row   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[Space] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Toggle   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[D] ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Ver Detalle PST   ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("View PST Details   ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled("[E] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Explorar   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Explore   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[A/N] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Todos/Ninguno   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("All/None   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[Enter] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled("Continuar", Style::default().fg(Theme::SUCCESS)),
+        Span::styled("Continue", Style::default().fg(Theme::SUCCESS)),
     ]);
     f.render_widget(Paragraph::new(help_line).alignment(Alignment::Center), chunks[help_idx]);
 }

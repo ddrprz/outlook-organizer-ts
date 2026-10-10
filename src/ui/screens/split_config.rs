@@ -25,18 +25,18 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // 1. Guía superior
     let guide_lines = vec![
         Line::from(vec![
-            Span::styled("CONFIGURACIÓN DE PARTICIÓN Y SALIDA", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" — Define cómo se nombrarán los archivos resultantes y el destino en disco", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("PARTITION AND OUTPUT CONFIGURATION", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(" — Define how output files are named and the destination folder on disk", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
         Line::from(vec![
             Span::styled("[1/2/3] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Modo Partición  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Partition Mode  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[M] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Copiar/Mover  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Copy/Move  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[O] ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Editar Ruta Salida  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Edit Output Path  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[Enter] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled("Siguiente", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Next", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
     f.render_widget(Paragraph::new(guide_lines), chunks[0]);
@@ -50,20 +50,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Line::from(""),
         Line::from(vec![
             Span::styled(if is_year { "  (●) " } else { "  (○) " }, if is_year { Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MUTED) }),
-            Span::styled("[1] Un PST por cada año ", if is_year { Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
-            Span::styled("(ej: Archivo_2022.pst, Archivo_2023.pst) — Recomendado para archivos masivos", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[1] One PST per year ", if is_year { Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
+            Span::styled("(e.g., File_2022.pst, File_2023.pst) — Recommended for massive archives", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled(if is_year_month { "  (●) " } else { "  (○) " }, if is_year_month { Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MUTED) }),
-            Span::styled("[2] Un PST por cada año y mes ", if is_year_month { Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
-            Span::styled("(ej: Archivo_2024_01.pst, Archivo_2024_02.pst) — Ideal para segregación mensual", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[2] One PST per year and month ", if is_year_month { Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
+            Span::styled("(e.g., File_2024_01.pst, File_2024_02.pst) — Ideal for monthly segregation", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled(if is_single { "  (●) " } else { "  (○) " }, if is_single { Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MUTED) }),
-            Span::styled("[3] Un único archivo consolidado ", if is_single { Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
-            Span::styled("(ej: Archivo_filtrado.pst) — Extrae todo el rango filtrado en un solo PST", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[3] Single consolidated archive ", if is_single { Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
+            Span::styled("(e.g., File_filtered.pst) — Extracts entire filtered range into one PST", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
 
@@ -71,7 +71,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" 1. Modo de Partición ");
+        .title(" 1. Partition Mode ");
     f.render_widget(Paragraph::new(part_lines).block(part_block), chunks[1]);
 
     // 3. Carpeta de Salida
@@ -84,15 +84,15 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let dir_lines = vec![
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Carpeta de Guardado: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  Output Folder: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format!("\"{}\"", state.split.output_dir), output_dir_style),
-            Span::styled(if state.split.is_editing_output_dir { " ✎ [Escribe y pulsa Enter]" } else { "  (Por defecto: misma carpeta del archivo)" }, Style::default().fg(Theme::WARNING)),
+            Span::styled(if state.split.is_editing_output_dir { " ✎ [Type path and press Enter]" } else { "  (Default: same folder as original)" }, Style::default().fg(Theme::WARNING)),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  ※ Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  ※ Press ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[O]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" para modificar la ruta de destino de los nuevos archivos PST.", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" to modify the destination path for the new PST files.", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
 
@@ -100,7 +100,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(if state.split.is_editing_output_dir { Theme::BRAND_PRIMARY } else { Theme::BORDER_INACTIVE }))
-        .title(" 2. Ubicación de Destino ");
+        .title(" 2. Destination Location ");
     f.render_widget(Paragraph::new(dir_lines).block(dir_block), chunks[2]);
 
     // 4. Modo de Acción (Copiar vs Mover)
@@ -111,22 +111,22 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Line::from(""),
         Line::from(vec![
             Span::styled(if is_copy { "  (●) " } else { "  (○) " }, if is_copy { Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MUTED) }),
-            Span::styled("COPIAR CORREOS [Recomendado] ", if is_copy { Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
-            Span::styled("— Los correos se duplican hacia los nuevos PSTs y el archivo original permanece 100% intacto.", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("COPY EMAILS [Recommended] ", if is_copy { Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
+            Span::styled("— Emails are duplicated into new PSTs; original file remains 100% intact.", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled(if is_move { "  (●) " } else { "  (○) " }, if is_move { Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MUTED) }),
-            Span::styled("MOVER CORREOS [Destructivo / Reducción] ", if is_move { Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
-            Span::styled("— Extrae los correos y los elimina del PST original para reducir su peso en disco.", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("MOVE EMAILS [Destructive / Shrink] ", if is_move { Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD) } else { Style::default().fg(Theme::TEXT_MAIN) }),
+            Span::styled("— Extracts emails and deletes them from original PST to reduce disk size.", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
 
     if is_move {
         action_lines.push(Line::from(""));
         action_lines.push(Line::from(vec![
-            Span::styled("  ▲ ADVERTENCIA: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-            Span::styled("El archivo PST de origen se modificará. Asegúrate de tener una copia de respaldo antes de continuar.", Style::default().fg(Theme::WARNING)),
+            Span::styled("  ▲ WARNING: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled("The source PST file will be modified. Ensure you have a backup copy before continuing.", Style::default().fg(Theme::WARNING)),
         ]));
     }
 
@@ -134,6 +134,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(if is_move { Theme::WARNING } else { Theme::BORDER_INACTIVE }))
-        .title(" 3. Acción sobre el PST Original [Presiona M para alternar] ");
+        .title(" 3. Action on Source PST [Press M to toggle] ");
     f.render_widget(Paragraph::new(action_lines).block(action_block), chunks[3]);
 }

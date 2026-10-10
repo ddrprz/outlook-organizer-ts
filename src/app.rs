@@ -29,24 +29,24 @@ pub enum WizardStep {
 impl WizardStep {
     pub fn title(&self) -> &'static str {
         match self {
-            WizardStep::Welcome => "Menú Principal",
-            WizardStep::FileExplorer => "Explorador de Archivos PST",
-            WizardStep::PstSource => "Selección de Archivos PST",
-            WizardStep::Mailbox => "Selección de Buzón Destino",
-            WizardStep::FoldersMode => "Carpetas y Modo de Transferencia",
-            WizardStep::Routing => "Enrutamiento y Agrupación Temporal",
-            WizardStep::Deduplication => "Deduplicación y Revisión Profunda",
-            WizardStep::Filters => "Filtros de Fecha y Throttling",
-            WizardStep::Summary => "Resumen Pre-Vuelo y Confirmación",
-            WizardStep::Execution => "Procesando en Tiempo Real",
-            WizardStep::Completion => "Operación Finalizada y Reportes",
-            WizardStep::PstDetailView => "Detalle Analítico del Archivo PST",
-            WizardStep::SplitSelect => "Separar PST: Selección de Archivo Origen",
-            WizardStep::SplitFilter => "Separar PST: Filtro de Periodos y Carpetas",
-            WizardStep::SplitConfig => "Separar PST: Configuración de Partición y Salida",
-            WizardStep::SplitSummary => "Separar PST: Resumen Pre-Vuelo y Confirmación",
-            WizardStep::SplitExecution => "Separar PST: Procesando y Generando Archivos",
-            WizardStep::SplitCompletion => "Separar PST: Operación Finalizada",
+            WizardStep::Welcome => "Main Menu",
+            WizardStep::FileExplorer => "PST File Explorer",
+            WizardStep::PstSource => "PST Source Selection",
+            WizardStep::Mailbox => "Destination Mailbox Selection",
+            WizardStep::FoldersMode => "Folders & Transfer Mode",
+            WizardStep::Routing => "Routing & Date Organization",
+            WizardStep::Deduplication => "Deduplication & Deep Scan",
+            WizardStep::Filters => "Date Filters & Throttling",
+            WizardStep::Summary => "Pre-Flight Summary & Confirmation",
+            WizardStep::Execution => "Real-Time Processing",
+            WizardStep::Completion => "Operation Complete & Reports",
+            WizardStep::PstDetailView => "PST Analytical Details",
+            WizardStep::SplitSelect => "Split PST: Source File Selection",
+            WizardStep::SplitFilter => "Split PST: Date & Folder Filter",
+            WizardStep::SplitConfig => "Split PST: Output Configuration",
+            WizardStep::SplitSummary => "Split PST: Pre-Flight Summary",
+            WizardStep::SplitExecution => "Split PST: Processing & Splitting",
+            WizardStep::SplitCompletion => "Split PST: Operation Complete",
         }
     }
 
@@ -96,9 +96,9 @@ pub enum SplitPartitionMode {
 impl SplitPartitionMode {
     pub fn label(&self) -> &'static str {
         match self {
-            SplitPartitionMode::ByYear => "Un archivo PST por cada año (ej. Backup_2023.pst)",
-            SplitPartitionMode::ByYearMonth => "Un archivo PST por cada año y mes (ej. Backup_2024_05.pst)",
-            SplitPartitionMode::SinglePst => "Un único archivo consolidado (ej. Backup_filtrado.pst)",
+            SplitPartitionMode::ByYear => "One PST file per year (e.g. Backup_2023.pst)",
+            SplitPartitionMode::ByYearMonth => "One PST file per year & month (e.g. Backup_2024_05.pst)",
+            SplitPartitionMode::SinglePst => "Single consolidated file (e.g. Backup_filtered.pst)",
         }
     }
 }
@@ -112,8 +112,8 @@ pub enum SplitTransferMode {
 impl SplitTransferMode {
     pub fn label(&self) -> &'static str {
         match self {
-            SplitTransferMode::Copy => "Copiar correos [Recomendado] (PST original intacto)",
-            SplitTransferMode::Move => "Mover correos [Destructivo] (Reduce tamaño del PST original)",
+            SplitTransferMode::Copy => "Copy emails [Recommended] (Original PST untouched)",
+            SplitTransferMode::Move => "Move emails [Destructive] (Reduces original PST size)",
         }
     }
 }
@@ -1059,11 +1059,11 @@ impl MailboxItem {
     pub fn health_status(&self) -> (&'static str, ratatui::style::Color) {
         let pct = self.get_usage_percent();
         if pct >= 99.0 || (self.get_total_gb() > 0.0 && self.get_free_gb() <= 0.001) {
-            ("Lleno", crate::ui::theme::Theme::DANGER)
+            ("Full", crate::ui::theme::Theme::DANGER)
         } else if pct >= 90.0 {
-            ("Crítico", crate::ui::theme::Theme::DANGER)
+            ("Critical", crate::ui::theme::Theme::DANGER)
         } else if pct >= 75.0 {
-            ("Atención", crate::ui::theme::Theme::WARNING)
+            ("Warning", crate::ui::theme::Theme::WARNING)
         } else {
             ("Normal", crate::ui::theme::Theme::SUCCESS)
         }
@@ -1577,10 +1577,10 @@ impl AppState {
         if let Some(ref path) = self.pause_file {
             if self.progress.is_paused {
                 let _ = std::fs::File::create(path);
-                self.log_event("[PAUSA] Proceso puesto en pausa. Presione 'P' para reanudar.".to_string());
+                self.log_event("[PAUSE] Process paused. Press 'P' to resume.".to_string());
             } else {
                 let _ = std::fs::remove_file(path);
-                self.log_event("[REANUDAR] Proceso reanudado por el usuario.".to_string());
+                self.log_event("[RESUME] Process resumed by user.".to_string());
             }
         }
         self.progress.is_paused
@@ -1761,38 +1761,38 @@ impl AppState {
 
     pub fn format_years_filter_display(&self) -> String {
         if self.routing_all_years || self.selected_years.is_empty() {
-            "Todos los años".to_string()
+            "All years".to_string()
         } else if self.selected_years.len() == 1 {
-            format!("Año {}", self.selected_years.iter().next().unwrap())
+            format!("Year {}", self.selected_years.iter().next().unwrap())
         } else {
             let list = self.selected_years.iter().map(|y| y.to_string()).collect::<Vec<_>>().join(", ");
-            format!("Años: {}", list)
+            format!("Years: {}", list)
         }
     }
 
     pub fn format_months_filter_display(&self) -> String {
         const MONTH_NAMES_SHORT: [&str; 12] = [
-            "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-            "Jul", "Ago", "Set", "Oct", "Nov", "Dic"
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
         ];
         if self.routing_all_months || self.selected_months.is_empty() {
-            "Todos los meses".to_string()
+            "All months".to_string()
         } else if self.is_first_half_selected() {
-            "1ª Mitad (Ene - Jun / H1)".to_string()
+            "1st Half (Jan - Jun / H1)".to_string()
         } else if self.is_second_half_selected() {
-            "2ª Mitad (Jul - Dic / H2)".to_string()
+            "2nd Half (Jul - Dec / H2)".to_string()
         } else if self.selected_months.len() == 1 {
             let m = *self.selected_months.iter().next().unwrap();
-            let name = MONTH_NAMES_SHORT.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes");
-            format!("Mes {:02} ({})", m, name)
+            let name = MONTH_NAMES_SHORT.get((m as usize).saturating_sub(1)).unwrap_or(&"Month");
+            format!("Month {:02} ({})", m, name)
         } else if self.selected_months.len() <= 4 {
             let list = self.selected_months.iter()
-                .map(|&m| MONTH_NAMES_SHORT.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes").to_string())
+                .map(|&m| MONTH_NAMES_SHORT.get((m as usize).saturating_sub(1)).unwrap_or(&"Month").to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("Meses: {}", list)
+            format!("Months: {}", list)
         } else {
-            format!("{} meses seleccionados", self.selected_months.len())
+            format!("{} months selected", self.selected_months.len())
         }
     }
 
@@ -1825,11 +1825,11 @@ impl AppState {
     pub fn selected_mailboxes_display(&self) -> String {
         let selected = self.selected_mailboxes();
         if selected.is_empty() {
-            "Ninguno seleccionado".to_string()
+            "None selected".to_string()
         } else if selected.len() == 1 {
             selected[0].display_name.clone()
         } else {
-            format!("{} buzones seleccionados", selected.len())
+            format!("{} mailboxes selected", selected.len())
         }
     }
 
@@ -1948,11 +1948,11 @@ impl AppState {
                 let delta_percent = (percent_after - percent_before).max(0.0);
 
                 let health_after = if percent_after >= 99.0 || (total_gb > 0.0 && free_after_gb <= 0.001) {
-                    "Lleno".to_string()
+                    "Full".to_string()
                 } else if percent_after >= 90.0 {
-                    "Crítico".to_string()
+                    "Critical".to_string()
                 } else if percent_after >= 75.0 {
-                    "Atención".to_string()
+                    "Warning".to_string()
                 } else {
                     "Normal".to_string()
                 };
@@ -2565,7 +2565,7 @@ mod tests {
         });
 
         assert_eq!(state.selected_mailboxes().len(), 2);
-        assert_eq!(state.selected_mailboxes_display(), "2 buzones seleccionados");
+        assert_eq!(state.selected_mailboxes_display(), "2 mailboxes selected");
 
         state.discovered_mailboxes[0].selected = false;
         assert_eq!(state.selected_mailboxes().len(), 1);
@@ -2573,7 +2573,7 @@ mod tests {
 
         state.discovered_mailboxes[1].selected = false;
         assert_eq!(state.selected_mailboxes().len(), 0);
-        assert_eq!(state.selected_mailboxes_display(), "Ninguno seleccionado");
+        assert_eq!(state.selected_mailboxes_display(), "None selected");
     }
 
     #[test]
@@ -2607,7 +2607,7 @@ mod tests {
             usage_percent: Some(84.0),
         };
         assert_eq!(item2.get_usage_percent(), 84.0);
-        assert_eq!(item2.health_status().0, "Atención");
+        assert_eq!(item2.health_status().0, "Warning");
 
         let item3 = MailboxItem {
             display_name: "critico@empresa.com".to_string(),
@@ -2621,7 +2621,7 @@ mod tests {
             usage_percent: Some(97.0),
         };
         assert_eq!(item3.get_usage_percent(), 97.0);
-        assert_eq!(item3.health_status().0, "Crítico");
+        assert_eq!(item3.health_status().0, "Critical");
 
         let item_zero_quota = MailboxItem {
             display_name: "fallback@empresa.com".to_string(),
@@ -2669,7 +2669,7 @@ mod tests {
         };
         assert_eq!(item_kiosk.get_total_gb(), 2.0);
         assert_eq!(item_kiosk.get_quota_display(), "2 GB");
-        assert_eq!(item_kiosk.health_status().0, "Atención");
+        assert_eq!(item_kiosk.health_status().0, "Warning");
     }
 
     #[test]
@@ -3424,26 +3424,26 @@ mod tests {
     fn test_format_filter_display_strings() {
         let mut state = AppState::new();
 
-        // Años
-        assert_eq!(state.format_years_filter_display(), "Todos los años");
+        // Years
+        assert_eq!(state.format_years_filter_display(), "All years");
         state.toggle_year(2024);
-        assert_eq!(state.format_years_filter_display(), "Año 2024");
+        assert_eq!(state.format_years_filter_display(), "Year 2024");
         state.toggle_year(2022);
-        assert_eq!(state.format_years_filter_display(), "Años: 2022, 2024");
+        assert_eq!(state.format_years_filter_display(), "Years: 2022, 2024");
 
-        // Meses
-        assert_eq!(state.format_months_filter_display(), "Todos los meses");
+        // Months
+        assert_eq!(state.format_months_filter_display(), "All months");
         state.set_first_half_months();
-        assert_eq!(state.format_months_filter_display(), "1ª Mitad (Ene - Jun / H1)");
+        assert_eq!(state.format_months_filter_display(), "1st Half (Jan - Jun / H1)");
         state.set_second_half_months();
-        assert_eq!(state.format_months_filter_display(), "2ª Mitad (Jul - Dic / H2)");
+        assert_eq!(state.format_months_filter_display(), "2nd Half (Jul - Dec / H2)");
 
         state.set_all_months();
         state.toggle_month(5);
-        assert_eq!(state.format_months_filter_display(), "Mes 05 (May)");
+        assert_eq!(state.format_months_filter_display(), "Month 05 (May)");
 
         state.toggle_month(10);
-        assert_eq!(state.format_months_filter_display(), "Meses: May, Oct");
+        assert_eq!(state.format_months_filter_display(), "Months: May, Oct");
     }
 
     #[test]

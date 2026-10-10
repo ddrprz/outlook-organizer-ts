@@ -23,25 +23,25 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" Detección y Omisión de Duplicados ");
+        .title(" Duplicate Detection & Omission ");
 
     let dedup_inner = dedup_block.inner(chunks[0]);
     f.render_widget(dedup_block, chunks[0]);
 
     let dedup_label = if state.deduplication_enabled {
-        Span::styled("[x] OMITIR DUPLICADOS ACTIVADO — No importar correos ya existentes", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
+        Span::styled("[x] SKIP DUPLICATES ENABLED — Do not import existing emails", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled("[ ] OMITIR DUPLICADOS DESACTIVADO — Importar todo sin verificar duplicados", Style::default().fg(Theme::WARNING))
+        Span::styled("[ ] SKIP DUPLICATES DISABLED — Import all without checking duplicates", Style::default().fg(Theme::WARNING))
     };
 
     let dedup_lines = vec![
         Line::from(dedup_label),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Criterio: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("Message-ID (RFC 822) + SearchKey MAPI + Clave Compuesta", Style::default().fg(Theme::TEXT_MAIN)),
+            Span::styled("Criteria: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Message-ID (RFC 822) + MAPI SearchKey + Composite Key", Style::default().fg(Theme::TEXT_MAIN)),
         ]),
-        Line::from(Span::styled("[D] Alternar Deduplicación On/Off", Style::default().fg(Theme::ACCENT_PRIMARY))),
+        Line::from(Span::styled("[D] Toggle Deduplication On/Off", Style::default().fg(Theme::ACCENT_PRIMARY))),
     ];
     f.render_widget(Paragraph::new(dedup_lines), dedup_inner);
 
@@ -50,30 +50,30 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" Revisión Profunda (Deep Scan) ");
+        .title(" Deep Scan ");
 
     let deep_inner = deep_block.inner(chunks[1]);
     f.render_widget(deep_block, chunks[1]);
 
     let deep_label = if state.deep_scan_enabled {
-        Span::styled("[x] REVISIÓN PROFUNDA ACTIVADA (Indexa recursivamente subcarpetas)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
+        Span::styled("[x] DEEP SCAN ENABLED (Recursively indexes subfolders)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled("[ ] REVISIÓN PROFUNDA DESACTIVADA (Solo verifica carpeta destino directa)", Style::default().fg(Theme::TEXT_MUTED))
+        Span::styled("[ ] DEEP SCAN DISABLED (Only checks direct target folder)", Style::default().fg(Theme::TEXT_MUTED))
     };
 
     let deep_lines = vec![
         Line::from(deep_label),
         Line::from(""),
-        Line::from(Span::styled("Detecta correos que los usuarios hayan movido manualmente a subcarpetas.", Style::default().fg(Theme::TEXT_MUTED))),
-        Line::from(Span::styled("Más exhaustivo y seguro contra duplicados dispersos.", Style::default().fg(Theme::BRAND_PRIMARY))),
-        Line::from(Span::styled("[P] Alternar Revisión Profunda", Style::default().fg(Theme::ACCENT_PRIMARY))),
+        Line::from(Span::styled("Detects emails that users moved manually to subfolders.", Style::default().fg(Theme::TEXT_MUTED))),
+        Line::from(Span::styled("More thorough and safe against scattered duplicates.", Style::default().fg(Theme::BRAND_PRIMARY))),
+        Line::from(Span::styled("[P] Toggle Deep Scan", Style::default().fg(Theme::ACCENT_PRIMARY))),
     ];
     f.render_widget(Paragraph::new(deep_lines), deep_inner);
 
     // 3. Resumen
     let summary = Line::from(vec![
-        Span::styled("Algoritmo: ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("Comparación en memoria hash SHA-256 de alta velocidad.", Style::default().fg(Theme::TEXT_MAIN)),
+        Span::styled("Algorithm: ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("High-speed in-memory SHA-256 hash comparison.", Style::default().fg(Theme::TEXT_MAIN)),
     ]);
     f.render_widget(Paragraph::new(summary).alignment(Alignment::Center), chunks[2]);
 }

@@ -12,18 +12,18 @@ use crate::{
 };
 
 pub const MONTH_NAMES: [&str; 12] = [
-    "01 - Enero",
-    "02 - Febrero",
-    "03 - Marzo",
-    "04 - Abril",
-    "05 - Mayo",
-    "06 - Junio",
-    "07 - Julio",
-    "08 - Agosto",
-    "09 - Setiembre",
-    "10 - Octubre",
-    "11 - Noviembre",
-    "12 - Diciembre",
+    "01 - January",
+    "02 - February",
+    "03 - March",
+    "04 - April",
+    "05 - May",
+    "06 - June",
+    "07 - July",
+    "08 - August",
+    "09 - September",
+    "10 - October",
+    "11 - November",
+    "12 - December",
 ];
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
@@ -70,9 +70,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .border_type(card1_border_type)
         .border_style(card1_border_style)
         .title(if is_orig_selected {
-            " [1] Estructura Original (Nativa) "
+            " [1] Original Structure (Native) "
         } else {
-            " [1] Estructura Original "
+            " [1] Original Structure "
         });
 
     let card1_inner = card1_block.inner(card_chunks[0]);
@@ -80,7 +80,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let card1_badge = if is_orig_selected {
         Span::styled(
-            " [ ★ ACTIVA ] ",
+            " [ ★ ACTIVE ] ",
             Style::default()
                 .bg(Theme::SUCCESS)
                 .fg(Color::Black)
@@ -88,14 +88,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else {
         Span::styled(
-            " [ Tecla 1 ] ",
+            " [ Key 1 ] ",
             Style::default().fg(Theme::TEXT_MUTED),
         )
     };
 
     let card1_lines = vec![
         Line::from(vec![
-            Span::styled("◈ Nativa del PST", if is_orig_selected {
+            Span::styled("◈ PST Native", if is_orig_selected {
                 Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Theme::TEXT_MAIN)
@@ -104,7 +104,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             card1_badge,
         ]),
         Line::from(Span::styled(
-            "Mapeo directo 1:1 a carpetas homólogas",
+            "Direct 1:1 mapping to matching folders",
             if is_orig_selected {
                 Style::default().fg(Theme::TEXT_MAIN)
             } else {
@@ -112,11 +112,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             },
         )),
         Line::from(Span::styled(
-            "Conserva intacta la jerarquía del archivo PST",
+            "Preserves PST file hierarchy intact",
             Style::default().fg(Theme::TEXT_MUTED),
         )),
         Line::from(Span::styled(
-            "✓ Sin crear carpetas de año ni mes",
+            "✓ Without creating year or month folders",
             if is_orig_selected {
                 Style::default().fg(Theme::SUCCESS)
             } else {
@@ -143,9 +143,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .border_type(card2_border_type)
         .border_style(card2_border_style)
         .title(if is_years_selected {
-            " [2] Agrupar por Años "
+            " [2] Group by Year "
         } else {
-            " [2] Por Años "
+            " [2] By Year "
         });
 
     let card2_inner = card2_block.inner(card_chunks[1]);
@@ -153,7 +153,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let card2_badge = if is_years_selected {
         Span::styled(
-            " [ ★ ACTIVA ] ",
+            " [ ★ ACTIVE ] ",
             Style::default()
                 .bg(Theme::SUCCESS)
                 .fg(Color::Black)
@@ -161,14 +161,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else {
         Span::styled(
-            " [ Tecla 2 ] ",
+            " [ Key 2 ] ",
             Style::default().fg(Theme::TEXT_MUTED),
         )
     };
 
     let card2_lines = vec![
         Line::from(vec![
-            Span::styled("◷ 1 Nivel Temporal", if is_years_selected {
+            Span::styled("◷ 1 Time Level", if is_years_selected {
                 Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Theme::TEXT_MAIN)
@@ -177,7 +177,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             card2_badge,
         ]),
         Line::from(Span::styled(
-            "Estructura: [Buzón] / <Año>",
+            "Structure: [Mailbox] / <Year>",
             if is_years_selected {
                 Style::default().fg(Theme::TEXT_MAIN)
             } else {
@@ -185,11 +185,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             },
         )),
         Line::from(Span::styled(
-            "Clasifica los correos en carpetas anuales",
+            "Classifies emails into annual folders",
             Style::default().fg(Theme::TEXT_MUTED),
         )),
         Line::from(Span::styled(
-            "✓ Ej: 2023, 2024, 2025",
+            "✓ E.g.: 2023, 2024, 2025",
             if is_years_selected {
                 Style::default().fg(Theme::SUCCESS)
             } else {
@@ -216,9 +216,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .border_type(card3_border_type)
         .border_style(card3_border_style)
         .title(if is_months_selected {
-            " [3] Por Años y Meses "
+            " [3] By Year & Month "
         } else {
-            " [3] Años y Meses "
+            " [3] Year & Month "
         });
 
     let card3_inner = card3_block.inner(card_chunks[2]);
@@ -226,7 +226,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let card3_badge = if is_months_selected {
         Span::styled(
-            " [ ★ ACTIVA ] ",
+            " [ ★ ACTIVE ] ",
             Style::default()
                 .bg(Theme::SUCCESS)
                 .fg(Color::Black)
@@ -234,14 +234,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else {
         Span::styled(
-            " [ Tecla 3 ] ",
+            " [ Key 3 ] ",
             Style::default().fg(Theme::TEXT_MUTED),
         )
     };
 
     let card3_lines = vec![
         Line::from(vec![
-            Span::styled("◷ Jerarquía Completa", if is_months_selected {
+            Span::styled("◷ Full Hierarchy", if is_months_selected {
                 Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Theme::TEXT_MAIN)
@@ -250,7 +250,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             card3_badge,
         ]),
         Line::from(Span::styled(
-            "Estructura: [Buzón] / <Año> / <Mes>",
+            "Structure: [Mailbox] / <Year> / <Month>",
             if is_months_selected {
                 Style::default().fg(Theme::TEXT_MAIN)
             } else {
@@ -258,11 +258,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             },
         )),
         Line::from(Span::styled(
-            "Máxima granularidad y organización cronológica",
+            "Maximum chronological organization",
             Style::default().fg(Theme::TEXT_MUTED),
         )),
         Line::from(Span::styled(
-            "✓ Ej: 2024 / 01-Enero, 2024 / 02-Febrero",
+            "✓ E.g.: 2024 / 01-January, 2024 / 02-February",
             if is_months_selected {
                 Style::default().fg(Theme::SUCCESS)
             } else {
@@ -284,7 +284,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         } else {
             Style::default().fg(Theme::ACCENT_SECONDARY)
         })
-        .title(" Filtro de Fecha / Alcance Temporal (Opcional) ");
+        .title(" Date Filter / Time Scope (Optional) ");
 
     let filter_inner = filter_block.inner(chunks[1]);
     f.render_widget(filter_block, chunks[1]);
@@ -295,33 +295,33 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         let filter_desc = format!("{} • {}", years_desc, months_desc);
 
         vec![
-            Span::styled("  ※ Filtro Activo: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  ※ Active Filter: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                format!("Solo correos de: {} ", filter_desc),
+                format!("Only emails from: {} ", filter_desc),
                 Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD),
             ),
             Span::styled(" • ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[A]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" Años", Style::default().fg(Theme::TEXT_MAIN)),
+            Span::styled(" Years", Style::default().fg(Theme::TEXT_MAIN)),
             Span::styled("  •  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[M]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" Meses", Style::default().fg(Theme::TEXT_MAIN)),
+            Span::styled(" Months", Style::default().fg(Theme::TEXT_MAIN)),
             Span::styled("  •  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[R]", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
-            Span::styled(" Quitar Filtros (Historial Completo)", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" Clear Filters (Full History)", Style::default().fg(Theme::TEXT_MUTED)),
         ]
     } else {
         vec![
-            Span::styled("  ✓ Alcance: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  ✓ Scope: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                "Historial Completo (Sin filtro de fecha — Se importan todos los correos) ",
+                "Full History (No date filter — All emails will be imported) ",
                 Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" • Pulsa ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" • Press ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[A]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" para filtrar Años  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" to filter Years  •  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[M]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" para filtrar Meses (H1 / H2 / Selección múltiple)", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" to filter Months (H1 / H2 / Multi-select)", Style::default().fg(Theme::TEXT_MUTED)),
         ]
     };
 
@@ -332,14 +332,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // =========================================================================
     let selected_mboxes = state.selected_mailboxes();
     let mbox_names = if selected_mboxes.is_empty() {
-        "Buzón predeterminado".to_string()
+        "Default mailbox".to_string()
     } else if selected_mboxes.len() == 1 {
         selected_mboxes[0].display_name.clone()
     } else {
         selected_mboxes.iter().map(|m| m.display_name.as_str()).collect::<Vec<_>>().join(" | ")
     };
 
-    let preview_title = format!(" Vista Previa del Enrutamiento MAPI hacia: [{}] ", mbox_names);
+    let preview_title = format!(" Live MAPI Routing Preview into: [{}] ", mbox_names);
     let preview_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -353,17 +353,17 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         RoutingGranularity::Mirror => {
             let filter_hint = if has_date_filter {
                 format!(
-                    "ℹ Filtro activo: Solo correos de [{}] y [{}] serán copiados a sus carpetas nativas.",
+                    "ℹ Active filter: Only emails from [{}] and [{}] will be copied to their native folders.",
                     state.format_years_filter_display(),
                     state.format_months_filter_display()
                 )
             } else {
-                "ℹ Historial completo: todos los correos se transfieren a sus carpetas homólogas sin filtro.".to_string()
+                "ℹ Full history: all emails transferred directly to matching folders without filter.".to_string()
             };
 
             vec![
                 Line::from(Span::styled(
-                    "Conservar Estructura Original: las carpetas del PST se transfieren directamente a sus homólogas en Outlook:",
+                    "Preserve Original Structure: PST folders are transferred directly to matching folders in Outlook:",
                     Style::default().fg(Theme::TEXT_MUTED),
                 )),
                 Line::from(""),
@@ -372,16 +372,16 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     Span::styled(format!("[{}]", mbox_names), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(vec![
-                    Span::styled("      ├── ✉ Bandeja de entrada /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-                    Span::styled("──▶  Mapeo directo al buzón (sin carpetas de fecha)", Style::default().fg(Theme::TEXT_MUTED)),
+                    Span::styled("      ├── ✉ Inbox /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("──▶  Direct mapping to mailbox (no date folders)", Style::default().fg(Theme::TEXT_MUTED)),
                 ]),
                 Line::from(vec![
-                    Span::styled("      ├── ✉ Elementos enviados /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-                    Span::styled("──▶  Mapeo directo al buzón (sin carpetas de fecha)", Style::default().fg(Theme::TEXT_MUTED)),
+                    Span::styled("      ├── ✉ Sent Items /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("──▶  Direct mapping to mailbox (no date folders)", Style::default().fg(Theme::TEXT_MUTED)),
                 ]),
                 Line::from(vec![
-                    Span::styled("      └── ▸ Carpetas del PST /     ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-                    Span::styled("──▶  Conserva exactamente su nombre y contenido", Style::default().fg(Theme::TEXT_MUTED)),
+                    Span::styled("      └── ▸ PST Folders /     ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("──▶  Preserves exact folder name and content", Style::default().fg(Theme::TEXT_MUTED)),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(filter_hint, Style::default().fg(Theme::SUCCESS))),
@@ -397,9 +397,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             let mut lines = vec![
                 Line::from(Span::styled(
                     if state.routing_all_years {
-                        "Clasificación automática de todos los años hacia el buzón destino:".to_string()
+                        "Automatic organization of all years into target mailbox:".to_string()
                     } else {
-                        format!("Clasificación exclusiva para los años seleccionados [{}]:", state.format_years_filter_display())
+                        format!("Exclusive organization for selected years [{}]:", state.format_years_filter_display())
                     },
                     Style::default().fg(Theme::TEXT_MUTED),
                 )),
@@ -421,16 +421,16 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             }
             if count > 4 {
                 lines.push(Line::from(vec![
-                    Span::styled("      └── ◷ ... (y más años)     ──▶  ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-                    Span::styled(format!("[{}] / <Año>", mbox_names), Style::default().fg(Theme::TEXT_MUTED)),
+                    Span::styled("      └── ◷ ... (more years)     ──▶  ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled(format!("[{}] / <Year>", mbox_names), Style::default().fg(Theme::TEXT_MUTED)),
                 ]));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 if !state.routing_all_months {
-                    format!("✓ Filtrado por mes activo: {}", state.format_months_filter_display())
+                    format!("✓ Active month filter: {}", state.format_months_filter_display())
                 } else {
-                    "✓ Cada correo se organizará en la carpeta anual correspondiente según su fecha de recepción.".to_string()
+                    "✓ Each email will be organized into the corresponding annual folder by received date.".to_string()
                 },
                 Style::default().fg(Theme::SUCCESS),
             )));
@@ -451,7 +451,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             let mut lines = vec![
                 Line::from(Span::styled(
                     format!(
-                        "Estructura jerárquica en 2 niveles (Año / Mes) para [{}]:",
+                        "2-level hierarchical structure (Year / Month) for [{}]:",
                         state.format_years_filter_display()
                     ),
                     Style::default().fg(Theme::TEXT_MUTED),
@@ -472,7 +472,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             for (i, &m) in months_to_show.iter().take(3).enumerate() {
                 let is_last = (i == m_count - 1) || (i == 2 && m_count <= 3);
                 let branch = if is_last && m_count <= 3 { "          └── ▸ " } else { "          ├── ▸ " };
-                let m_name = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes");
+                let m_name = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Month");
                 lines.push(Line::from(vec![
                     Span::styled(format!("{}{:<14} / ──▶  ", branch, m_name), Style::default().fg(Theme::ACCENT_SECONDARY)),
                     Span::styled(format!("[{}] / {} / {}", mbox_names, sample_year, m_name), Style::default().fg(Theme::TEXT_MAIN)),
@@ -480,13 +480,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             }
             if m_count > 3 {
                 lines.push(Line::from(vec![
-                    Span::styled("          └── ▸ ... (y más meses)  ──▶  ", Style::default().fg(Theme::ACCENT_SECONDARY)),
-                    Span::styled(format!("[{}] / {} / <Mes>", mbox_names, sample_year), Style::default().fg(Theme::TEXT_MUTED)),
+                    Span::styled("          └── ▸ ... (more months)  ──▶  ", Style::default().fg(Theme::ACCENT_SECONDARY)),
+                    Span::styled(format!("[{}] / {} / <Month>", mbox_names, sample_year), Style::default().fg(Theme::TEXT_MUTED)),
                 ]));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                format!("✓ Filtro activo: {} | {}", state.format_years_filter_display(), state.format_months_filter_display()),
+                format!("✓ Active filter: {} | {}", state.format_years_filter_display(), state.format_months_filter_display()),
                 Style::default().fg(Theme::SUCCESS),
             )));
             lines
@@ -499,25 +499,25 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // =========================================================================
     let mut help_spans = vec![
         Span::styled("[1/2/3] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Elegir Criterio   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Choose Routing   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[←/→] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Alternar   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Toggle   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[A] ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-        Span::styled("Años   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Years   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[M] ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-        Span::styled("Meses   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Months   ", Style::default().fg(Theme::TEXT_MUTED)),
     ];
 
     if has_date_filter {
         help_spans.push(Span::styled("[R] ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)));
-        help_spans.push(Span::styled("Restablecer   ", Style::default().fg(Theme::TEXT_MUTED)));
+        help_spans.push(Span::styled("Reset   ", Style::default().fg(Theme::TEXT_MUTED)));
     }
 
     help_spans.extend(vec![
         Span::styled("[Enter] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled("Continuar a Deduplicación   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Continue to Deduplication   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[Esc] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Atrás", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Back", Style::default().fg(Theme::TEXT_MUTED)),
     ]);
 
     f.render_widget(Paragraph::new(Line::from(help_spans)).alignment(Alignment::Center), chunks[3]);
@@ -542,42 +542,42 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
 
     let (title, subtitle, hints) = match state.active_routing_modal {
         RoutingModal::Criterion => (
-            "--- Criterio de Enrutamiento ---".to_string(),
-            "Selecciona cómo deseas estructurar las carpetas en los buzones de destino:".to_string(),
-            "1/2/3 o ↑/↓ elegir | Enter confirmar | Esc volver".to_string(),
+            "--- Routing Criterion ---".to_string(),
+            "Choose how you want to structure folders in the destination mailbox:".to_string(),
+            "1/2/3 or ↑/↓ choose | Enter confirm | Esc back".to_string(),
         ),
         RoutingModal::YearScope => (
-            "--- Filtro de Fecha: Selección de Años ---".to_string(),
-            "Selecciona uno o más años a procesar (Detectados dinámicamente del archivo PST):".to_string(),
-            "↑/↓ Navegar | Espacio Marcar/Desmarcar | T Todos los años | Enter Confirmar | Esc Volver".to_string(),
+            "--- Date Filter: Year Selection ---".to_string(),
+            "Select one or more years to process (Dynamically detected from PST file):".to_string(),
+            "↑/↓ Navigate | Space Toggle | T All years | Enter Confirm | Esc Back".to_string(),
         ),
         RoutingModal::SpecificYear => (
-            "--- Filtro de Fecha: Año Específico ---".to_string(),
-            "Ingresa el año a procesar (ejemplo: 2024):".to_string(),
-            "0-9 escribir | Backspace borrar | Enter confirmar | Esc volver".to_string(),
+            "--- Date Filter: Specific Year ---".to_string(),
+            "Enter the year to process (example: 2024):".to_string(),
+            "0-9 type | Backspace delete | Enter confirm | Esc back".to_string(),
         ),
         RoutingModal::MonthScope => {
             let sub = if state.routing_all_years {
-                "Selecciona meses para todo el historial (Presets rápidos o selección individual):".to_string()
+                "Select months for all history (Quick presets or individual selection):".to_string()
             } else {
-                format!("Selecciona meses para los años [{}] (Presets o selección individual):", state.format_years_filter_display())
+                format!("Select months for years [{}] (Presets or individual selection):", state.format_years_filter_display())
             };
             (
-                "--- Filtro de Fecha: Selección de Meses ---".to_string(),
+                "--- Date Filter: Month Selection ---".to_string(),
                 sub,
-                "1 1ª Mitad (Ene-Jun) | 2 2ª Mitad (Jul-Dic) | T Todos | Espacio Conmutar | Enter Confirmar | Esc Volver".to_string(),
+                "1 1st Half (Jan-Jun) | 2 2nd Half (Jul-Dec) | T All | Space Toggle | Enter Confirm | Esc Back".to_string(),
             )
         }
         RoutingModal::SpecificMonth => {
             let sub = if state.routing_all_years {
-                "Seleccione el mes a procesar:".to_string()
+                "Select month to process:".to_string()
             } else {
-                format!("Seleccione el mes para [{}]:", state.format_years_filter_display())
+                format!("Select month for [{}]:", state.format_years_filter_display())
             };
             (
-                "--- Filtro de Fecha: Mes Específico ---".to_string(),
+                "--- Date Filter: Specific Month ---".to_string(),
                 sub,
-                "←/→ cambiar mes | Enter confirmar | Esc volver".to_string(),
+                "←/→ change month | Enter confirm | Esc back".to_string(),
             )
         }
         RoutingModal::None => return,
@@ -610,9 +610,9 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
 
     match state.active_routing_modal {
         RoutingModal::Criterion => {
-            let opt_mirror = "  1. Conservar Estructura Original (Nativa del PST - Sin agrupación temporal)";
-            let opt_years = "  2. Agrupado por Años (1 nivel: [Buzón] / <Año>)";
-            let opt_months = "  3. Agrupado por Años y Meses (Jerárquico: [Buzón] / <Año> / <Mes>)";
+            let opt_mirror = "  1. Preserve Original Structure (Native PST - No time grouping)";
+            let opt_years = "  2. Group by Year (1 level: [Mailbox] / <Year>)";
+            let opt_months = "  3. Group by Year & Month (Hierarchical: [Mailbox] / <Year> / <Month>)";
 
             let line_mirror = if state.routing_modal_criterion_idx == 0 {
                 Line::from(Span::styled(
@@ -656,7 +656,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             let is_all_sel = state.routing_all_years;
             let prefix_all = if is_all_sel { "[✓]" } else { "[ ]" };
             let is_cursor_0 = state.routing_modal_year_cursor == 0;
-            let label_all = format!(" {} Todos los años (Historial completo del PST)", prefix_all);
+            let label_all = format!(" {} All years (Full PST history)", prefix_all);
             lines.push(if is_cursor_0 {
                 Line::from(vec![
                     Span::styled(" ▶ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -684,12 +684,12 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
                     }
                 }
                 let count_str = if total_items_year > 0 {
-                    format!(" (~{} correos)", total_items_year)
+                    format!(" (~{} emails)", total_items_year)
                 } else {
                     String::new()
                 };
 
-                let item_text = format!(" {} Año {}{}", prefix, y, count_str);
+                let item_text = format!(" {} Year {}{}", prefix, y, count_str);
                 lines.push(if is_cursor {
                     Line::from(vec![
                         Span::styled(" ▶ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -711,7 +711,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-                .title(" Año a procesar (4 dígitos) ");
+                .title(" Year to process (4 digits) ");
 
             let year_text = format!("  {} █", state.routing_input_year);
             let input_p = Paragraph::new(Line::from(Span::styled(
@@ -729,7 +729,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             let is_all_sel = state.routing_all_months;
             let is_cursor_0 = state.routing_modal_month_cursor == 0;
             let prefix_all = if is_all_sel { "[✓]" } else { "[ ]" };
-            let label_all = format!(" {} [T] Todos los meses (Historial completo)", prefix_all);
+            let label_all = format!(" {} [T] All months (Full history)", prefix_all);
             lines.push(if is_cursor_0 {
                 Line::from(vec![
                     Span::styled(" ▶ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -746,7 +746,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             let is_h1 = state.is_first_half_selected();
             let is_cursor_1 = state.routing_modal_month_cursor == 1;
             let prefix_h1 = if is_h1 { "[✓]" } else { "[ ]" };
-            let label_h1 = format!(" {} [1] Primera mitad del año (01 - Enero a 06 - Junio / H1)", prefix_h1);
+            let label_h1 = format!(" {} [1] First half of year (01 - January to 06 - June / H1)", prefix_h1);
             lines.push(if is_cursor_1 {
                 Line::from(vec![
                     Span::styled(" ▶ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -763,7 +763,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             let is_h2 = state.is_second_half_selected();
             let is_cursor_2 = state.routing_modal_month_cursor == 2;
             let prefix_h2 = if is_h2 { "[✓]" } else { "[ ]" };
-            let label_h2 = format!(" {} [2] Segunda mitad del año (07 - Julio a 12 - Diciembre / H2)", prefix_h2);
+            let label_h2 = format!(" {} [2] Second half of year (07 - July to 12 - December / H2)", prefix_h2);
             lines.push(if is_cursor_2 {
                 Line::from(vec![
                     Span::styled(" ▶ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
@@ -777,7 +777,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             });
 
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled("  ── Meses disponibles en el PST (Selección múltiple personalizada) ──", Style::default().fg(Theme::TEXT_MUTED))));
+            lines.push(Line::from(Span::styled("  ── Available months in PST (Custom multi-selection) ──", Style::default().fg(Theme::TEXT_MUTED))));
 
             // Opciones 3..=N: Meses dinámicos
             for (idx, &m) in available_months.iter().enumerate() {
@@ -785,7 +785,7 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
                 let is_cursor = state.routing_modal_month_cursor == item_idx;
                 let is_checked = !state.routing_all_months && state.selected_months.contains(&m);
                 let prefix = if is_checked { "[✓]" } else { "[ ]" };
-                let m_name = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes");
+                let m_name = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Month");
 
                 let item_text = format!(" {} {}", prefix, m_name);
                 lines.push(if is_cursor {
@@ -805,9 +805,9 @@ fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
             f.render_widget(opts_p, chunks[2]);
         }
         RoutingModal::SpecificMonth => {
-            let month_name = MONTH_NAMES.get((state.routing_input_month as usize).saturating_sub(1)).unwrap_or(&"01 - Enero");
+            let month_name = MONTH_NAMES.get((state.routing_input_month as usize).saturating_sub(1)).unwrap_or(&"01 - January");
             let year_label = state.format_years_filter_display();
-            let sel_text = format!("  Años: {}  |  Mes seleccionado: [◀ {} ▶]", year_label, month_name);
+            let sel_text = format!("  Years: {}  |  Selected month: [◀ {} ▶]", year_label, month_name);
             let month_p = Paragraph::new(vec![
                 Line::from(""),
                 Line::from(Span::styled(

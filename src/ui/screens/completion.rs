@@ -29,10 +29,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // =========================================================================
     let (status_title, status_border_color, status_badge) = if is_cancelled {
         (
-            " ◈ Operación Interrumpida ◈ ",
+            " ◈ Operation Cancelled ◈ ",
             Theme::WARNING,
             Span::styled(
-                " ■ CANCELADO POR EL USUARIO ",
+                " ■ CANCELLED BY USER ",
                 Style::default()
                     .bg(Theme::WARNING)
                     .fg(Color::Black)
@@ -41,10 +41,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else if has_errors {
         (
-            " ◈ Operación Finalizada con Advertencias ◈ ",
+            " ◈ Operation Completed with Warnings ◈ ",
             Theme::WARNING,
             Span::styled(
-                " ▲ FINALIZADO CON INCIDENCIAS ",
+                " ▲ COMPLETED WITH ISSUES ",
                 Style::default()
                     .bg(Theme::WARNING)
                     .fg(Color::Black)
@@ -53,10 +53,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else {
         (
-            " ◈ Operación Finalizada con Éxito ◈ ",
+            " ◈ Operation Completed Successfully ◈ ",
             Theme::SUCCESS,
             Span::styled(
-                " ● COMPLETADO EXITOSAMENTE ",
+                " ● SUCCESSFULLY COMPLETED ",
                 Style::default()
                     .bg(Theme::SUCCESS)
                     .fg(Color::Black)
@@ -87,7 +87,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // Context ribbon
     let selected_mboxes = state.selected_mailboxes();
     let mbox_names = if selected_mboxes.is_empty() {
-        "Buzón predeterminado".to_string()
+        "Default mailbox".to_string()
     } else if selected_mboxes.len() == 1 {
         selected_mboxes[0].display_name.clone()
     } else {
@@ -99,8 +99,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let mode_text = match state.transfer_mode {
-        TransferMode::Copy => "Modo: Copiar (Intacto)",
-        TransferMode::Move => "Modo: Mover (Transaccional)",
+        TransferMode::Copy => "Mode: Copy (Intact)",
+        TransferMode::Move => "Mode: Move (Transactional)",
     };
     let mode_color = match state.transfer_mode {
         TransferMode::Copy => Theme::SUCCESS,
@@ -112,7 +112,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let ribbon_line = Line::from(vec![
         status_badge,
         Span::raw("  "),
-        Span::styled("Destino: ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Target: ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(
             mbox_names.clone(),
             Style::default()
@@ -126,7 +126,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ),
         Span::styled("  •  ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(
-            format!("PSTs: {} archivo(s)", selected_psts_count),
+            format!("PSTs: {} file(s)", selected_psts_count),
             Style::default().fg(Theme::BRAND_PRIMARY),
         ),
     ]);
@@ -150,7 +150,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::SUCCESS))
-        .title(" ✓ Importados ");
+        .title(" ✓ Imported ");
     let card1_text = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("{} ", state.progress.imported_count),
@@ -158,7 +158,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 .fg(Theme::SUCCESS)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("correos", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("emails", Style::default().fg(Theme::TEXT_MUTED)),
     ]))
     .alignment(Alignment::Center);
     let card1_inner = card1_block.inner(kpi_chunks[0]);
@@ -170,7 +170,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-        .title(" ⧉ Duplicados ");
+        .title(" ⧉ Duplicates ");
     let card2_text = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("{} ", state.progress.duplicates_skipped),
@@ -178,7 +178,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 .fg(Theme::BRAND_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("omitidos", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("skipped", Style::default().fg(Theme::TEXT_MUTED)),
     ]))
     .alignment(Alignment::Center);
     let card2_inner = card2_block.inner(kpi_chunks[1]);
@@ -195,7 +195,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(card3_color))
-        .title(" ▲ Errores ");
+        .title(" ▲ Errors ");
     let card3_val_color = if has_errors {
         Theme::DANGER
     } else {
@@ -208,7 +208,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 .fg(card3_val_color)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("incidencias", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("issues", Style::default().fg(Theme::TEXT_MUTED)),
     ]))
     .alignment(Alignment::Center);
     let card3_inner = card3_block.inner(kpi_chunks[2]);
@@ -220,7 +220,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" ◈ Total Analizado ");
+        .title(" ◈ Total Analyzed ");
     let card4_text = Paragraph::new(Line::from(vec![
         Span::styled(
             format!("{} ", total_analyzed),
@@ -228,7 +228,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 .fg(Theme::TEXT_MAIN)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("mensajes", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("messages", Style::default().fg(Theme::TEXT_MUTED)),
     ]))
     .alignment(Alignment::Center);
     let card4_inner = card4_block.inner(kpi_chunks[3]);
@@ -261,7 +261,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" ◈ Informes y Documentación de Auditoría ◈ ");
+        .title(" ◈ Audit Reports & Documentation ◈ ");
     let reports_inner = reports_block.inner(reports_area);
     f.render_widget(reports_block, reports_area);
 
@@ -269,20 +269,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     // 2.1 Informe HTML
     report_lines.push(Line::from(vec![Span::styled(
-        "◆ Informe Visual Interactivo HTML",
+        "◆ Interactive Visual HTML Report",
         Style::default()
             .fg(Theme::BRAND_PRIMARY)
             .add_modifier(Modifier::BOLD),
     )]));
     report_lines.push(Line::from(vec![Span::styled(
-        "  Dashboard con búsqueda de correos, filtros dinámicos y desglose de carpetas.",
+        "  Dashboard with email search, dynamic filters, and folder breakdown.",
         Style::default().fg(Theme::TEXT_MUTED),
     )]));
 
     if let Some(ref path) = state.html_report_path {
         report_lines.push(Line::from(vec![
             Span::styled(
-                "  ✓ Archivo: ",
+                "  ✓ File: ",
                 Style::default()
                     .fg(Theme::SUCCESS)
                     .add_modifier(Modifier::BOLD),
@@ -300,12 +300,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Abrir Informe en el Navegador Web",
+                "Open Report in Web Browser",
                 Style::default()
                     .fg(Theme::TEXT_MAIN)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" (Recomendado)", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" (Recommended)", Style::default().fg(Theme::TEXT_MUTED)),
         ]));
         report_lines.push(Line::from(vec![
             Span::styled(
@@ -315,15 +315,15 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Regenerar y volver a abrir informe interactivo",
+                "Regenerate and reopen interactive report",
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
         ]));
     } else {
         report_lines.push(Line::from(vec![
-            Span::styled("  • Estado: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  • Status: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                "Listo para generar y visualizar",
+                "Ready to generate and view",
                 Style::default().fg(Theme::TEXT_MAIN),
             ),
         ]));
@@ -335,7 +335,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "Generar y Abrir Informe HTML Interactivo",
+                "Generate & Open Interactive HTML Report",
                 Style::default()
                     .fg(Theme::TEXT_MAIN)
                     .add_modifier(Modifier::BOLD),
@@ -345,22 +345,22 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     report_lines.push(Line::from(""));
 
-    // 2.2 Auditoría Corporativa JSON (Sin textos de borrador!)
+    // 2.2 Auditoría Corporativa JSON
     report_lines.push(Line::from(vec![Span::styled(
-        "◆ Registro de Auditoría y Trazabilidad (JSON)",
+        "◆ Audit & Traceability Log (JSON)",
         Style::default()
             .fg(Theme::TEXT_MAIN)
             .add_modifier(Modifier::BOLD),
     )]));
     report_lines.push(Line::from(vec![Span::styled(
-        "  Trazabilidad técnica para cumplimiento normativo y control de cambios.",
+        "  Technical traceability for regulatory compliance and change control.",
         Style::default().fg(Theme::TEXT_MUTED),
     )]));
 
     if let Some(ref path) = state.json_audit_path {
         report_lines.push(Line::from(vec![
             Span::styled(
-                "  ✓ Archivo: ",
+                "  ✓ File: ",
                 Style::default()
                     .fg(Theme::SUCCESS)
                     .add_modifier(Modifier::BOLD),
@@ -372,7 +372,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ]));
     } else {
         report_lines.push(Line::from(vec![Span::styled(
-            "  ✓ Registro técnico archivado en el directorio de auditoría corporativa.",
+            "  ✓ Technical log archived in corporate audit directory.",
             Style::default().fg(Theme::TEXT_MUTED),
         )]));
     }
@@ -384,7 +384,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" ◈ Parámetros Ejecutados ◈ ");
+        .title(" ◈ Execution Parameters ◈ ");
     let params_inner = params_block.inner(params_area);
     f.render_widget(params_block, params_area);
 
@@ -396,66 +396,66 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .sum();
 
     let routing_str = match state.routing_granularity {
-        RoutingGranularity::Mirror => "Estructura Nativa Espejo",
-        RoutingGranularity::Years => "Agrupación por Años",
-        RoutingGranularity::YearsAndMonths => "Agrupación por Años y Meses",
+        RoutingGranularity::Mirror => "Native Mirror Structure",
+        RoutingGranularity::Years => "Group by Year",
+        RoutingGranularity::YearsAndMonths => "Group by Year & Month",
     };
 
     let profile_name = if state.use_default_profile {
-        "Predeterminado de Windows".to_string()
+        "Windows Default".to_string()
     } else {
-        format!("Personalizado ({})", state.custom_profile_name)
+        format!("Custom ({})", state.custom_profile_name)
     };
 
     let params_lines = vec![
         Line::from(vec![
             Span::styled(
-                "• Perfil Outlook:    ",
+                "• Outlook Profile:   ",
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(profile_name, Style::default().fg(Theme::TEXT_MAIN)),
         ]),
         Line::from(vec![
             Span::styled(
-                "• Archivos PST:      ",
+                "• PST Files:         ",
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(
-                format!("{} archivo(s) ({})", selected_psts_count, format_size_mb(total_size_mb)),
+                format!("{} file(s) ({})", selected_psts_count, format_size_mb(total_size_mb)),
                 Style::default().fg(Theme::BRAND_PRIMARY),
             ),
         ]),
         Line::from(vec![
             Span::styled(
-                "• Buzón Destino:     ",
+                "• Target Mailbox:    ",
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(mbox_names, Style::default().fg(Theme::TEXT_MAIN)),
         ]),
         Line::from(vec![
             Span::styled(
-                "• Transferencia:     ",
+                "• Transfer:          ",
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(mode_text, Style::default().fg(mode_color)),
         ]),
         Line::from(vec![
             Span::styled(
-                "• Estructura:        ",
+                "• Structure:         ",
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(routing_str, Style::default().fg(Theme::ACCENT_PRIMARY)),
         ]),
         Line::from(vec![
             Span::styled(
-                "• Deduplicación:     ",
+                "• Deduplication:     ",
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(
                 if state.deep_scan_enabled {
-                    "Revisión Profunda MAPI"
+                    "MAPI Deep Scan"
                 } else {
-                    "Detección Estándar"
+                    "Standard Detection"
                 },
                 Style::default().fg(Theme::TEXT_MAIN),
             ),
@@ -467,9 +467,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ),
             Span::styled(
                 if state.adaptive_throttling_enabled {
-                    "Adaptativo Activo"
+                    "Adaptive Active"
                 } else {
-                    "Desactivado"
+                    "Disabled"
                 },
                 Style::default().fg(if state.adaptive_throttling_enabled {
                     Theme::SUCCESS
@@ -486,14 +486,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // 3. PIE DE PANTALLA: CIERRE E INSTRUCCIONES
     // =========================================================================
     let exit_line = Line::from(vec![
-        Span::styled("Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Press ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(
             "[Enter]",
             Style::default()
                 .fg(Theme::BRAND_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" o ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled(" or ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(
             "[Q]",
             Style::default()
@@ -501,7 +501,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            " para cerrar la aplicación y volver a la terminal.",
+            " to close the application and return to terminal.",
             Style::default().fg(Theme::TEXT_MUTED),
         ),
     ]);
