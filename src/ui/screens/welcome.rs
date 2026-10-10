@@ -107,7 +107,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Span::styled("  ", Style::default()),
         Span::styled("[ ◈ Cero Riesgo de Corrupción ]", Style::default().fg(Theme::BRAND_PRIMARY)),
         Span::styled("  ", Style::default()),
-        Span::styled("[ ⚡ Throttling M365 ]", Style::default().fg(Theme::WARNING)),
+        Span::styled("[ ◈ Throttling M365 ]", Style::default().fg(Theme::WARNING)),
         Span::styled("  ", Style::default()),
         Span::styled(profile_badge_text, profile_badge_style),
     ]);
@@ -216,7 +216,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             )),
             Line::from(""),
             Line::from(vec![
-                Span::styled("💡 Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("※ Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
                 Span::styled("Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(" o ", Style::default().fg(Theme::TEXT_MUTED)),
@@ -237,7 +237,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Line::from(Span::styled(current_menu.2, Style::default().fg(Theme::TEXT_MUTED))),
             Line::from(""),
             Line::from(vec![
-                Span::styled("💡 Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("※ Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
                 Span::styled("Presiona ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(" para ejecutar o ", Style::default().fg(Theme::TEXT_MUTED)),

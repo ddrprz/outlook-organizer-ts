@@ -131,7 +131,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("Perfil MAPI en uso: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(profile_desc, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             if state.is_loading_mailboxes {
-                Span::styled("   [⏳ Consultando Outlook y cuotas...]", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))
+                Span::styled("   [⧗ Consultando Outlook y cuotas...]", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))
             } else {
                 Span::styled("   [✓ Conexión establecida]", Style::default().fg(Theme::SUCCESS))
             },
@@ -149,7 +149,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .title(" Buzones de Destino ");
         let loading_p = Paragraph::new(vec![
             Line::from(""),
-            Line::from(Span::styled("⏳ Conectando con Microsoft Outlook y calculando cuotas...", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("⧗ Conectando con Microsoft Outlook y calculando cuotas...", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))),
             Line::from(Span::styled("Por favor espere un momento mientras se leen los almacenes MAPI y niveles de ocupación.", Style::default().fg(Theme::TEXT_MUTED))),
         ])
         .alignment(Alignment::Center)
@@ -283,7 +283,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             let total_pst_gb = total_pst_mb / 1024.0;
             let line3 = if free_gb <= 0.001 || item.get_usage_percent() >= 99.0 {
                 Line::from(vec![
-                    Span::styled("⛔ BUZÓN LLENO / SIN ESPACIO: ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
+                    Span::styled("■ BUZÓN LLENO / SIN ESPACIO: ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
                     Span::styled(
                         "El buzón alcanzó el límite máximo de almacenamiento (0.00 GB libres). No es posible transferir correos adicionales.",
                         Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD),
@@ -292,7 +292,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             } else if total_pst_mb > 0.0 {
                 if total_pst_gb > free_gb {
                     Line::from(vec![
-                        Span::styled("⚠️ ALERTA DE CUOTA: ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
+                        Span::styled("▲ ALERTA DE CUOTA: ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
                         Span::styled(
                             format!(
                                 "Los PSTs seleccionados ({:.2} GB) exceden el espacio libre restante ({:.2} GB). Riesgo inminente de rebose.",
@@ -352,7 +352,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     if has_warning {
         if let Some(ref notice) = state.mailbox_warning_notice {
             let warn_p = Paragraph::new(Line::from(vec![
-                Span::styled("⚠️  ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("▲  ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
                 Span::styled(notice.as_str(), Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
             ]))
             .alignment(Alignment::Center);

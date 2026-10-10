@@ -65,7 +65,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 let status_str = if has_cache {
                     "✓ Analizado"
                 } else if state.inspecting_psts.contains(&pst.path) {
-                    "⏳ Analizando..."
+                    "⧗ Analizando..."
                 } else {
                     "Listo para particionar"
                 };
@@ -196,7 +196,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("  ⚡ ", Style::default().fg(Theme::WARNING)),
+                Span::styled("  ⧗ ", Style::default().fg(Theme::BRAND_PRIMARY)),
                 Span::styled(folder_info, Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(""),
@@ -210,7 +210,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .borders(Borders::ALL)
             .border_type(BorderType::Double)
             .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-            .title(" ⚡ Escaneando Estructura y Periodos del Archivo PST ");
+            .title(" ◈ Escaneando Estructura y Periodos del Archivo PST ");
         f.render_widget(Paragraph::new(modal_lines).block(modal_block), popup_area);
     }
 }

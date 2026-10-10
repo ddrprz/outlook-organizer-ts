@@ -44,7 +44,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let source_lines = vec![
         Line::from(vec![
             Span::styled("Ruta actual de escaneo: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled(format!("📁 {}", state.pst_scan_path), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("▸ {}", state.pst_scan_path), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(" (Ruta por defecto C:\\Correo)", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
         Line::from(vec![
@@ -110,7 +110,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let help_idx = if has_warning {
         if let Some(ref notice) = state.pst_warning_notice {
             let warn_p = Paragraph::new(Line::from(vec![
-                Span::styled("⚠️  ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("▲  ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
                 Span::styled(notice.as_str(), Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
             ]))
             .alignment(Alignment::Center);

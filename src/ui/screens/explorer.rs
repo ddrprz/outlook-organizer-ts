@@ -31,7 +31,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     if let Some(ref notice) = explorer.warning_notice {
         top_lines.push(Line::from(vec![
-            Span::styled(" ⚠ AVISO: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(" ▲ AVISO: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
             Span::styled(notice.as_str(), Style::default().fg(Theme::WARNING)),
         ]));
     }
@@ -87,14 +87,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 "-".to_string(),
             ),
             ExplorerItemType::Drive => (
-                "💾",
+                "▤",
                 "[DISCO]",
                 Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
                 "   ",
                 "-".to_string(),
             ),
             ExplorerItemType::Directory => (
-                "📁",
+                "▸",
                 "[DIR]  ",
                 Style::default().fg(Theme::WARNING),
                 "   ",

@@ -95,7 +95,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let card1_lines = vec![
         Line::from(vec![
-            Span::styled("📁 Nativa del PST", if is_orig_selected {
+            Span::styled("◈ Nativa del PST", if is_orig_selected {
                 Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Theme::TEXT_MAIN)
@@ -168,7 +168,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let card2_lines = vec![
         Line::from(vec![
-            Span::styled("📅 1 Nivel Temporal", if is_years_selected {
+            Span::styled("◷ 1 Nivel Temporal", if is_years_selected {
                 Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Theme::TEXT_MAIN)
@@ -241,7 +241,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let card3_lines = vec![
         Line::from(vec![
-            Span::styled("📅 Jerarquía Completa", if is_months_selected {
+            Span::styled("◷ Jerarquía Completa", if is_months_selected {
                 Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Theme::TEXT_MAIN)
@@ -295,7 +295,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         let filter_desc = format!("{} • {}", years_desc, months_desc);
 
         vec![
-            Span::styled("  🔍 Filtro Activo: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  ※ Filtro Activo: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 format!("Solo correos de: {} ", filter_desc),
                 Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD),
@@ -368,19 +368,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 )),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("  📁 ", Style::default().fg(Theme::BRAND_PRIMARY)),
+                    Span::styled("  ◈ ", Style::default().fg(Theme::BRAND_PRIMARY)),
                     Span::styled(format!("[{}]", mbox_names), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(vec![
-                    Span::styled("      ├── 📥 Bandeja de entrada /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("      ├── ✉ Bandeja de entrada /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
                     Span::styled("──▶  Mapeo directo al buzón (sin carpetas de fecha)", Style::default().fg(Theme::TEXT_MUTED)),
                 ]),
                 Line::from(vec![
-                    Span::styled("      ├── 📤 Elementos enviados /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("      ├── ✉ Elementos enviados /   ", Style::default().fg(Theme::ACCENT_PRIMARY)),
                     Span::styled("──▶  Mapeo directo al buzón (sin carpetas de fecha)", Style::default().fg(Theme::TEXT_MUTED)),
                 ]),
                 Line::from(vec![
-                    Span::styled("      └── 📂 Carpetas del PST /     ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("      └── ▸ Carpetas del PST /     ", Style::default().fg(Theme::ACCENT_PRIMARY)),
                     Span::styled("──▶  Conserva exactamente su nombre y contenido", Style::default().fg(Theme::TEXT_MUTED)),
                 ]),
                 Line::from(""),
@@ -405,7 +405,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 )),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("  📁 ", Style::default().fg(Theme::BRAND_PRIMARY)),
+                    Span::styled("  ◈ ", Style::default().fg(Theme::BRAND_PRIMARY)),
                     Span::styled(format!("[{}]", mbox_names), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 ]),
             ];
@@ -413,7 +413,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             let count = years_to_show.len();
             for (i, y) in years_to_show.iter().take(4).enumerate() {
                 let is_last = (i == count - 1) || (i == 3 && count <= 4);
-                let branch = if is_last && count <= 4 { "      └── 📅 " } else { "      ├── 📅 " };
+                let branch = if is_last && count <= 4 { "      └── ◷ " } else { "      ├── ◷ " };
                 lines.push(Line::from(vec![
                     Span::styled(format!("{}{:<5} /              ──▶  ", branch, y), Style::default().fg(Theme::ACCENT_PRIMARY)),
                     Span::styled(format!("[{}] / {}", mbox_names, y), Style::default().fg(Theme::TEXT_MAIN)),
@@ -421,7 +421,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             }
             if count > 4 {
                 lines.push(Line::from(vec![
-                    Span::styled("      └── 📅 ... (y más años)     ──▶  ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+                    Span::styled("      └── ◷ ... (y más años)     ──▶  ", Style::default().fg(Theme::ACCENT_PRIMARY)),
                     Span::styled(format!("[{}] / <Año>", mbox_names), Style::default().fg(Theme::TEXT_MUTED)),
                 ]));
             }
@@ -458,20 +458,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 )),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("  📁 ", Style::default().fg(Theme::BRAND_PRIMARY)),
+                    Span::styled("  ◈ ", Style::default().fg(Theme::BRAND_PRIMARY)),
                     Span::styled(format!("[{}]", mbox_names), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 ]),
             ];
 
             let sample_year = years_to_show.first().copied().unwrap_or(2024);
             lines.push(Line::from(vec![
-                Span::styled(format!("      └── 📅 {} /", sample_year), Style::default().fg(Theme::ACCENT_PRIMARY)),
+                Span::styled(format!("      └── ◷ {} /", sample_year), Style::default().fg(Theme::ACCENT_PRIMARY)),
             ]));
 
             let m_count = months_to_show.len();
             for (i, &m) in months_to_show.iter().take(3).enumerate() {
                 let is_last = (i == m_count - 1) || (i == 2 && m_count <= 3);
-                let branch = if is_last && m_count <= 3 { "          └── 📂 " } else { "          ├── 📂 " };
+                let branch = if is_last && m_count <= 3 { "          └── ▸ " } else { "          ├── ▸ " };
                 let m_name = MONTH_NAMES.get((m as usize).saturating_sub(1)).unwrap_or(&"Mes");
                 lines.push(Line::from(vec![
                     Span::styled(format!("{}{:<14} / ──▶  ", branch, m_name), Style::default().fg(Theme::ACCENT_SECONDARY)),
@@ -480,7 +480,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             }
             if m_count > 3 {
                 lines.push(Line::from(vec![
-                    Span::styled("          └── 📂 ... (y más meses)  ──▶  ", Style::default().fg(Theme::ACCENT_SECONDARY)),
+                    Span::styled("          └── ▸ ... (y más meses)  ──▶  ", Style::default().fg(Theme::ACCENT_SECONDARY)),
                     Span::styled(format!("[{}] / {} / <Mes>", mbox_names, sample_year), Style::default().fg(Theme::TEXT_MUTED)),
                 ]));
             }

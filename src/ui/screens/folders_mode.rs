@@ -34,7 +34,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         let loading_lines = vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("  ⏳ Obteniendo carpetas internas del archivo PST...", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("  ⧗ Obteniendo carpetas internas del archivo PST...", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
             Line::from(vec![
@@ -104,7 +104,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     let right_cols_len = 7 + 3 + 10; // 20 caracteres
 
                     // Estimación de ancho visual izquierdo:
-                    // indent (level * 3) + cb (6) + icon 📁 (2 visible cols + 1 space = 3) + name_with_indicator
+                    // indent (level * 3) + cb (6) + icon ▸ (2 visible cols + 1 space = 3) + name_with_indicator
                     let left_vis_len = (node.level * 3) + 6 + 3 + name_with_indicator.chars().count();
                     let padding = content_width.saturating_sub(left_vis_len + right_cols_len);
                     let pad_str = " ".repeat(padding.max(2));
@@ -118,7 +118,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     let line = Line::from(vec![
                         Span::raw(indent_str),
                         cb_span,
-                        Span::raw("📁 "),
+                        Span::raw("▸ "),
                         Span::styled(name_with_indicator, name_style),
                         Span::raw(pad_str),
                         Span::styled(right_count, Style::default().fg(if is_focused { Theme::TEXT_MAIN } else { Theme::TEXT_MUTED })),
@@ -184,7 +184,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let warning_note = if state.transfer_mode == TransferMode::Move {
         vec![
             Line::from(""),
-            Line::from(Span::styled("ℹ️ ADVERTENCIA:", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("▲ ADVERTENCIA:", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))),
             Line::from(Span::styled("Esta opción transferirá los correos al buzón destino", Style::default().fg(Theme::TEXT_MAIN))),
             Line::from(Span::styled("y los eliminará del archivo PST tras confirmar su guardado seguro.", Style::default().fg(Theme::TEXT_MAIN))),
             Line::from(""),

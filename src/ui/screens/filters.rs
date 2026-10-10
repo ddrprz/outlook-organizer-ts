@@ -66,7 +66,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     // 3. Recomendación
     let rec = Line::from(vec![
-        Span::styled("⚡ M365 Best Practice: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+        Span::styled("◈ M365 Best Practice: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
         Span::styled("Mantener el Throttling activo previene desconexiones del tenant.", Style::default().fg(Theme::TEXT_MAIN)),
     ]);
     f.render_widget(Paragraph::new(rec).alignment(Alignment::Center), chunks[2]);
