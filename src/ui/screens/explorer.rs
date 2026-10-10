@@ -31,19 +31,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     if let Some(ref notice) = explorer.warning_notice {
         top_lines.push(Line::from(vec![
-            Span::styled(" ▲ AVISO: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(" ▲ NOTICE: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
             Span::styled(notice.as_str(), Style::default().fg(Theme::WARNING)),
         ]));
     }
 
     let current_path_str = if explorer.is_drives_view {
-        "Selección de Unidades de Disco".to_string()
+        "Drive Selection".to_string()
     } else {
         explorer.current_path.to_string_lossy().to_string()
     };
 
     top_lines.push(Line::from(vec![
-        Span::styled("◈ Explorando: ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("◈ Exploring: ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled(current_path_str, Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
     ]));
 
@@ -51,11 +51,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let sel_count = explorer.entries.iter().filter(|e| e.item_type == ExplorerItemType::PstFile && e.selected).count();
 
     top_lines.push(Line::from(vec![
-        Span::styled("Elementos en directorio: ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Directory items: ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(format!("{}", explorer.entries.len()), Style::default().fg(Theme::TEXT_MAIN)),
-        Span::styled("  |  Archivos PST detectados: ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("  |  PST files detected: ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(format!("{}", pst_count), Style::default().fg(if pst_count > 0 { Theme::SUCCESS } else { Theme::TEXT_MUTED }).add_modifier(Modifier::BOLD)),
-        Span::styled("  |  Seleccionados: ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("  |  Selected: ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(format!("{}", sel_count), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
     ]));
 
@@ -63,14 +63,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(if has_warning { Theme::WARNING } else { Theme::ACCENT_PRIMARY }))
-        .title(" Explorador del Sistema de Archivos ");
+        .title(" File System Explorer ");
 
     let top_inner = top_block.inner(chunks[0]);
     f.render_widget(top_block, chunks[0]);
     f.render_widget(Paragraph::new(top_lines), top_inner);
 
     // 2. Tabla de navegación de Archivos / Carpetas / Discos
-    let header_cells = ["", "Tipo", "Nombre", "Tamaño", "Ruta"].iter().map(|h| {
+    let header_cells = ["", "Type", "Name", "Size", "Path"].iter().map(|h| {
         Cell::from(*h).style(Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
     });
     let header = Row::new(header_cells).height(1).bottom_margin(1);
@@ -81,14 +81,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         let (icon, type_label, type_style, checkbox, size_str) = match entry.item_type {
             ExplorerItemType::ParentDir => (
                 "▲",
-                "[SUBIR]",
+                "[UP]   ",
                 Style::default().fg(Theme::ACCENT_PRIMARY),
                 "   ",
                 "-".to_string(),
             ),
             ExplorerItemType::Drive => (
                 "▤",
-                "[DISCO]",
+                "[DRIVE]",
                 Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
                 "   ",
                 "-".to_string(),
@@ -164,9 +164,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
             .title(if explorer.is_drives_view {
-                " Unidades Locales Disponibles "
+                " Available Local Drives "
             } else {
-                " Contenido de la Carpeta "
+                " Folder Contents "
             }),
     );
 
@@ -179,29 +179,29 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let mut second_row = vec![
         Span::styled("[C] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled("Usar Carpeta   ", Style::default().fg(Theme::SUCCESS)),
+        Span::styled("Use Folder   ", Style::default().fg(Theme::SUCCESS)),
         Span::styled("[B] ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Buscar (Discos)   ", Style::default().fg(Theme::BRAND_PRIMARY)),
+        Span::styled("Search (Drives)   ", Style::default().fg(Theme::BRAND_PRIMARY)),
     ];
 
     if is_on_pst {
         second_row.push(Span::styled("[D] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)));
-        second_row.push(Span::styled("Ver Detalle PST   ", Style::default().fg(Theme::ACCENT_PRIMARY)));
+        second_row.push(Span::styled("View PST Details   ", Style::default().fg(Theme::ACCENT_PRIMARY)));
     }
 
     second_row.push(Span::styled("[Esc] ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)));
-    second_row.push(Span::styled("Volver al Menú", Style::default().fg(Theme::TEXT_MUTED)));
+    second_row.push(Span::styled("Back to Menu", Style::default().fg(Theme::TEXT_MUTED)));
 
     let shortcuts = vec![
         Line::from(vec![
             Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Navegar  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Navigate  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[Enter] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Abrir carpeta/disco  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Open folder/drive  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[Backspace] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Subir nivel  ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("[Espacio] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Marcar PST  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Up level  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[Space] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("Toggle PST  ", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
         Line::from(second_row),
     ];

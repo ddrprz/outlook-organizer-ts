@@ -108,13 +108,13 @@ pub fn format_duration_compact(seconds: u64) -> String {
 /// - 3725 -> "1 h 2 min 5 s"
 pub fn format_duration_verbose(seconds: u64) -> String {
     if seconds == 0 {
-        return "0 segundos".to_string();
+        return "0 seconds".to_string();
     }
     if seconds == 1 {
-        return "1 segundo".to_string();
+        return "1 second".to_string();
     }
     if seconds < 60 {
-        return format!("{} segundos", seconds);
+        return format!("{} seconds", seconds);
     }
 
     if seconds < 3600 {
@@ -143,11 +143,11 @@ pub fn format_duration_verbose(seconds: u64) -> String {
         let hours = rem / 3600;
         let mins = (rem % 3600) / 60;
         if hours == 0 && mins == 0 {
-            format!("{} días", days)
+            format!("{} days", days)
         } else if mins == 0 {
-            format!("{} días {} h", days, hours)
+            format!("{} days {} h", days, hours)
         } else {
-            format!("{} días {} h {} min", days, hours, mins)
+            format!("{} days {} h {} min", days, hours, mins)
         }
     }
 }
@@ -189,13 +189,13 @@ mod tests {
 
     #[test]
     fn test_format_duration_verbose() {
-        assert_eq!(format_duration_verbose(0), "0 segundos");
-        assert_eq!(format_duration_verbose(1), "1 segundo");
-        assert_eq!(format_duration_verbose(45), "45 segundos");
+        assert_eq!(format_duration_verbose(0), "0 seconds");
+        assert_eq!(format_duration_verbose(1), "1 second");
+        assert_eq!(format_duration_verbose(45), "45 seconds");
         assert_eq!(format_duration_verbose(60), "1 min");
         assert_eq!(format_duration_verbose(125), "2 min 5 s");
         assert_eq!(format_duration_verbose(3600), "1 h");
         assert_eq!(format_duration_verbose(3665), "1 h 1 min 5 s");
-        assert_eq!(format_duration_verbose(90060), "1 días 1 h 1 min");
+        assert_eq!(format_duration_verbose(90060), "1 days 1 h 1 min");
     }
 }

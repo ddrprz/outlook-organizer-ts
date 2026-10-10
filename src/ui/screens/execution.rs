@@ -61,14 +61,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(status_border_color))
-        .title(" ◈ Estado de la Sesión MAPI y Destino ◈ ");
+        .title(" ◈ MAPI Session Status & Target ◈ ");
 
     let status_inner = status_block.inner(chunks[0]);
     f.render_widget(status_block, chunks[0]);
 
     let status_badge = if progress.graceful_cancelling {
         Span::styled(
-            " ■ CANCELANDO CON SEGURIDAD ",
+            " ■ SAFE CANCELLATION IN PROGRESS ",
             Style::default()
                 .bg(Theme::WARNING)
                 .fg(Color::Black)
@@ -76,7 +76,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else if progress.is_paused {
         Span::styled(
-            " ❚❚ EN PAUSA [P: Reanudar] ",
+            " ❚❚ PAUSED [P: Resume] ",
             Style::default()
                 .bg(Theme::WARNING)
                 .fg(Color::Black)
@@ -84,7 +84,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else if progress.throttling_active {
         Span::styled(
-            " ▲ THROTTLING ACTIVO ",
+            " ▲ THROTTLING ACTIVE ",
             Style::default()
                 .bg(Theme::WARNING)
                 .fg(Color::Black)
@@ -92,7 +92,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         )
     } else {
         Span::styled(
-            " ● EN EJECUCIÓN ACTIVA ",
+            " ● ACTIVELY RUNNING ",
             Style::default()
                 .bg(Theme::SUCCESS)
                 .fg(Color::Black)
@@ -102,7 +102,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let selected_mboxes = state.selected_mailboxes();
     let mbox_names = if selected_mboxes.is_empty() {
-        "Buzón predeterminado".to_string()
+        "Default mailbox".to_string()
     } else if selected_mboxes.len() == 1 {
         selected_mboxes[0].display_name.clone()
     } else {
@@ -110,19 +110,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let mode_badge = match state.transfer_mode {
-        TransferMode::Copy => Span::styled("Modo: Copiar (Intacto)", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        TransferMode::Move => Span::styled("Modo: Mover (Transaccional)", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+        TransferMode::Copy => Span::styled("Mode: Copy (Intact)", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        TransferMode::Move => Span::styled("Mode: Move (Transactional)", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
     };
     let routing_badge = match state.routing_granularity {
-        RoutingGranularity::Mirror => Span::styled("Estructura: Nativa Espejo", Style::default().fg(Theme::TEXT_MUTED)),
-        RoutingGranularity::Years => Span::styled("Estructura: Por Años", Style::default().fg(Theme::ACCENT_SECONDARY)),
-        RoutingGranularity::YearsAndMonths => Span::styled("Estructura: Años y Meses", Style::default().fg(Theme::BRAND_PRIMARY)),
+        RoutingGranularity::Mirror => Span::styled("Structure: Native Mirror", Style::default().fg(Theme::TEXT_MUTED)),
+        RoutingGranularity::Years => Span::styled("Structure: By Year", Style::default().fg(Theme::ACCENT_SECONDARY)),
+        RoutingGranularity::YearsAndMonths => Span::styled("Structure: Year & Month", Style::default().fg(Theme::BRAND_PRIMARY)),
     };
 
     let ribbon_line = Line::from(vec![
         status_badge,
         Span::raw("  "),
-        Span::styled("Destino: ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Target: ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(mbox_names, Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
         Span::styled("  •  ", Style::default().fg(Theme::TEXT_MUTED)),
         mode_badge,
@@ -139,7 +139,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     } else if let Some(first) = selected_psts.first() {
         first.name.as_str()
     } else {
-        "Archivo PST"
+        "PST File"
     };
 
     let pst_percent = if progress.current_pst_total > 0 {
@@ -151,7 +151,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let bottom_area = if is_single_pst {
         // --- CASO 1: UN SOLO PST -> UNA SOLA BARRA MODERNA Y COMPLETA ---
         let label = format!(
-            " {}%  •  {}/{} correos  •  Velocidad: {:.1} msgs/s  •  ETA: ~{} ",
+            " {}%  •  {}/{} emails  •  Speed: {:.1} msgs/s  •  ETA: ~{} ",
             pst_percent,
             progress.current_pst_items,
             progress.current_pst_total,
@@ -165,7 +165,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Double)
                     .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-                    .title(format!(" ◈ Progreso de Importación del Archivo: {} ◈ ", current_file_name)),
+                    .title(format!(" ◈ File Import Progress: {} ◈ ", current_file_name)),
             )
             .gauge_style(
                 Style::default()
@@ -184,7 +184,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
         // Barra 1: PST Actual
         let pst_label = format!(
-            " {}%  ({}/{} correos) ",
+            " {}%  ({}/{} emails) ",
             pst_percent, progress.current_pst_items, progress.current_pst_total
         );
         let pst_gauge = Gauge::default()
@@ -193,7 +193,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-                    .title(format!(" ◈ Archivo Actual ({}/{}): {} ◈ ", current_idx, total_psts, current_file_name)),
+                    .title(format!(" ◈ Current File ({}/{}): {} ◈ ", current_idx, total_psts, current_file_name)),
             )
             .gauge_style(
                 Style::default()
@@ -212,7 +212,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             0
         };
         let global_label = format!(
-            " {}%  •  Total Global: {}/{} correos  •  Vel: {:.1} msgs/s  •  ETA: ~{} ",
+            " {}%  •  Global Total: {}/{} emails  •  Speed: {:.1} msgs/s  •  ETA: ~{} ",
             global_percent,
             progress.global_items_processed,
             progress.global_items_total,
@@ -225,7 +225,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Double)
                     .border_style(Style::default().fg(Theme::SUCCESS))
-                    .title(" ◈ Progreso Global Consolidado (Todos los PSTs) ◈ "),
+                    .title(" ◈ Consolidated Global Progress (All PSTs) ◈ "),
             )
             .gauge_style(
                 Style::default()
@@ -256,28 +256,28 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" ◈ Métricas en Directo ◈ ");
+        .title(" ◈ Live Metrics ◈ ");
 
     let metrics_inner = metrics_block.inner(bottom_chunks[0]);
     f.render_widget(metrics_block, bottom_chunks[0]);
 
     let metrics_lines = vec![
         Line::from(vec![
-            Span::styled("✓ Transferidos:      ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("✓ Transferred:       ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                format!("{} correos", progress.imported_count),
+                format!("{} emails", progress.imported_count),
                 Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("⧉ Duplicados Omit.:  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("⧉ Duplicates Skip:  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                format!("{} correos", progress.duplicates_skipped),
+                format!("{} emails", progress.duplicates_skipped),
                 Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("▲ Errores Lectura:   ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("▲ Read Errors:       ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 format!("{}", progress.error_count),
                 if progress.error_count > 0 {
@@ -289,14 +289,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("▸ Velocidad MAPI:    ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("▸ MAPI Speed:        ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
-                format!("{:.1} correos/seg", progress.speed_mps),
+                format!("{:.1} emails/sec", progress.speed_mps),
                 Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
-            Span::styled("◷ Tiempo Estimado:   ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("◷ Estimated Time:    ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 format!("~{}", format_duration_verbose(progress.eta_seconds)),
                 Style::default().fg(Theme::ACCENT_PRIMARY),
@@ -306,9 +306,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("◆ Anti-Throttling:   ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
                 if progress.throttling_active {
-                    "▲ Pausa activa (429 Backoff)"
+                    "▲ Active backoff (429 Backoff)"
                 } else {
-                    "● Normal (Velocidad óptima)"
+                    "● Normal (Optimal speed)"
                 },
                 Style::default()
                     .fg(if progress.throttling_active { Theme::WARNING } else { Theme::SUCCESS })
@@ -316,17 +316,17 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("◈ Integridad PST:    ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("Desmontaje seguro activo", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("◈ PST Integrity:     ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Safe unmount active", Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
     f.render_widget(Paragraph::new(metrics_lines), metrics_inner);
 
     // --- Panel Derecho: Log en Directo con Auto-Scroll y Sintaxis ---
     let log_title = if progress.graceful_cancelling {
-        " ▲ REGISTRO: PARADA SEGURA EN CURSO (DESMONTANDO PST) "
+        " ▲ LOG: SAFE STOP IN PROGRESS (DISMOUNTING PST) "
     } else {
-        " ◈ Registro de Actividad y Telemetría MAPI ◈ "
+        " ◈ Activity Log & MAPI Telemetry ◈ "
     };
 
     let log_border_color = if progress.graceful_cancelling {
@@ -351,20 +351,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     let log_lines: Vec<Line> = if state.activity_log.is_empty() {
         vec![
-            Line::from(Span::styled("  [SISTEMA] Iniciando sesión MAPI y preparando almacenes de Outlook...", Style::default().fg(Theme::TEXT_MUTED))),
+            Line::from(Span::styled("  [SYSTEM] Starting MAPI session and preparing Outlook stores...", Style::default().fg(Theme::TEXT_MUTED))),
         ]
     } else {
         state.activity_log
             .iter()
             .skip(skip_count)
             .map(|s| {
-                let style = if s.starts_with("[FIN]") || s.starts_with("[AUDITORÍA]") {
+                let style = if s.starts_with("[FIN]") || s.starts_with("[DONE]") || s.starts_with("[AUDITORÍA]") || s.starts_with("[AUDIT]") {
                     Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)
                 } else if s.starts_with("[ERROR]") {
                     Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)
                 } else if s.starts_with("[WARN]") || s.starts_with("[THROTTLING]") {
                     Style::default().fg(Theme::WARNING)
-                } else if s.starts_with("[SISTEMA]") {
+                } else if s.starts_with("[SISTEMA]") || s.starts_with("[SYSTEM]") {
                     Style::default().fg(Theme::BRAND_PRIMARY)
                 } else {
                     Style::default().fg(Theme::TEXT_MAIN)
@@ -397,7 +397,7 @@ fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Theme::WARNING))
-        .title(" ▲ Parada Segura ▲ ");
+        .title(" ▲ Safe Stop ▲ ");
     let inner = modal_block.inner(modal_rect);
     f.render_widget(modal_block, modal_rect);
 
@@ -412,7 +412,7 @@ fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState)
 
     // 1. Pregunta principal
     let question_line = Line::from(Span::styled(
-        "¿Está seguro de que desea cancelar de forma segura?",
+        "Are you sure you want to safely cancel?",
         Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD),
     ));
     f.render_widget(
@@ -434,9 +434,9 @@ fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState)
     };
 
     let btn_yes_text = if state.cancel_modal_selected_yes {
-        " ▶ [ Sí ] ◀ "
+        " ▶ [ Yes ] ◀ "
     } else {
-        "   [ Sí ]   "
+        "   [ Yes ]   "
     };
 
     let btn_no_text = if !state.cancel_modal_selected_yes {
@@ -458,11 +458,11 @@ fn render_cancel_confirmation_modal(f: &mut Frame, area: Rect, state: &AppState)
     // 3. Guía de atajos
     let shortcuts_line = Line::from(vec![
         Span::styled("←/→/Tab", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled(" Elegir  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled(" Choose  •  ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("Enter", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled(" Confirmar  •  ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("S", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-        Span::styled(" Sí  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled(" Confirm  •  ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Y", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+        Span::styled(" Yes  •  ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("N / Esc", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
         Span::styled(" No", Style::default().fg(Theme::TEXT_MUTED)),
     ]);

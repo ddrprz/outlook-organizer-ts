@@ -23,19 +23,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" Filtros Temporales (Opcional) ");
+        .title(" Time Filters (Optional) ");
 
     let date_inner = date_block.inner(chunks[0]);
     f.render_widget(date_block, chunks[0]);
 
     let date_lines = vec![
         Line::from(vec![
-            Span::styled("Rango de Importación: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("Historial Completo (Sin filtro restrictivo)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled("Import Range: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Full History (No restrictive filter)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(""),
-        Line::from(Span::styled("Se importarán todos los correos contenidos en los PSTs seleccionados.", Style::default().fg(Theme::TEXT_MAIN))),
-        Line::from(Span::styled("[F] Cambiar rango a año específico", Style::default().fg(Theme::TEXT_MUTED))),
+        Line::from(Span::styled("All emails contained in the selected PSTs will be imported.", Style::default().fg(Theme::TEXT_MAIN))),
+        Line::from(Span::styled("[F] Change range to specific year", Style::default().fg(Theme::TEXT_MUTED))),
     ];
     f.render_widget(Paragraph::new(date_lines), date_inner);
 
@@ -44,30 +44,30 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" Control de Rendimiento: Throttling Adaptativo ");
+        .title(" Performance Control: Adaptive Throttling ");
 
     let thrott_inner = thrott_block.inner(chunks[1]);
     f.render_widget(thrott_block, chunks[1]);
 
     let thrott_label = if state.adaptive_throttling_enabled {
-        Span::styled("[x] THROTTLING ADAPTATIVO ACTIVADO (Recomendado)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
+        Span::styled("[x] ADAPTIVE THROTTLING ENABLED (Recommended)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled("[ ] THROTTLING DESACTIVADO (Velocidad fija / Riesgo de bloqueo)", Style::default().fg(Theme::WARNING))
+        Span::styled("[ ] THROTTLING DISABLED (Fixed speed / Throttling risk)", Style::default().fg(Theme::WARNING))
     };
 
     let thrott_lines = vec![
         Line::from(thrott_label),
         Line::from(""),
-        Line::from(Span::styled("Regula automáticamente la velocidad de llamadas MAPI/COM cuando Exchange", Style::default().fg(Theme::TEXT_MUTED))),
-        Line::from(Span::styled("Online o Microsoft 365 detecta saturación o emite códigos HTTP 429.", Style::default().fg(Theme::TEXT_MUTED))),
-        Line::from(Span::styled("[T] Alternar Throttling Adaptativo", Style::default().fg(Theme::ACCENT_PRIMARY))),
+        Line::from(Span::styled("Automatically regulates MAPI/COM call speed when Exchange", Style::default().fg(Theme::TEXT_MUTED))),
+        Line::from(Span::styled("Online or Microsoft 365 detects high latency or emits HTTP 429 backoff.", Style::default().fg(Theme::TEXT_MUTED))),
+        Line::from(Span::styled("[T] Toggle Adaptive Throttling", Style::default().fg(Theme::ACCENT_PRIMARY))),
     ];
     f.render_widget(Paragraph::new(thrott_lines), thrott_inner);
 
     // 3. Recomendación
     let rec = Line::from(vec![
         Span::styled("◈ M365 Best Practice: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-        Span::styled("Mantener el Throttling activo previene desconexiones del tenant.", Style::default().fg(Theme::TEXT_MAIN)),
+        Span::styled("Keeping throttling active prevents tenant disconnections.", Style::default().fg(Theme::TEXT_MAIN)),
     ]);
     f.render_widget(Paragraph::new(rec).alignment(Alignment::Center), chunks[2]);
 }

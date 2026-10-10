@@ -115,13 +115,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.progress.duplicates_skipped = duplicates;
                     state.progress.error_count = errors;
                     state.load_processed_items_from_temp();
-                    state.log_event(format!("[FIN] Operación finalizada con estado: {}", status));
+                    state.log_event(format!("[DONE] Operation finished with status: {}", status));
 
                     // Auditoría JSON automática (solo si es .exe de producción)
                     if let Ok(Some(path)) = generate_audit_json(&state, &status) {
                         state.json_audit_path = Some(path.clone());
                         state
-                            .log_event(format!("[AUDITORÍA] JSON guardado en: {}", path.display()));
+                            .log_event(format!("[AUDIT] JSON saved to: {}", path.display()));
                     }
 
                     state.step = WizardStep::Completion;
@@ -143,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.split.total_extracted = final_count;
                     state.split.generated_psts = generated_psts;
                     state.log_event(format!(
-                        "[FIN] Separación de PSTs finalizada con estado: {}. Correos transferidos: {}",
+                        "[DONE] PST split operation finished with status: {}. Emails transferred: {}",
                         status, final_count
                     ));
                     state.step = WizardStep::SplitCompletion;
@@ -1034,10 +1034,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
                                 state.cancel_modal_selected_yes = !state.cancel_modal_selected_yes;
                             }
-                            KeyCode::Char('s') | KeyCode::Char('S') => {
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Char('s') | KeyCode::Char('S') => {
                                 state.close_cancel_modal();
                                 state.progress.graceful_cancelling = true;
-                                state.log_event("[SISTEMA] Parada segura confirmada por el usuario. Desmontando PST con RemoveStore...".to_string());
+                                state.log_event("[SYSTEM] Safe stop confirmed by user. Dismounting PST with RemoveStore...".to_string());
                                 if let Some(ref path) = worker_abort_file {
                                     let _ = std::fs::File::create(path);
                                 }
@@ -1050,13 +1050,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                                 state.close_cancel_modal();
-                                state.log_event("[SISTEMA] Parada segura descartada. Continuando importación...".to_string());
+                                state.log_event("[SYSTEM] Safe stop dismissed. Continuing import...".to_string());
                             }
                             KeyCode::Enter => {
                                 if state.cancel_modal_selected_yes {
                                     state.close_cancel_modal();
                                     state.progress.graceful_cancelling = true;
-                                    state.log_event("[SISTEMA] Parada segura confirmada por el usuario. Desmontando PST con RemoveStore...".to_string());
+                                    state.log_event("[SYSTEM] Safe stop confirmed by user. Dismounting PST with RemoveStore...".to_string());
                                     if let Some(ref path) = worker_abort_file {
                                         let _ = std::fs::File::create(path);
                                     }
@@ -1520,146 +1520,146 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
     // 3. Footer con Marca de Agua Timeless Support
     let shortcuts = match state.step {
         WizardStep::Welcome => vec![
-            ("↑/↓", "Navegar"),
-            ("Enter", "Seleccionar"),
-            ("1-5", "Acceso"),
-            ("P", "Perfil"),
-            ("Q", "Salir"),
+            ("↑/↓", "Navigate"),
+            ("Enter", "Select"),
+            ("1-5", "Quick Access"),
+            ("P", "Profile"),
+            ("Q", "Quit"),
         ],
         WizardStep::FileExplorer => vec![
-            ("↑/↓", "Navegar"),
-            ("Enter", "Abrir"),
-            ("Backspace", "Subir"),
-            ("Espacio", "Marcar"),
-            ("C", "Confirmar"),
-            ("Esc", "Volver"),
+            ("↑/↓", "Navigate"),
+            ("Enter", "Open"),
+            ("Backspace", "Up"),
+            ("Space", "Toggle"),
+            ("C", "Confirm"),
+            ("Esc", "Back"),
         ],
         WizardStep::PstSource => vec![
-            ("↑/↓", "Navegar"),
-            ("Espacio", "Marcar"),
-            ("E", "Explorar"),
-            ("A/N", "Todos/Ninguno"),
-            ("Enter", "Siguiente"),
+            ("↑/↓", "Navigate"),
+            ("Space", "Toggle"),
+            ("E", "Explore"),
+            ("A/N", "All/None"),
+            ("Enter", "Next"),
         ],
         WizardStep::Mailbox => vec![
-            ("↑/↓", "Navegar"),
-            ("Espacio", "Marcar"),
-            ("A/N", "Todos/Ninguno"),
-            ("R", "Recargar"),
-            ("Enter", "Siguiente"),
-            ("Esc", "Atrás"),
+            ("↑/↓", "Navigate"),
+            ("Space", "Toggle"),
+            ("A/N", "All/None"),
+            ("R", "Reload"),
+            ("Enter", "Next"),
+            ("Esc", "Back"),
         ],
         WizardStep::FoldersMode => vec![
-            ("↑/↓", "Navegar"),
-            ("E", "Desplegar"),
-            ("Espacio", "Seleccionar"),
-            ("A/N", "Todas/Ninguna"),
-            ("M", "Copiar/Mover"),
-            ("Enter", "Siguiente"),
-            ("Esc", "Atrás"),
+            ("↑/↓", "Navigate"),
+            ("E", "Expand"),
+            ("Space", "Toggle"),
+            ("A/N", "All/None"),
+            ("M", "Copy/Move"),
+            ("Enter", "Next"),
+            ("Esc", "Back"),
         ],
         WizardStep::Routing => {
             if state.active_routing_modal != RoutingModal::None {
                 vec![
-                    ("↑/↓", "Mover"),
-                    ("Enter", "Confirmar"),
-                    ("Esc/Q", "Cancelar"),
+                    ("↑/↓", "Move"),
+                    ("Enter", "Confirm"),
+                    ("Esc/Q", "Cancel"),
                 ]
             } else {
                 vec![
-                    ("1/2/3", "Criterio"),
-                    ("←/→", "Mover Tarjeta"),
-                    ("C", "Menú Criterio"),
-                    ("F", "Filtro Fechas"),
-                    ("Enter", "Siguiente"),
-                    ("Esc", "Atrás"),
+                    ("1/2/3", "Criterion"),
+                    ("←/→", "Move Card"),
+                    ("C", "Criterion Menu"),
+                    ("F", "Date Filter"),
+                    ("Enter", "Next"),
+                    ("Esc", "Back"),
                 ]
             }
         }
         WizardStep::Deduplication => vec![
-            ("D", "Duplicados On/Off"),
-            ("P", "Revisión Profunda"),
-            ("Enter", "Siguiente"),
+            ("D", "Duplicates On/Off"),
+            ("P", "Deep Scan"),
+            ("Enter", "Next"),
         ],
         WizardStep::Filters => vec![
             ("T", "Throttling"),
-            ("Enter", "Siguiente"),
-            ("Esc", "Atrás"),
+            ("Enter", "Next"),
+            ("Esc", "Back"),
         ],
         WizardStep::Summary => vec![
-            ("Enter", "Iniciar Operación"),
-            ("Esc", "Atrás"),
-            ("q", "Salir"),
+            ("Enter", "Start Operation"),
+            ("Esc", "Back"),
+            ("q", "Quit"),
         ],
         WizardStep::Execution => {
             if state.show_cancel_modal {
                 vec![
-                    ("←/→/Tab", "Elegir"),
-                    ("Enter", "Confirmar"),
-                    ("S", "Sí"),
+                    ("←/→/Tab", "Choose"),
+                    ("Enter", "Confirm"),
+                    ("Y", "Yes"),
                     ("N/Esc", "No"),
                 ]
             } else if state.progress.graceful_cancelling {
-                vec![("Espere...", "Desmontando PST con seguridad")]
+                vec![("Wait...", "Safely dismounting PST")]
             } else {
-                let p_label = if state.progress.is_paused { "Reanudar" } else { "Pausar" };
-                vec![("P", p_label), ("Esc/Q", "Parada Segura")]
+                let p_label = if state.progress.is_paused { "Resume" } else { "Pause" };
+                vec![("P", p_label), ("Esc/Q", "Safe Stop")]
             }
         }
         WizardStep::Completion => {
             if state.html_report_path.is_some() {
-                vec![("O", "Abrir HTML"), ("H", "Regenerar HTML"), ("Enter/q", "Salir")]
+                vec![("O", "Open HTML"), ("H", "Regenerate HTML"), ("Enter/q", "Quit")]
             } else {
-                vec![("H", "Informe HTML"), ("Enter/q", "Salir")]
+                vec![("H", "HTML Report"), ("Enter/q", "Quit")]
             }
         }
         WizardStep::PstDetailView => vec![
-            ("↑/↓", "Navegar"),
-            ("Enter/E/→", "Desplegar"),
-            ("←/Backspace", "Plegar"),
-            ("Espacio", "Aislar Métricas"),
-            ("Esc/Q", "Volver"),
+            ("↑/↓", "Navigate"),
+            ("Enter/E/→", "Expand"),
+            ("←/Backspace", "Collapse"),
+            ("Space", "Isolate Metrics"),
+            ("Esc/Q", "Back"),
         ],
         WizardStep::SplitSelect => vec![
-            ("↑/↓", "Navegar"),
-            ("Espacio", "Marcar"),
-            ("A/D", "Todos/Ninguno"),
-            ("Enter", "Continuar"),
-            ("E", "Explorador"),
-            ("Esc", "Menú"),
+            ("↑/↓", "Navigate"),
+            ("Space", "Toggle"),
+            ("A/D", "All/None"),
+            ("Enter", "Continue"),
+            ("E", "Explorer"),
+            ("Esc", "Menu"),
         ],
         WizardStep::SplitFilter => vec![
-            ("Tab", "Años/Meses"),
-            ("↑/↓", "Navegar"),
-            ("Espacio", "Marcar"),
-            ("A/N", "Todos/Ninguno"),
-            ("1/2/T", "Semestres/Todos"),
-            ("Enter", "Siguiente"),
-            ("Esc", "Atrás"),
+            ("Tab", "Years/Months"),
+            ("↑/↓", "Navigate"),
+            ("Space", "Toggle"),
+            ("A/N", "All/None"),
+            ("1/2/T", "Semesters/All"),
+            ("Enter", "Next"),
+            ("Esc", "Back"),
         ],
         WizardStep::SplitConfig => vec![
-            ("1/2/3", "Partición"),
-            ("M", "Copiar/Mover"),
-            ("O", "Carpeta Destino"),
-            ("Enter", "Siguiente"),
-            ("Esc", "Atrás"),
+            ("1/2/3", "Partition"),
+            ("M", "Copy/Move"),
+            ("O", "Output Folder"),
+            ("Enter", "Next"),
+            ("Esc", "Back"),
         ],
         WizardStep::SplitSummary => vec![
-            ("Enter", "Iniciar Separación"),
-            ("Esc", "Atrás"),
-            ("Q", "Salir"),
+            ("Enter", "Start Split"),
+            ("Esc", "Back"),
+            ("Q", "Quit"),
         ],
         WizardStep::SplitExecution => {
             if state.progress.graceful_cancelling {
-                vec![("Espere...", "Desmontando PST con seguridad")]
+                vec![("Wait...", "Safely dismounting PST")]
             } else {
-                let p_label = if state.progress.is_paused { "Reanudar" } else { "Pausar" };
-                vec![("P", p_label), ("Esc/Q", "Parada Segura")]
+                let p_label = if state.progress.is_paused { "Resume" } else { "Pause" };
+                vec![("P", p_label), ("Esc/Q", "Safe Stop")]
             }
         }
         WizardStep::SplitCompletion => vec![
-            ("O", "Abrir Carpeta"),
-            ("Enter/Q", "Menú Principal"),
+            ("O", "Open Folder"),
+            ("Enter/Q", "Main Menu"),
         ],
     };
 

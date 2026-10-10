@@ -41,7 +41,7 @@ pub fn render_header(f: &mut Frame, area: Rect, step_title: &str, current_step: 
     } else {
         Line::from(vec![
             Span::styled(
-                format!("[Paso {} de {}: {}] ", current_step, total_steps, step_title),
+                format!("[Step {} of {}: {}] ", current_step, total_steps, step_title),
                 Style::default()
                     .fg(Theme::ACCENT_SECONDARY)
                     .add_modifier(Modifier::BOLD),

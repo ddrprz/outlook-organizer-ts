@@ -25,7 +25,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" ◈ Carpetas del PST a Importar ");
+        .title(" ◈ PST Folders to Import ");
 
     let folders_inner = folders_block.inner(chunks[0]);
     f.render_widget(folders_block, chunks[0]);
@@ -34,14 +34,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         let loading_lines = vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("  ⧗ Obteniendo carpetas internas del archivo PST...", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("  ⧗ Retrieving internal folders from PST file...", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled("  Analizando jerarquía de carpetas, conteos y tamaños en disco.", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("  Analyzing folder hierarchy, message counts, and disk sizes.", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(vec![
-                Span::styled("  Por favor espere un momento...", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("  Please wait a moment...", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ];
         f.render_widget(Paragraph::new(loading_lines), folders_inner);
@@ -52,8 +52,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
         let mut folder_lines = vec![
             Line::from(vec![
-                Span::styled("Estructura de carpetas ", Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("({} de {} seleccionadas):", selected_count, total_nodes), Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Folder structure ", Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("({} of {} selected):", selected_count, total_nodes), Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(""),
         ];
@@ -61,7 +61,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         let content_width = folders_inner.width as usize;
 
         if visible_indices.is_empty() {
-            folder_lines.push(Line::from(Span::styled("  No hay carpetas disponibles.", Style::default().fg(Theme::TEXT_MUTED))));
+            folder_lines.push(Line::from(Span::styled("  No folders available.", Style::default().fg(Theme::TEXT_MUTED))));
         } else {
             for (v_idx, &node_idx) in visible_indices.iter().enumerate() {
                 if let Some(node) = state.folder_tree.nodes.get(node_idx) {
@@ -134,15 +134,15 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         folder_lines.push(Line::from(""));
         folder_lines.push(Line::from(vec![
             Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-            Span::styled("Navegar  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Navigate  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[E] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-            Span::styled("Desplegar  ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("[Espacio] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-            Span::styled("Seleccionar  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Expand  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("[Space] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
+            Span::styled("Select  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[A] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-            Span::styled("Todas  ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("All  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled("[N] ", Style::default().fg(Theme::ACCENT_PRIMARY)),
-            Span::styled("Ninguna", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("None", Style::default().fg(Theme::TEXT_MUTED)),
         ]));
 
         f.render_widget(Paragraph::new(folder_lines), folders_inner);
@@ -158,49 +158,49 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(mode_border_color))
-        .title(" Acción sobre los Correos ");
+        .title(" Email Transfer Action ");
 
     let mode_inner = mode_block.inner(chunks[1]);
     f.render_widget(mode_block, chunks[1]);
 
     let radio_copy = if state.transfer_mode == TransferMode::Copy {
         Line::from(vec![
-            Span::styled("[●] MODO COPIAR ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled("(Recomendado)", Style::default().fg(Theme::TEXT_MAIN)),
+            Span::styled("[●] COPY MODE ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled("(Recommended)", Style::default().fg(Theme::TEXT_MAIN)),
         ])
     } else {
-        Line::from(Span::styled("[○] MODO COPIAR (PST intacto)", Style::default().fg(Theme::TEXT_MUTED)))
+        Line::from(Span::styled("[○] COPY MODE (PST intact)", Style::default().fg(Theme::TEXT_MUTED)))
     };
 
     let radio_move = if state.transfer_mode == TransferMode::Move {
         Line::from(vec![
-            Span::styled("[●] MODO MOVER ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("(Transferir y liberar espacio)", Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
+            Span::styled("[●] MOVE MODE ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("(Transfer & free space)", Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
         ])
     } else {
-        Line::from(Span::styled("[○] MODO MOVER (Transferir correos)", Style::default().fg(Theme::TEXT_MUTED)))
+        Line::from(Span::styled("[○] MOVE MODE (Transfer emails)", Style::default().fg(Theme::TEXT_MUTED)))
     };
 
     let warning_note = if state.transfer_mode == TransferMode::Move {
         vec![
             Line::from(""),
-            Line::from(Span::styled("▲ ADVERTENCIA:", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))),
-            Line::from(Span::styled("Esta opción transferirá los correos al buzón destino", Style::default().fg(Theme::TEXT_MAIN))),
-            Line::from(Span::styled("y los eliminará del archivo PST tras confirmar su guardado seguro.", Style::default().fg(Theme::TEXT_MAIN))),
+            Line::from(Span::styled("▲ WARNING:", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("This option transfers emails to the destination mailbox", Style::default().fg(Theme::TEXT_MAIN))),
+            Line::from(Span::styled("and removes them from the PST after confirming safe storage.", Style::default().fg(Theme::TEXT_MAIN))),
             Line::from(""),
-            Line::from(Span::styled("✓ Proceso seguro: parada transaccional ante cualquier interrupción.", Style::default().fg(Theme::TEXT_MUTED))),
+            Line::from(Span::styled("✓ Safe process: transactional stop on any interruption.", Style::default().fg(Theme::TEXT_MUTED))),
         ]
     } else {
         vec![
             Line::from(""),
-            Line::from(Span::styled("✓ Seguro y no destructivo:", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))),
-            Line::from(Span::styled("Los correos se importan al buzón y el archivo PST", Style::default().fg(Theme::TEXT_MAIN))),
-            Line::from(Span::styled("permanece exactamente intacto en modo solo lectura.", Style::default().fg(Theme::TEXT_MAIN))),
+            Line::from(Span::styled("✓ Safe & non-destructive:", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("Emails are imported to the mailbox and the PST file", Style::default().fg(Theme::TEXT_MAIN))),
+            Line::from(Span::styled("remains completely intact in read-only mode.", Style::default().fg(Theme::TEXT_MAIN))),
         ]
     };
 
     let mut mode_lines = vec![
-        Line::from("Elija cómo interactuar con los elementos del archivo:"),
+        Line::from("Choose how to handle items from the archive:"),
         Line::from(""),
         radio_copy,
         Line::from(""),
@@ -210,7 +210,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     mode_lines.push(Line::from(""));
     mode_lines.push(Line::from(vec![
         Span::styled("[M] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Alternar Copiar / Mover", Style::default().fg(Theme::TEXT_MAIN)),
+        Span::styled("Toggle Copy / Move", Style::default().fg(Theme::TEXT_MAIN)),
     ]));
 
     f.render_widget(Paragraph::new(mode_lines), mode_inner);

@@ -29,15 +29,15 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let title_str = if state.progress.graceful_cancelling {
-        " [DETENIENDO CON SEGURIDAD... DESMONTANDO PSTs] "
+        " [SAFELY STOPPING... DISMOUNTING PSTs] "
     } else if state.progress.is_paused {
-        " [PROCESO PAUSADO — PRESIONE 'P' PARA REANUDAR] "
+        " [PROCESS PAUSED — PRESS 'P' TO RESUME] "
     } else {
-        " Generando y poblando archivos PST "
+        " Generating and populating PST files "
     };
 
     let gauge_label = format!(
-        "{}% ({}/{} correos analizados)",
+        "{}% ({}/{} emails analyzed)",
         percent, current_items, total_items
     );
 
@@ -89,7 +89,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::SUCCESS))
-            .title(" Correos Transferidos "),
+            .title(" Transferred Emails "),
     );
     f.render_widget(card_extracted, metric_chunks[0]);
 
@@ -103,7 +103,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-            .title(" Velocidad "),
+            .title(" Speed "),
     );
     f.render_widget(card_speed, metric_chunks[1]);
 
@@ -122,12 +122,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-            .title(" Tiempo Estimado (ETA) "),
+            .title(" Estimated Time (ETA) "),
     );
     f.render_widget(card_eta, metric_chunks[2]);
 
     let current_dest_name = if state.progress.current_pst_name.is_empty() {
-        "Iniciando...".to_string()
+        "Starting...".to_string()
     } else {
         state.progress.current_pst_name.clone()
     };
@@ -141,7 +141,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::BORDER_INACTIVE))
-            .title(" PST Activo de Salida "),
+            .title(" Active Output PST "),
     );
     f.render_widget(card_file, metric_chunks[3]);
 
@@ -157,7 +157,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Style::default().fg(Theme::DANGER)
             } else if msg.contains("[WARN]") {
                 Style::default().fg(Theme::WARNING)
-            } else if msg.contains("Finalizado") || msg.contains("exitosamente") {
+            } else if msg.contains("Completed") || msg.contains("successfully") || msg.contains("Finalizado") || msg.contains("exitosamente") {
                 Style::default().fg(Theme::SUCCESS)
             } else {
                 Style::default().fg(Theme::TEXT_MUTED)
@@ -170,6 +170,6 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::BORDER_INACTIVE))
-        .title(" Registro de Actividad en Tiempo Real ");
+        .title(" Real-Time Activity Log ");
     f.render_widget(Paragraph::new(log_lines).block(log_block), chunks[2]);
 }

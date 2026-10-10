@@ -26,8 +26,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
-                .title(" Detalle de PST ");
-            f.render_widget(Paragraph::new("No hay información de PST cargada. Presione [Esc] para volver."), block.inner(area));
+                .title(" PST Details ");
+            f.render_widget(Paragraph::new("No PST information loaded. Press [Esc] to return."), block.inner(area));
             f.render_widget(block, area);
         }
     }
@@ -45,7 +45,7 @@ fn render_loading(
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-        .title(format!(" ◈ Inspeccionando PST: {} ", pst_name));
+        .title(format!(" ◈ Inspecting PST: {} ", pst_name));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -55,13 +55,13 @@ fn render_loading(
         Line::from(vec![
             Span::styled("  ⧗ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled(
-                "Analizando estructura interna MAPI, carpetas y métricas temporales...",
+                "Analyzing internal MAPI structure, folders, and temporal metrics...",
                 Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Archivo: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  File: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(pst_path, Style::default().fg(Theme::ACCENT_PRIMARY)),
         ]),
         Line::from(""),
@@ -69,22 +69,22 @@ fn render_loading(
 
     if let Some(folder) = current_folder {
         content.push(Line::from(vec![
-            Span::styled("  ▶ Carpeta activa: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("  ▶ Active folder: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(folder, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(format!(" ({} correos indexados hasta ahora)", scanned_items), Style::default().fg(Theme::SUCCESS)),
+            Span::styled(format!(" ({} emails indexed so far)", scanned_items), Style::default().fg(Theme::SUCCESS)),
         ]));
     } else {
         content.push(Line::from(vec![
-            Span::styled("  ▶ Estado: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled("Conectando con motor MAPI e indexando carpetas...", Style::default().fg(Theme::WARNING)),
+            Span::styled("  ▶ Status: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Connecting to MAPI engine and indexing folders...", Style::default().fg(Theme::WARNING)),
         ]));
     }
 
     content.push(Line::from(""));
-    content.push(Line::from(Span::styled("  Extrayendo jerarquía de carpetas, fechas, distribución por años y meses.", Style::default().fg(Theme::TEXT_MUTED))));
-    content.push(Line::from(Span::styled("  Calculando tamaños por periodo y volumen de mensajes...", Style::default().fg(Theme::TEXT_MUTED))));
+    content.push(Line::from(Span::styled("  Extracting folder hierarchy, dates, year and month distribution.", Style::default().fg(Theme::TEXT_MUTED))));
+    content.push(Line::from(Span::styled("  Calculating sizes per period and message volume...", Style::default().fg(Theme::TEXT_MUTED))));
     content.push(Line::from(""));
-    content.push(Line::from(Span::styled("  [Esc / Q] Cancelar y volver", Style::default().fg(Theme::TEXT_MUTED))));
+    content.push(Line::from(Span::styled("  [Esc / Q] Cancel and back", Style::default().fg(Theme::TEXT_MUTED))));
 
     f.render_widget(Paragraph::new(content), inner);
 }
@@ -94,18 +94,18 @@ fn render_error(f: &mut Frame, area: Rect, pst_name: &str, message: &str) {
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Theme::DANGER))
-        .title(format!(" ▲ Error al Inspeccionar: {} ", pst_name));
+        .title(format!(" ▲ Error Inspecting: {} ", pst_name));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
     let content = vec![
         Line::from(""),
-        Line::from(Span::styled("  No se pudo leer la estructura interna del archivo PST:", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("  Could not read internal structure of PST file:", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD))),
         Line::from(""),
         Line::from(Span::styled(format!("  {}", message), Style::default().fg(Theme::TEXT_MAIN))),
         Line::from(""),
-        Line::from(Span::styled("  [Esc / Enter / Q] Volver al listado", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("  [Esc / Enter / Q] Back to list", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
     ];
 
     f.render_widget(Paragraph::new(content), inner);
@@ -144,27 +144,27 @@ fn render_header_card(f: &mut Frame, area: Rect, detail: &PstDetail) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(format!(" ◈ Detalle de Archivo PST: {} ", detail.file_name));
+        .title(format!(" ◈ PST File Details: {} ", detail.file_name));
 
     let inner = header_block.inner(area);
     f.render_widget(header_block, area);
 
-    let first_date = detail.first_email_date.as_deref().unwrap_or("N/D");
-    let last_date = detail.last_email_date.as_deref().unwrap_or("N/D");
+    let first_date = detail.first_email_date.as_deref().unwrap_or("N/A");
+    let last_date = detail.last_email_date.as_deref().unwrap_or("N/A");
 
     let lines = vec![
         Line::from(vec![
-            Span::styled("Ruta: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Path: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format!("▸ {} ", detail.file_path), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" | Peso Total: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(" | Total Size: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(format_size_mb(detail.size_mb), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled(" | Total de Correos: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled(format!("{} correos", detail.total_items), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(" | Total Emails: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(format!("{} emails", detail.total_items), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("Rango de Fechas Detectado: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled(format!("Desde: {}  ➜  Hasta: {}", first_date, last_date), Style::default().fg(Theme::TEXT_MAIN)),
-            Span::styled(format!(" | Total Carpetas: {}", detail.folders.len()), Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("Detected Date Range: ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled(format!("From: {}  ➜  To: {}", first_date, last_date), Style::default().fg(Theme::TEXT_MAIN)),
+            Span::styled(format!(" | Total Folders: {}", detail.folders.len()), Style::default().fg(Theme::TEXT_MUTED)),
         ]),
     ];
 
@@ -179,7 +179,7 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: 
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" ◈ Jerarquía de Carpetas (Menús Desplegables) ");
+        .title(" ◈ Folder Hierarchy (Expandable Tree) ");
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -192,7 +192,7 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: 
         ])
         .split(inner);
 
-    let header_cells = ["Sel", "Carpeta / Subcarpeta", "Correos", "Tamaño"]
+    let header_cells = ["Sel", "Folder / Subfolder", "Emails", "Size"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)));
     let header = Row::new(header_cells).height(1).bottom_margin(1);
@@ -200,7 +200,7 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: 
     let rows: Vec<Row> = if visible.is_empty() {
         vec![Row::new(vec![
             Cell::from(" "),
-            Cell::from("No hay carpetas detectadas en este PST"),
+            Cell::from("No folders detected in this PST"),
             Cell::from("-"),
             Cell::from("-"),
         ])]
@@ -277,21 +277,21 @@ fn render_folder_explorer(f: &mut Frame, area: Rect, state: &AppState, _detail: 
                 .fg(Theme::ACCENT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Desplegar ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Expand ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(
             "• [←] ",
             Style::default()
                 .fg(Theme::ACCENT_PRIMARY)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Plegar ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Collapse ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(
-            "• [Espacio] ",
+            "• [Space] ",
             Style::default()
                 .fg(Theme::SUCCESS)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("Aislar Métricas", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Isolate Metrics", Style::default().fg(Theme::TEXT_MUTED)),
     ];
     f.render_widget(Paragraph::new(Line::from(hint_spans)), chunks[1]);
 }
@@ -310,7 +310,7 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
 
     if let Some(folder) = selected_folder {
         // --- CASO 1: Carpeta Seleccionada con Espacio ---
-        let block_title = format!(" ◈ Detalle de Carpeta: {} ", folder.name);
+        let block_title = format!(" ◈ Folder Details: {} ", folder.name);
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -321,7 +321,7 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
         f.render_widget(block, chunks[0]);
 
         let years_str = if folder.years.is_empty() {
-            "Sin correos".to_string()
+            "No emails".to_string()
         } else {
             folder.years.iter().map(|y| y.to_string()).collect::<Vec<_>>().join(", ")
         };
@@ -330,21 +330,21 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
 
         let lines = vec![
             Line::from(vec![
-                Span::styled("Carpeta: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Folder: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(&folder.name, Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" (Ruta: \\{})", if folder.path.is_empty() { &folder.name } else { &folder.path }), Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(format!(" (Path: \\{})", if folder.path.is_empty() { &folder.name } else { &folder.path }), Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(vec![
-                Span::styled("Total Correos: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Total Emails: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{} ", folder.count), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled("| Tamaño Estimado: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("| Estimated Size: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{} ", format_size_mb(folder.size_mb)), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("| Meses con Actividad: {}", month_count), Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(format!("| Active Months: {}", month_count), Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(vec![
-                Span::styled("Años Presentes: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Active Years: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(years_str, Style::default().fg(Theme::ACCENT_PRIMARY)),
-                Span::styled("  [Espacio para deseleccionar y ver PST completo]", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("  [Space to deselect and view full PST]", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ];
         f.render_widget(Paragraph::new(lines), inner);
@@ -365,13 +365,13 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-            .title(format!(" ◈ Métricas Consolidadas del PST: {} ", detail.file_name));
+            .title(format!(" ◈ Consolidated PST Metrics: {} ", detail.file_name));
 
         let inner = block.inner(chunks[0]);
         f.render_widget(block, chunks[0]);
 
         let years_str = if detail.years.is_empty() {
-            "Sin correos".to_string()
+            "No emails".to_string()
         } else {
             detail.years.iter().map(|y| y.to_string()).collect::<Vec<_>>().join(", ")
         };
@@ -380,20 +380,20 @@ fn render_metrics_panel(f: &mut Frame, area: Rect, state: &AppState, detail: &Ps
 
         let lines = vec![
             Line::from(vec![
-                Span::styled("Estado: ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled("Vista Global del PST (Ninguna carpeta seleccionada)", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Status: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Global PST View (No folder selected)", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![
-                Span::styled("Total Correos PST: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Total PST Emails: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{} ", detail.total_items), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled("| Peso en Disco: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("| Disk Size: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(format!("{} ", format_size_mb(detail.size_mb)), Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("| Total de Meses: {}", month_count), Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(format!("| Total Months: {}", month_count), Style::default().fg(Theme::TEXT_MUTED)),
             ]),
             Line::from(vec![
-                Span::styled("Años Detectados: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Detected Years: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(years_str, Style::default().fg(Theme::ACCENT_PRIMARY)),
-                Span::styled("  [Presione Espacio sobre una carpeta para aislar sus métricas]", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("  [Press Space on a folder to isolate its metrics]", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ];
         f.render_widget(Paragraph::new(lines), inner);
@@ -429,7 +429,7 @@ fn render_breakdown_tables(
         .split(area);
 
     // 1. Tabla de Años
-    let year_header_cells = ["Año", "Correos", "Tamaño", "% Total"]
+    let year_header_cells = ["Year", "Emails", "Size", "% Total"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)));
     let year_header = Row::new(year_header_cells).height(1).bottom_margin(1);
@@ -465,12 +465,12 @@ fn render_breakdown_tables(
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-            .title(" Distribución por Año "),
+            .title(" Distribution by Year "),
     );
     f.render_widget(year_table, split[0]);
 
     // 2. Tabla de Meses
-    let month_header_cells = ["Mes", "Correos", "Tamaño"]
+    let month_header_cells = ["Month", "Emails", "Size"]
         .iter()
         .map(|h| Cell::from(*h).style(Style::default().fg(Theme::ACCENT_SECONDARY).add_modifier(Modifier::BOLD)));
     let month_header = Row::new(month_header_cells).height(1).bottom_margin(1);
@@ -498,7 +498,7 @@ fn render_breakdown_tables(
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-            .title(" Distribución por Mes (Recientes) "),
+            .title(" Distribution by Month (Recent) "),
     );
     f.render_widget(month_table, split[1]);
 }
