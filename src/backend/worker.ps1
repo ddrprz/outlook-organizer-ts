@@ -16,7 +16,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Stop"
 
 try {
-    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::Normal
 } catch {}
 
 function Send-Telemetry([hashtable]$Payload) {
@@ -66,7 +66,7 @@ function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$p
 function Check-And-Emit-Progress([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime, [bool]$force = $false) {
     try {
         $now = [DateTime]::UtcNow
-        $shouldEmit = $force -or ($currentItems % 15 -eq 0) -or ($null -eq $script:lastTelemetryTime) -or (($now - $script:lastTelemetryTime).TotalMilliseconds -gt 200) -or ($currentItems -eq $totalItems)
+        $shouldEmit = $force -or ($currentItems -eq $totalItems) -or ($null -eq $script:lastTelemetryTime) -or (($now - $script:lastTelemetryTime).TotalMilliseconds -ge 200)
         if ($shouldEmit) {
             Emit-ProgressTelemetry $currentPstIdx $totalPsts $pstName $currentItems $totalItems $startTime
         }
@@ -174,6 +174,8 @@ function Clear-FolderCaches {
         }
         $script:dateFolderCache.Clear()
     }
+    if ($script:dateFolderIdCache) { $script:dateFolderIdCache.Clear() }
+    if ($script:dateFolderNameCache) { $script:dateFolderNameCache.Clear() }
 }
 
 function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collections.Generic.List[hashtable]]$collector, $selectedPathsSet, [bool]$hasSubpaths, $config) {
@@ -477,6 +479,8 @@ $lastTelemetryTime = [DateTime]::UtcNow
 $targetSets = @{}
 $destFolderCache = @{}
 $dateFolderCache = @{}
+$dateFolderIdCache = @{}
+$dateFolderNameCache = @{}
 $consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 $duplicateSampleCount = 0
@@ -800,8 +804,14 @@ try {
 
             # Pre-resolver carpeta base de destino una sola vez para toda la carpeta de origen
             $baseDest = Get-CachedDestBaseFolder $destStore $cf.RelPath $cf.Type
-            $baseDestId = $null
-            try { $baseDestId = $baseDest.EntryID } catch {}
+            $baseDestId = ""
+            $baseDestName = ""
+            if ($baseDest) {
+                try { $baseDestId = [string]$baseDest.EntryID } catch {}
+                try { $baseDestName = [string]$baseDest.Name } catch {}
+            }
+            if ([string]::IsNullOrWhiteSpace($baseDestId)) { $baseDestId = "DEFAULT_DEST" }
+            if ([string]::IsNullOrWhiteSpace($baseDestName)) { $baseDestName = if ($cf.Name) { $cf.Name } else { "-" } }
 
             # Intentar extracción ultra-rápida por lotes con MAPI Table
             $tableEntries = New-Object 'System.Collections.Generic.List[hashtable]'
@@ -872,20 +882,22 @@ try {
             if ($useTable -and $tableEntries.Count -gt 0) {
                 # === RUTA A: PROCESAMIENTO ACELERADO EN RAM CON MAPI TABLE ===
                 foreach ($entry in $tableEntries) {
-                    if ($AbortFile -and (Test-Path $AbortFile)) {
-                        Log-Message "Señal de parada segura recibida. Deteniendo proceso ordenadamente..." "WARN"
-                        $isAborted = $true
-                        break
-                    }
-
-                    if ($PauseFile -and (Test-Path $PauseFile)) {
-                        Log-Message "Proceso de importación pausado por el usuario. En espera de reanudación..." "WARN"
-                        while ($PauseFile -and (Test-Path $PauseFile)) {
-                            if ($AbortFile -and (Test-Path $AbortFile)) { break }
-                            Start-Sleep -Milliseconds 200
+                    if ($pstProcessedCount % 25 -eq 0) {
+                        if ($AbortFile -and [System.IO.File]::Exists($AbortFile)) {
+                            Log-Message "Señal de parada segura recibida. Deteniendo proceso ordenadamente..." "WARN"
+                            $isAborted = $true
+                            break
                         }
-                        if (-not ($AbortFile -and (Test-Path $AbortFile))) {
-                            Log-Message "Proceso de importación reanudado." "INFO"
+
+                        if ($PauseFile -and [System.IO.File]::Exists($PauseFile)) {
+                            Log-Message "Proceso de importación pausado por el usuario. En espera de reanudación..." "WARN"
+                            while ($PauseFile -and [System.IO.File]::Exists($PauseFile)) {
+                                if ($AbortFile -and [System.IO.File]::Exists($AbortFile)) { break }
+                                Start-Sleep -Milliseconds 200
+                            }
+                            if (-not ($AbortFile -and [System.IO.File]::Exists($AbortFile))) {
+                                Log-Message "Proceso de importación reanudado." "INFO"
+                            }
                         }
                     }
 
@@ -909,14 +921,10 @@ try {
                             continue
                         }
 
-                        # Determinar carpeta de destino final con enrutamiento y caché O(1)
+                        # Determinar carpeta de destino final con enrutamiento y caché O(1) de objeto, ID y Nombre
                         $finalDest = $baseDest
-                        if ($null -eq $finalDest) {
-                            $finalDest = Get-CachedDestBaseFolder $destStore $cf.RelPath $cf.Type
-                        }
-                        if ($null -eq $finalDest) {
-                            try { $finalDest = $destStore.GetDefaultFolder(6) } catch {}
-                        }
+                        $destId = $baseDestId
+                        $destName = $baseDestName
 
                         if ($config -and $config.routing_enabled -and $rcvd) {
                             $granularity = if ($config.routing_granularity) { $config.routing_granularity } else { "Mirror" }
@@ -926,7 +934,11 @@ try {
                                 $dateKey = "$baseDestId|$granularity|$y|$m"
                                 if ($dateKey -and $script:dateFolderCache.ContainsKey($dateKey)) {
                                     $cachedDest = $script:dateFolderCache[$dateKey]
-                                    if ($null -ne $cachedDest) { $finalDest = $cachedDest }
+                                    if ($null -ne $cachedDest) {
+                                        $finalDest = $cachedDest
+                                        if ($script:dateFolderIdCache.ContainsKey($dateKey)) { $destId = $script:dateFolderIdCache[$dateKey] }
+                                        if ($script:dateFolderNameCache.ContainsKey($dateKey)) { $destName = $script:dateFolderNameCache[$dateKey] }
+                                    }
                                 } else {
                                     $routedDest = $null
                                     if ($granularity -eq "YearsAndMonths") {
@@ -944,21 +956,25 @@ try {
                                     }
                                     if ($routedDest) {
                                         $finalDest = $routedDest
-                                        if ($dateKey) { $script:dateFolderCache[$dateKey] = $routedDest }
+                                        $dId = ""
+                                        $dName = ""
+                                        try { $dId = [string]$routedDest.EntryID } catch {}
+                                        try { $dName = [string]$routedDest.Name } catch {}
+                                        if ([string]::IsNullOrWhiteSpace($dId)) { $dId = if ($baseDestId) { $baseDestId } else { "DEFAULT_DEST" } }
+                                        if ([string]::IsNullOrWhiteSpace($dName)) { $dName = if ($baseDestName) { $baseDestName } else { "-" } }
+                                        $destId = $dId
+                                        $destName = $dName
+                                        if ($dateKey) {
+                                            $script:dateFolderCache[$dateKey] = $routedDest
+                                            $script:dateFolderIdCache[$dateKey] = $dId
+                                            $script:dateFolderNameCache[$dateKey] = $dName
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        # Deduplicación inteligente en memoria con destId 100% seguro contra null
-                        [string]$destId = ""
-                        if ($finalDest) {
-                            try { $destId = [string]$finalDest.EntryID } catch {}
-                        }
-                        if ([string]::IsNullOrWhiteSpace($destId)) {
-                            $destId = if ($baseDestId) { [string]$baseDestId } else { "DEFAULT_DEST" }
-                        }
-
+                        # Recuperar conjunto de claves de deduplicación directamente sin desenrollado
                         if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
                             $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
                             if ($config -and $config.deduplication_enabled -and $finalDest) {
@@ -997,7 +1013,7 @@ try {
                                     sender        = if ($sender) { $sender } else { "(Desconocido)" }
                                     date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
                                     source_folder = $cf.RelPath
-                                    dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
+                                    dest_folder   = $destName
                                     pst_name      = $pstName
                                     status        = "Duplicado Omitido"
                                     size_kb       = $itemKb
@@ -1043,7 +1059,7 @@ try {
                                     sender        = if ($sender) { $sender } else { "(Desconocido)" }
                                     date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
                                     source_folder = $cf.RelPath
-                                    dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
+                                    dest_folder   = $destName
                                     pst_name      = $pstName
                                     status        = "Importado"
                                     size_kb       = $itemKb
@@ -1055,7 +1071,9 @@ try {
                         $totalErrors++
                         $pstProcessedCount++
                         $script:globalProcessedItems++
-                        $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 1)
+                        if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
+                            $consecutiveThrottles = [math]::Min(10, $consecutiveThrottles + 1)
+                        }
                         $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
                         $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
                         try {
@@ -1068,7 +1086,7 @@ try {
                                     sender        = $safeSender
                                     date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
                                     source_folder = $cf.RelPath
-                                    dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
+                                    dest_folder   = $destName
                                     pst_name      = $pstName
                                     status        = "Error"
                                     size_kb       = 0.0
@@ -1079,191 +1097,196 @@ try {
                     } finally {
                         if ($null -ne $copy) {
                             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                            $copy = $null
                         }
                         if ($null -ne $item) {
                             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            $item = $null
                         }
                     }
 
                     if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                        Start-Sleep -Milliseconds ([math]::Min(500, 25 * $consecutiveThrottles))
+                        Start-Sleep -Milliseconds ([math]::Min(250, 25 * $consecutiveThrottles))
                         $consecutiveThrottles--
                     }
 
                     Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
-                    if ($pstProcessedCount % 100 -eq 0) {
-                        [System.GC]::Collect()
-                        [System.GC]::WaitForPendingFinalizers()
+                    if ($pstProcessedCount % 1000 -eq 0) {
+                        [System.GC]::Collect(1, [System.GCCollectionMode]::Optimized)
                     }
                 }
             } else {
                 # === RUTA B: FALLBACK CLÁSICO SI LA CARPETA NO SOPORTA MAPI TABLE ===
                 for ($idx = $itemCount; $idx -ge 1; $idx--) {
-                # Comprobar protocolo de parada segura
-                if ($AbortFile -and (Test-Path $AbortFile)) {
-                    Log-Message "Señal de parada segura recibida. Deteniendo proceso ordenadamente..." "WARN"
-                    $isAborted = $true
-                    break
-                }
+                    if ($pstProcessedCount % 25 -eq 0) {
+                        if ($AbortFile -and [System.IO.File]::Exists($AbortFile)) {
+                            Log-Message "Señal de parada segura recibida. Deteniendo proceso ordenadamente..." "WARN"
+                            $isAborted = $true
+                            break
+                        }
 
-                # Comprobar pausa solicitada por el usuario
-                if ($PauseFile -and (Test-Path $PauseFile)) {
-                    Log-Message "Proceso de importación pausado por el usuario. En espera de reanudación..." "WARN"
-                    while ($PauseFile -and (Test-Path $PauseFile)) {
-                        if ($AbortFile -and (Test-Path $AbortFile)) { break }
-                        Start-Sleep -Milliseconds 200
-                    }
-                    if (-not ($AbortFile -and (Test-Path $AbortFile))) {
-                        Log-Message "Proceso de importación reanudado." "INFO"
-                    }
-                }
-
-                $item = $null
-                $copy = $null
-                try {
-                    $item = $folderItems.Item($idx)
-                } catch {
-                    $totalErrors++
-                    $pstProcessedCount++
-                    continue
-                }
-
-                if ($null -eq $item) {
-                    $pstProcessedCount++
-                    continue
-                }
-
-                try {
-                    # Extraer fecha del correo
-                    $rcvd = $null
-                    try { $rcvd = $item.ReceivedTime } catch {}
-                    if ($null -eq $rcvd -or $rcvd.Year -lt 1980) {
-                        try { $rcvd = $item.SentOn } catch {}
-                    }
-                    if ($null -eq $rcvd) {
-                        $rcvd = Get-Date
-                    }
-
-                    # Filtro por años específicos si está configurado
-                    if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
-                        $pstProcessedCount++
-                        $script:globalProcessedItems++
-                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
-                        continue
-                    }
-
-                    # Filtro por meses específicos si está configurado
-                    if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
-                        $pstProcessedCount++
-                        $script:globalProcessedItems++
-                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
-                        continue
-                    }
-
-                    # Determinar carpeta de destino final con enrutamiento y caché O(1)
-                    $finalDest = $baseDest
-                    if ($null -eq $finalDest) {
-                        $finalDest = Get-CachedDestBaseFolder $destStore $cf.RelPath $cf.Type
-                    }
-                    if ($null -eq $finalDest) {
-                        try { $finalDest = $destStore.GetDefaultFolder(6) } catch {}
-                    }
-
-                    if ($config -and $config.routing_enabled -and $rcvd) {
-                        $granularity = if ($config.routing_granularity) { $config.routing_granularity } else { "Mirror" }
-                        if ($granularity -ne "Mirror") {
-                            $y = $rcvd.Year
-                            $m = $rcvd.Month
-                            $dateKey = "$baseDestId|$granularity|$y|$m"
-                            if ($dateKey -and $script:dateFolderCache.ContainsKey($dateKey)) {
-                                $cachedDest = $script:dateFolderCache[$dateKey]
-                                if ($null -ne $cachedDest) { $finalDest = $cachedDest }
-                            } else {
-                                $routedDest = $null
-                                if ($granularity -eq "YearsAndMonths") {
-                                    $yearName = "$y"
-                                    $yearFolder = if ($baseDest) { Get-OrCreateFolder $baseDest $yearName } else { $null }
-                                    $mName = if ($m -and $monthNames.ContainsKey($m)) { $monthNames[$m] } else { "{0:D2}" -f $m }
-                                    if ($yearFolder) {
-                                        $routedDest = Get-OrCreateFolder $yearFolder $mName
-                                    }
-                                } elseif ($granularity -eq "Years") {
-                                    $yearName = "$y"
-                                    if ($baseDest) {
-                                        $routedDest = Get-OrCreateFolder $baseDest $yearName
-                                    }
-                                }
-                                if ($routedDest) {
-                                    $finalDest = $routedDest
-                                    if ($dateKey) { $script:dateFolderCache[$dateKey] = $routedDest }
-                                }
+                        if ($PauseFile -and [System.IO.File]::Exists($PauseFile)) {
+                            Log-Message "Proceso de importación pausado por el usuario. En espera de reanudación..." "WARN"
+                            while ($PauseFile -and [System.IO.File]::Exists($PauseFile)) {
+                                if ($AbortFile -and [System.IO.File]::Exists($AbortFile)) { break }
+                                Start-Sleep -Milliseconds 200
+                            }
+                            if (-not ($AbortFile -and [System.IO.File]::Exists($AbortFile))) {
+                                Log-Message "Proceso de importación reanudado." "INFO"
                             }
                         }
                     }
 
-                    # Deduplicación inteligente con MAPI Table (destId 100% seguro contra null)
-                    [string]$destId = ""
-                    if ($finalDest) {
-                        try { $destId = [string]$finalDest.EntryID } catch {}
-                    }
-                    if ([string]::IsNullOrWhiteSpace($destId)) {
-                        $destId = if ($baseDestId) { [string]$baseDestId } else { "DEFAULT_DEST" }
+                    $item = $null
+                    $copy = $null
+                    try {
+                        $item = $folderItems.Item($idx)
+                    } catch {
+                        $totalErrors++
+                        $pstProcessedCount++
+                        continue
                     }
 
-                    if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
-                        $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
-                        if ($config -and $config.deduplication_enabled -and $finalDest) {
-                            Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
+                    if ($null -eq $item) {
+                        $pstProcessedCount++
+                        continue
+                    }
+
+                    try {
+                        # Extraer fecha del correo
+                        $rcvd = $null
+                        try { $rcvd = $item.ReceivedTime } catch {}
+                        if ($null -eq $rcvd -or $rcvd.Year -lt 1980) {
+                            try { $rcvd = $item.SentOn } catch {}
                         }
-                    }
-                    $folderSet = $targetSets[$destId]
-                    if ($folderSet -isnot [System.Collections.Generic.HashSet[string]]) {
-                        $folderSet = New-Object 'System.Collections.Generic.HashSet[string]'
-                        $targetSets[$destId] = $folderSet
-                    }
+                        if ($null -eq $rcvd) {
+                            $rcvd = Get-Date
+                        }
 
-                    $subj = $item.Subject
-                    $sender = $item.SenderEmailAddress
-                    $cKey = "$subj|$sender|$($rcvd.ToString('yyyyMMddHHmmss'))"
+                        # Filtro por años específicos si está configurado
+                        if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+                            Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+                            continue
+                        }
 
-                    $isDuplicate = $false
-                    $mid = $null
-                    if ($config -and $config.deduplication_enabled) {
-                        # 1. Comprobar clave compuesta primero (instantáneo en RAM, 0 llamadas COM)
-                        if ($folderSet.Contains($cKey)) {
-                            $isDuplicate = $true
-                        } else {
-                            # 2. Solo si no coincide la clave compuesta, consultar Message-ID MAPI
-                            try {
-                                $mid = $item.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
-                            } catch {}
-                            if ($mid -and ($mid -is [string]) -and $folderSet.Contains($mid.Trim())) {
+                        # Filtro por meses específicos si está configurado
+                        if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+                            Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+                            continue
+                        }
+
+                        # Determinar carpeta de destino final con enrutamiento y caché O(1) de objeto, ID y Nombre
+                        $finalDest = $baseDest
+                        $destId = $baseDestId
+                        $destName = $baseDestName
+
+                        if ($config -and $config.routing_enabled -and $rcvd) {
+                            $granularity = if ($config.routing_granularity) { $config.routing_granularity } else { "Mirror" }
+                            if ($granularity -ne "Mirror") {
+                                $y = $rcvd.Year
+                                $m = $rcvd.Month
+                                $dateKey = "$baseDestId|$granularity|$y|$m"
+                                if ($dateKey -and $script:dateFolderCache.ContainsKey($dateKey)) {
+                                    $cachedDest = $script:dateFolderCache[$dateKey]
+                                    if ($null -ne $cachedDest) {
+                                        $finalDest = $cachedDest
+                                        if ($script:dateFolderIdCache.ContainsKey($dateKey)) { $destId = $script:dateFolderIdCache[$dateKey] }
+                                        if ($script:dateFolderNameCache.ContainsKey($dateKey)) { $destName = $script:dateFolderNameCache[$dateKey] }
+                                    }
+                                } else {
+                                    $routedDest = $null
+                                    if ($granularity -eq "YearsAndMonths") {
+                                        $yearName = "$y"
+                                        $yearFolder = if ($baseDest) { Get-OrCreateFolder $baseDest $yearName } else { $null }
+                                        $mName = if ($m -and $monthNames.ContainsKey($m)) { $monthNames[$m] } else { "{0:D2}" -f $m }
+                                        if ($yearFolder) {
+                                            $routedDest = Get-OrCreateFolder $yearFolder $mName
+                                        }
+                                    } elseif ($granularity -eq "Years") {
+                                        $yearName = "$y"
+                                        if ($baseDest) {
+                                            $routedDest = Get-OrCreateFolder $baseDest $yearName
+                                        }
+                                    }
+                                    if ($routedDest) {
+                                        $finalDest = $routedDest
+                                        $dId = ""
+                                        $dName = ""
+                                        try { $dId = [string]$routedDest.EntryID } catch {}
+                                        try { $dName = [string]$routedDest.Name } catch {}
+                                        if ([string]::IsNullOrWhiteSpace($dId)) { $dId = if ($baseDestId) { $baseDestId } else { "DEFAULT_DEST" } }
+                                        if ([string]::IsNullOrWhiteSpace($dName)) { $dName = if ($baseDestName) { $baseDestName } else { "-" } }
+                                        $destId = $dId
+                                        $destName = $dName
+                                        if ($dateKey) {
+                                            $script:dateFolderCache[$dateKey] = $routedDest
+                                            $script:dateFolderIdCache[$dateKey] = $dId
+                                            $script:dateFolderNameCache[$dateKey] = $dName
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
+                            $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
+                            if ($config -and $config.deduplication_enabled -and $finalDest) {
+                                Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
+                            }
+                        }
+                        $folderSet = $targetSets[$destId]
+                        if ($folderSet -isnot [System.Collections.Generic.HashSet[string]]) {
+                            $folderSet = New-Object 'System.Collections.Generic.HashSet[string]'
+                            $targetSets[$destId] = $folderSet
+                        }
+
+                        $subj = $item.Subject
+                        $sender = $item.SenderEmailAddress
+                        $cKey = "$subj|$sender|$($rcvd.ToString('yyyyMMddHHmmss'))"
+
+                        $isDuplicate = $false
+                        $mid = $null
+                        if ($config -and $config.deduplication_enabled) {
+                            if ($folderSet.Contains($cKey)) {
                                 $isDuplicate = $true
+                            } else {
+                                try {
+                                    $mid = $item.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                                } catch {}
+                                if ($mid -and ($mid -is [string]) -and $folderSet.Contains($mid.Trim())) {
+                                    $isDuplicate = $true
+                                }
                             }
                         }
-                    }
 
-                    if ($isDuplicate) {
-                        $totalDuplicates++
-                        $pstProcessedCount++
-                        $script:globalProcessedItems++
-                        if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
-                            $script:duplicateSampleCount++
-                            $itemKb = 0.0
-                            try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
-                            $processedItemsList.Add(@{
-                                subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
-                                sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                                date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
-                                source_folder = $cf.RelPath
-                                dest_folder   = $finalDest.Name
-                                pst_name      = $pstName
-                                status        = "Duplicado Omitido"
-                                size_kb       = $itemKb
-                            })
+                        if ($isDuplicate) {
+                            $totalDuplicates++
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+                            if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
+                                $script:duplicateSampleCount++
+                                $itemKb = 0.0
+                                try { $itemKb = [math]::Round($item.Size / 1024.0, 1) } catch {}
+                                $processedItemsList.Add(@{
+                                    subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                    sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                                    date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
+                                    source_folder = $cf.RelPath
+                                    dest_folder   = $destName
+                                    pst_name      = $pstName
+                                    status        = "Duplicado Omitido"
+                                    size_kb       = $itemKb
+                                })
+                            }
+                            Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+                            continue
                         }
-                    } else {
+
                         # Transferencia: Copiar (predeterminado) o Mover
                         $itemBytes = [int64]0
                         try { if ($item.Size) { $itemBytes = [int64]$item.Size } } catch {}
@@ -1271,21 +1294,18 @@ try {
 
                         if ($config -and $config.transfer_mode -eq "Move") {
                             $item.Move($finalDest) | Out-Null
-                            $totalImported++
-                            $totalImportedBytes += $itemBytes
-                            $pstProcessedCount++
-                            $script:globalProcessedItems++
                         } else {
                             $copy = $item.Copy()
                             $copy.Move($finalDest) | Out-Null
                             if ($null -ne $copy) {
                                 try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                                $copy = $null
                             }
-                            $totalImported++
-                            $totalImportedBytes += $itemBytes
-                            $pstProcessedCount++
-                            $script:globalProcessedItems++
                         }
+                        $totalImported++
+                        $totalImportedBytes += $itemBytes
+                        $pstProcessedCount++
+                        $script:globalProcessedItems++
 
                         if ($processedItemsList.Count -lt 5000) {
                             $processedItemsList.Add(@{
@@ -1293,14 +1313,13 @@ try {
                                 sender        = if ($sender) { $sender } else { "(Desconocido)" }
                                 date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
                                 source_folder = $cf.RelPath
-                                dest_folder   = $finalDest.Name
+                                dest_folder   = $destName
                                 pst_name      = $pstName
                                 status        = "Importado"
                                 size_kb       = $itemKb
                             })
                         }
 
-                        # Registrar claves para deduplicar futuros correos de la misma sesión
                         if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
                             [void]$folderSet.Add($cKey)
                             if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
@@ -1308,69 +1327,59 @@ try {
                             }
                         }
 
-                        # Throttling adaptativo inteligente (dynamic backoff) y micro-pausa cooperativa
-                        if ($config -and $config.adaptive_throttling) {
-                            if ($consecutiveThrottles -gt 0) {
-                                Start-Sleep -Milliseconds ([math]::Min(500, 25 * $consecutiveThrottles))
-                                $consecutiveThrottles--
-                            } elseif ($pstProcessedCount % 10 -eq 0) {
-                                [System.Threading.Thread]::Sleep(2)
+                        if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
+                            Start-Sleep -Milliseconds ([math]::Min(250, 25 * $consecutiveThrottles))
+                            $consecutiveThrottles--
+                        }
+
+                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+
+                        if ($pstProcessedCount % 1000 -eq 0) {
+                            [System.GC]::Collect(1, [System.GCCollectionMode]::Optimized)
+                        }
+                    }
+                    catch {
+                        $errStr = "$_"
+                        $totalErrors++
+                        $pstProcessedCount++
+                        $script:globalProcessedItems++
+                        if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
+                            $consecutiveThrottles = [math]::Min(10, $consecutiveThrottles + 1)
+                        }
+                        $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
+                        $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
+                        try {
+                            Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo #${idx} - $errStr"
+                        } catch {}
+                        try {
+                            if ($processedItemsList.Count -lt 5000) {
+                                $processedItemsList.Add(@{
+                                    subject       = $safeSubj
+                                    sender        = $safeSender
+                                    date          = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                                    source_folder = $cf.RelPath
+                                    dest_folder   = "-"
+                                    pst_name      = $pstName
+                                    status        = "Error"
+                                    size_kb       = 0.0
+                                    error_message = $errStr
+                                })
                             }
-                        } elseif ($pstProcessedCount % 5 -eq 0) {
-                            [System.Threading.Thread]::Sleep(1)
+                        } catch {}
+
+                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+                    }
+                    finally {
+                        if ($null -ne $copy) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                            $copy = $null
+                        }
+                        if ($null -ne $item) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            $item = $null
                         }
                     }
-
-                    # Pausa periódica cooperativa cada 10 correos para ceder CPU y no saturar Windows Explorer
-                    if ($pstProcessedCount % 10 -eq 0) {
-                        [System.Threading.Thread]::Sleep(1)
-                    }
-
-                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
-
-                    if ($pstProcessedCount % 100 -eq 0) {
-                        [System.GC]::Collect()
-                        [System.GC]::WaitForPendingFinalizers()
-                    }
                 }
-                catch {
-                    $errStr = "$_"
-                    $totalErrors++
-                    $pstProcessedCount++
-                    $script:globalProcessedItems++
-                    $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 1)
-                    $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
-                    $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
-                    try {
-                        Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo #${idx} - $errStr"
-                    } catch {}
-                    try {
-                        if ($processedItemsList.Count -lt 5000) {
-                            $processedItemsList.Add(@{
-                                subject       = $safeSubj
-                                sender        = $safeSender
-                                date          = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-                                source_folder = $cf.RelPath
-                                dest_folder   = "-"
-                                pst_name      = $pstName
-                                status        = "Error"
-                                size_kb       = 0.0
-                                error_message = $errStr
-                            })
-                        }
-                    } catch {}
-
-                    Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
-                }
-                finally {
-                    if ($null -ne $copy) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
-                    }
-                    if ($null -ne $item) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
-                    }
-                }
-            }
             }
 
             # Liberar colección de elementos y carpeta de origen al concluir la carpeta
