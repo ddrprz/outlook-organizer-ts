@@ -184,8 +184,9 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
             continue
         }
 
-        # Manejar contenedores intermedios transparentes de Outlook / Exchange (Top of Personal Folders, etc.)
-        if ($subName -match "^(Top of Personal Folders|Top of Information Store|Elementos de nivel superior del almac[eé]n personal|IPM_SUBTREE)$") {
+        # Manejar contenedores intermedios transparentes de Outlook / Exchange
+        $pstBaseName = [System.IO.Path]::GetFileNameWithoutExtension($pstPath)
+        if ($subName -match "^(Top of Personal Folders|Top of Information Store|Elementos de nivel superior del almac[eé]n personal|IPM_SUBTREE|IPM_ROOT|Carpetas personales|Personal Folders|Archivo de datos de Outlook|Outlook Data File|Archivo de datos|Datos de Outlook|Almac[eé]n personal|Personal Storage)$" -or ($pstBaseName -and $subName -eq $pstBaseName)) {
             Collect-CandidateFolders $sub "" $collector $selectedPathsSet $hasSubpaths $config
             continue
         }
@@ -193,29 +194,51 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
         $subPath = if ($currentPath -eq "") { $subName } else { "$currentPath\$subName" }
         $fType = Get-FolderType $subName
 
-        $shouldInclude = $false
+        # Configuración de permisos
+        $allowInbox = if ($config -and $null -ne $config.include_inbox) { [bool]$config.include_inbox } else { $true }
+        $allowSent = if ($config -and $null -ne $config.include_sent) { [bool]$config.include_sent } else { $true }
+        $allowDeleted = if ($config -and $null -ne $config.include_deleted) { [bool]$config.include_deleted } else { $false }
+        $allowCustom = if ($config -and $null -ne $config.include_custom_folders) { [bool]$config.include_custom_folders } else { $true }
 
-        # A) Coincidencia de categoría general según flags de configuración
-        $hasCustomWildcard = $false
         if ($selectedPathsSet -and $selectedPathsSet.Count -gt 0) {
-            if ($selectedPathsSet.Contains("Carpetas personalizadas") -or $selectedPathsSet.Contains("Carpetas personalizadas / subcarpetas")) {
-                $hasCustomWildcard = $true
+            if ($selectedPathsSet.Contains("Carpetas personalizadas") -or $selectedPathsSet.Contains("Carpetas personalizadas / subcarpetas") -or $selectedPathsSet.Contains("Carpetas personalizadas / subcarpetas adicionales")) {
+                $allowCustom = $true
             }
         }
 
-        $allowInbox = if ($config) { [bool]$config.include_inbox } else { $true }
-        $allowSent = if ($config) { [bool]$config.include_sent } else { $true }
-        $allowDeleted = if ($config) { [bool]$config.include_deleted } else { $false }
-        $allowCustom = if ($config) { [bool]$config.include_custom_folders } else { $true }
-        if ($hasCustomWildcard) { $allowCustom = $true }
+        # Si algún ancestro es 'deleted' y no está permitido deleted, omitir
+        if (-not $allowDeleted) {
+            $pathParts = $subPath -split "[\\/]"
+            $isUnderDeleted = $false
+            foreach ($p in $pathParts) {
+                if ($p -match "^(Elementos eliminados|Deleted Items|Trash)$") {
+                    $isUnderDeleted = $true
+                    break
+                }
+            }
+            if ($isUnderDeleted) { continue }
+        }
 
-        # B) Coincidencia específica en selectedPathsSet
-        if ($selectedPathsSet -and $selectedPathsSet.Count -gt 0) {
-            # 1. Coincidencia exacta de ruta relativa
-            if ($selectedPathsSet.Contains($subPath)) {
+        # Si es deleted y no está permitido, omitir
+        if ($fType -eq "deleted" -and -not $allowDeleted) {
+            continue
+        }
+
+        $shouldInclude = $false
+
+        # Si no hay filtros específicos de rutas, incluir según flags generales
+        if ($null -eq $selectedPathsSet -or $selectedPathsSet.Count -eq 0) {
+            switch ($fType) {
+                "inbox"   { $shouldInclude = $allowInbox }
+                "sent"    { $shouldInclude = $allowSent }
+                "deleted" { $shouldInclude = $allowDeleted }
+                default   { $shouldInclude = $allowCustom }
+            }
+        } else {
+            # Comprobación de coincidencia con selectedPathsSet
+            if ($selectedPathsSet.Contains($subPath) -or $selectedPathsSet.Contains($subName)) {
                 $shouldInclude = $true
             } else {
-                # 2. Coincidencia si algún ancestro directo de la carpeta está en selectedPathsSet
                 $parts = $subPath -split "[\\/]"
                 $running = ""
                 foreach ($part in $parts) {
@@ -225,41 +248,37 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
                         break
                     }
                 }
-                # 3. Coincidencia por ancestro raíz o nombre de subcarpeta
                 if (-not $shouldInclude) {
                     $topAncestor = $parts[0]
-                    if ($selectedPathsSet.Contains($topAncestor) -or $selectedPathsSet.Contains($subName)) {
+                    if ($selectedPathsSet.Contains($topAncestor)) {
                         $shouldInclude = $true
                     }
                 }
             }
-        }
 
-        # C) Validación por tipo de carpeta independiente del idioma (Inbox vs Bandeja de entrada, etc.)
-        if (-not $shouldInclude) {
-            switch ($fType) {
-                "inbox" {
-                    if ($allowInbox -or ($selectedPathsSet -and ($selectedPathsSet.Contains("Bandeja de entrada") -or $selectedPathsSet.Contains("Inbox")))) {
-                        $shouldInclude = $true
+            # Si no hubo coincidencia directa por ruta, evaluar por tipo y permisos generales
+            if (-not $shouldInclude) {
+                switch ($fType) {
+                    "inbox" {
+                        if ($allowInbox -or $selectedPathsSet.Contains("Bandeja de entrada") -or $selectedPathsSet.Contains("Inbox")) {
+                            $shouldInclude = $true
+                        }
                     }
-                }
-                "sent" {
-                    if ($allowSent -or ($selectedPathsSet -and ($selectedPathsSet.Contains("Elementos enviados") -or $selectedPathsSet.Contains("Sent Items") -or $selectedPathsSet.Contains("Sent")))) {
-                        $shouldInclude = $true
+                    "sent" {
+                        if ($allowSent -or $selectedPathsSet.Contains("Elementos enviados") -or $selectedPathsSet.Contains("Sent Items") -or $selectedPathsSet.Contains("Sent")) {
+                            $shouldInclude = $true
+                        }
                     }
-                }
-                "deleted" {
-                    if ($allowDeleted -or ($selectedPathsSet -and ($selectedPathsSet.Contains("Elementos eliminados") -or $selectedPathsSet.Contains("Deleted Items")))) {
-                        $shouldInclude = $true
+                    "deleted" {
+                        if ($allowDeleted -or $selectedPathsSet.Contains("Elementos eliminados") -or $selectedPathsSet.Contains("Deleted Items")) {
+                            $shouldInclude = $true
+                        }
                     }
-                }
-                "custom" {
-                    if ($allowCustom -or $null -eq $selectedPathsSet -or $selectedPathsSet.Count -eq 0) {
-                        $shouldInclude = $true
+                    default {
+                        if ($allowCustom) {
+                            $shouldInclude = $true
+                        }
                     }
-                }
-                default {
-                    if ($allowCustom) { $shouldInclude = $true }
                 }
             }
         }
@@ -338,7 +357,7 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
             try {
                 $items = $targetFolder.Items
                 $count = $items.Count
-                $maxInspect = [math]::Min($count, 10000)
+                $maxInspect = [math]::Min($count, 1500)
                 for ($k = 1; $k -le $maxInspect; $k++) {
                     $existing = $null
                     try {
@@ -607,26 +626,52 @@ try {
             try { $null = $destStore.DisplayName } catch { $destStore = Get-TargetMailboxStore $namespace $config }
         }
 
-        # Verificar si ya está montado
-        $pstStore = $null
-        $fullPstPath = [System.IO.Path]::GetFullPath($pstPath).ToLowerInvariant()
-        foreach ($s in $namespace.Stores) {
-            $p = ""
-            try { $p = $s.FilePath } catch {}
-            if ($p) {
-                try {
-                    if ([System.IO.Path]::GetFullPath($p).ToLowerInvariant() -eq $fullPstPath) {
-                        $pstStore = $s
-                        break
-                    }
-                } catch {}
+        function Find-PstStore($ns, [string]$targetPath, [string]$targetName) {
+            $fullTarget = [System.IO.Path]::GetFullPath($targetPath).ToLowerInvariant()
+            $fileTarget = [System.IO.Path]::GetFileName($targetPath).ToLowerInvariant()
+            $baseTarget = [System.IO.Path]::GetFileNameWithoutExtension($targetPath).ToLowerInvariant()
+            $nameTarget = $targetName.ToLowerInvariant()
+
+            # 1. Búsqueda exacta por FilePath
+            foreach ($s in $ns.Stores) {
+                $p = ""
+                try { $p = $s.FilePath } catch {}
+                if ($p) {
+                    try {
+                        $fullP = [System.IO.Path]::GetFullPath($p).ToLowerInvariant()
+                        if ($fullP -eq $fullTarget) { return $s }
+                        if ([System.IO.Path]::GetFileName($fullP).ToLowerInvariant() -eq $fileTarget) { return $s }
+                    } catch {}
+                }
             }
+
+            # 2. Búsqueda por DisplayName del almacén
+            foreach ($s in $ns.Stores) {
+                $dn = ""
+                try { $dn = $s.DisplayName } catch {}
+                if ($dn) {
+                    $dnLow = $dn.Trim().ToLowerInvariant()
+                    if ($dnLow -eq $baseTarget -or $dnLow -eq $nameTarget -or $dnLow -eq $fileTarget) {
+                        return $s
+                    }
+                }
+            }
+            return $null
         }
 
+        # Verificar si ya está montado
+        $pstStore = Find-PstStore $namespace $pstPath $pstName
         $wasMountedByUs = $false
+
         if ($pstStore) {
             Log-Message "PST ya cargado en sesión MAPI: $($pstStore.DisplayName)."
         } else {
+            # Registrar StoreIDs previos para detección inequívoca tras AddStoreEx
+            $storesBefore = @{}
+            foreach ($s in $namespace.Stores) {
+                try { $storesBefore[$s.StoreID] = $true } catch {}
+            }
+
             try {
                 $namespace.AddStoreEx($pstPath, 1) # 1 = olStoreDefault
             } catch {
@@ -639,19 +684,18 @@ try {
                 }
             }
 
-            for ($retry = 0; $retry -lt 5; $retry++) {
-                Start-Sleep -Milliseconds 150
+            for ($retry = 0; $retry -lt 25; $retry++) {
+                Start-Sleep -Milliseconds 200
+                $pstStore = Find-PstStore $namespace $pstPath $pstName
+                if ($null -ne $pstStore) { break }
+
                 foreach ($s in $namespace.Stores) {
-                    $p = ""
-                    try { $p = $s.FilePath } catch {}
-                    if ($p) {
-                        try {
-                            if ([System.IO.Path]::GetFullPath($p).ToLowerInvariant() -eq $fullPstPath) {
-                                $pstStore = $s
-                                break
-                            }
-                        } catch {}
-                    }
+                    try {
+                        if (-not $storesBefore.ContainsKey($s.StoreID)) {
+                            $pstStore = $s
+                            break
+                        }
+                    } catch {}
                 }
                 if ($null -ne $pstStore) { break }
             }
@@ -659,12 +703,12 @@ try {
             if ($pstStore) {
                 $wasMountedByUs = $true
                 $storesToUnmount += $pstStore
-                Log-Message "PST montado exitosamente en MAPI."
+                Log-Message "PST montado exitosamente en MAPI: $($pstStore.DisplayName)."
             }
         }
 
         if ($null -eq $pstStore) {
-            Record-ExecutionError "pst_error" $pstName "" "" "" "No se pudo acceder al almacén MAPI de: $pstName"
+            Record-ExecutionError "pst_error" $pstName "" "" "" "No se pudo acceder al almacén MAPI de: $pstName tras reintentos."
             $totalErrors++
             continue
         }
@@ -700,11 +744,14 @@ try {
         # Pre-conteo de elementos para barra de progreso precisa
         $totalPstItems = 0
         foreach ($cf in $candidateFolders) {
-            try { $totalPstItems += $cf.Folder.Items.Count } catch {}
+            $cItems = 0
+            try { $cItems = $cf.Folder.Items.Count } catch {}
+            $totalPstItems += $cItems
+            Log-Message "  -> Carpeta identificada: '$($cf.RelPath)' ($cItems correos)"
         }
         $script:globalTotalItems += $totalPstItems
 
-        Log-Message "PST '$pstName': $totalPstItems correos encontrados en carpetas seleccionadas."
+        Log-Message "PST '$pstName': $($candidateFolders.Length) carpetas identificadas, $totalPstItems correos totales."
 
         Send-Telemetry @{
             type           = "progress"
@@ -1305,7 +1352,13 @@ try {
     # Guardar reporte de elementos procesados y registro de errores en archivos temporales JSON para el informe interactivo HTML y auditoría
     $itemsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_items.json"
     try {
-        $itemsJson = $processedItemsList | ConvertTo-Json -Depth 3 -Compress
+        $itemsJson = if ($processedItemsList.Count -eq 0) {
+            "[]"
+        } elseif ($processedItemsList.Count -eq 1) {
+            "[" + ($processedItemsList[0] | ConvertTo-Json -Depth 4 -Compress) + "]"
+        } else {
+            $processedItemsList | ConvertTo-Json -Depth 4 -Compress
+        }
         [System.IO.File]::WriteAllText($itemsTempFile, $itemsJson, [System.Text.Encoding]::UTF8)
         Log-Message "Historial de correos ($($processedItemsList.Count) items) preparado para informe interactivo."
     } catch {
@@ -1314,7 +1367,13 @@ try {
 
     $errorsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_errors.json"
     try {
-        $errorsJson = $errorsList | ConvertTo-Json -Depth 3 -Compress
+        $errorsJson = if ($errorsList.Count -eq 0) {
+            "[]"
+        } elseif ($errorsList.Count -eq 1) {
+            "[" + ($errorsList[0] | ConvertTo-Json -Depth 4 -Compress) + "]"
+        } else {
+            $errorsList | ConvertTo-Json -Depth 4 -Compress
+        }
         [System.IO.File]::WriteAllText($errorsTempFile, $errorsJson, [System.Text.Encoding]::UTF8)
         Log-Message "Registro de incidencias ($($errorsList.Count) errores) preparado para auditoría e informe."
     } catch {

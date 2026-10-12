@@ -58,29 +58,76 @@ try {
         } catch {}
     }
 
-    # Verificar si el PST ya está montado
-    foreach ($s in $namespace.Stores) {
-        if ($s.FilePath -and ($s.FilePath.Trim().ToLower() -eq $PstPath.Trim().ToLower())) {
-            $pstStore = $s
-            break
+    function Find-PstStore($ns, [string]$targetPath) {
+        $fullTarget = [System.IO.Path]::GetFullPath($targetPath).ToLowerInvariant()
+        $fileTarget = [System.IO.Path]::GetFileName($targetPath).ToLowerInvariant()
+        $baseTarget = [System.IO.Path]::GetFileNameWithoutExtension($targetPath).ToLowerInvariant()
+
+        foreach ($s in $ns.Stores) {
+            $p = ""
+            try { $p = $s.FilePath } catch {}
+            if ($p) {
+                try {
+                    $fullP = [System.IO.Path]::GetFullPath($p).ToLowerInvariant()
+                    if ($fullP -eq $fullTarget) { return $s }
+                    if ([System.IO.Path]::GetFileName($fullP).ToLowerInvariant() -eq $fileTarget) { return $s }
+                } catch {}
+            }
         }
+        foreach ($s in $ns.Stores) {
+            $dn = ""
+            try { $dn = $s.DisplayName } catch {}
+            if ($dn) {
+                $dnLow = $dn.Trim().ToLowerInvariant()
+                if ($dnLow -eq $baseTarget -or $dnLow -eq $fileTarget) {
+                    return $s
+                }
+            }
+        }
+        return $null
     }
 
+    # Verificar si el PST ya está montado
+    $pstStore = Find-PstStore $namespace $PstPath
+
     if (-not $pstStore) {
-        $namespace.AddStoreEx($PstPath, 1) # 1 = olStoreDefault (Unicode)
-        Start-Sleep -Milliseconds 150
+        $storesBefore = @{}
         foreach ($s in $namespace.Stores) {
-            if ($s.FilePath -and ($s.FilePath.Trim().ToLower() -eq $PstPath.Trim().ToLower())) {
-                $pstStore = $s
-                $wasMountedByUs = $true
-                break
+            try { $storesBefore[$s.StoreID] = $true } catch {}
+        }
+
+        try {
+            $namespace.AddStoreEx($PstPath, 1) # 1 = olStoreDefault (Unicode)
+        } catch {
+            try {
+                $namespace.AddStoreEx($PstPath, 2)
+            } catch {}
+        }
+
+        for ($retry = 0; $retry -lt 25; $retry++) {
+            Start-Sleep -Milliseconds 200
+            $pstStore = Find-PstStore $namespace $PstPath
+            if ($null -ne $pstStore) { break }
+
+            foreach ($s in $namespace.Stores) {
+                try {
+                    if (-not $storesBefore.ContainsKey($s.StoreID)) {
+                        $pstStore = $s
+                        break
+                    }
+                } catch {}
             }
+            if ($null -ne $pstStore) { break }
+        }
+
+        if ($pstStore) {
+            $wasMountedByUs = $true
         }
     }
 
     if (-not $pstStore) {
         $errObj = @{
-            error = "No se pudo montar el almacén MAPI para el archivo PST: '$fileName'"
+            error = "No se pudo montar el almacén MAPI para el archivo PST tras reintentos: '$fileName'"
         }
         Write-Output ($errObj | ConvertTo-Json -Compress)
         exit 0
@@ -91,6 +138,22 @@ try {
     # Función recursiva para explorar carpetas, jerarquía y métricas temporales
     function Inspect-Folder($folder, [string]$parentPath = "") {
         $fName = $folder.Name
+        # Ignorar carpetas internas de sistema
+        if ($fName -match "^(Yammer Root|Quick Step Settings|Conversation History|Social Activity Provider RSS Feeds|Sync Issues|Problemas de sincronización|Conflictos|Errores locales|Fallos del servidor|Journal|Diario|Notes|Notas|Suggested Contacts|Contactos sugeridos)$") {
+            return
+        }
+
+        # Desplegar contenedores intermedios transparentes
+        $pstBase = [System.IO.Path]::GetFileNameWithoutExtension($PstPath)
+        if ($fName -match "^(Top of Personal Folders|Top of Information Store|Elementos de nivel superior del almac[eé]n personal|IPM_SUBTREE|IPM_ROOT|Carpetas personales|Personal Folders|Archivo de datos de Outlook|Outlook Data File|Archivo de datos|Datos de Outlook|Almac[eé]n personal|Personal Storage)$" -or ($pstBase -and $fName -eq $pstBase)) {
+            try {
+                foreach ($sub in $folder.Folders) {
+                    Inspect-Folder $sub $parentPath
+                }
+            } catch {}
+            return
+        }
+
         $relPath = if ($parentPath) { "$parentPath\$fName" } else { $fName }
         $fCount = 0
         try {
