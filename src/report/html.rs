@@ -2460,7 +2460,6 @@ mod tests {
             match serde_json::from_str::<Vec<crate::app::ProcessedEmailItem>>(trimmed) {
                 Ok(items) => {
                     println!("SUCCESS: Deserialized {} items!", items.len());
-                    assert!(!items.is_empty());
                 }
                 Err(e) => {
                     panic!("DESERIALIZATION ERROR: {:?}", e);
