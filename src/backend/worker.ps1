@@ -35,13 +35,51 @@ function Log-Message([string]$msg, [string]$level = "INFO") {
     }
 }
 
+$script:transferStartTime = $null
+$script:rollingHistory = New-Object 'System.Collections.Generic.Queue[hashtable]'
+
 function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$pstName, [int]$currentItems, [int]$totalItems, [DateTime]$startTime) {
     try {
         $now = [DateTime]::UtcNow
-        $elapsedSec = ($now - $startTime).TotalSeconds
-        $speed = if ($elapsedSec -gt 0) { [math]::Round($currentItems / $elapsedSec, 1) } else { 0.0 }
+        if ($null -eq $script:transferStartTime -and $currentItems -gt 0) {
+            $script:transferStartTime = $now
+        }
+
+        # Medidor rodante de velocidad sobre ventana de 15 segundos
+        if ($script:rollingHistory -is [System.Collections.Generic.Queue[hashtable]]) {
+            $script:rollingHistory.Enqueue(@{ Time = $now; Count = $currentItems })
+            while ($script:rollingHistory.Count -gt 1) {
+                $oldest = $script:rollingHistory.Peek()
+                if (($now - $oldest.Time).TotalSeconds -gt 15.0) {
+                    [void]$script:rollingHistory.Dequeue()
+                } else {
+                    break
+                }
+            }
+        }
+
+        $speed = 0.0
+        if ($script:rollingHistory -and $script:rollingHistory.Count -ge 2) {
+            $oldest = $script:rollingHistory.Peek()
+            $dt = ($now - $oldest.Time).TotalSeconds
+            $dc = $currentItems - $oldest.Count
+            if ($dt -ge 1.0 -and $dc -gt 0) {
+                $speed = [math]::Round($dc / $dt, 1)
+            }
+        }
+
+        # Fallback al tiempo activo desde el primer correo transferido si la ventana rodante es incipiente
+        if ($speed -le 0.0 -and $script:transferStartTime) {
+            $activeSec = ($now - $script:transferStartTime).TotalSeconds
+            if ($activeSec -ge 1.0 -and $currentItems -gt 0) {
+                $speed = [math]::Round($currentItems / $activeSec, 1)
+            }
+        }
+
+        # Estimación realista de ETA basada en rendimiento activo (evita distorsión por tiempo inicial de logon MAPI)
+        $calcSpeed = if ($speed -gt 0.0) { $speed } else { 5.0 }
         $remaining = [math]::Max(0, $totalItems - $currentItems)
-        $eta = if ($speed -gt 0) { [math]::Round($remaining / $speed) } else { 0 }
+        $eta = [math]::Round($remaining / $calcSpeed)
 
         Send-Telemetry @{
             type           = "progress"
@@ -52,7 +90,7 @@ function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$p
             item_total     = $totalItems
             global_current = $script:globalProcessedItems
             global_total   = $script:globalTotalItems
-            speed_mps      = $speed
+            speed_mps      = if ($speed -gt 0.0) { $speed } else { 0.0 }
             eta_seconds    = $eta
             imported       = $script:totalImported
             imported_bytes = $script:totalImportedBytes
@@ -176,6 +214,8 @@ function Clear-FolderCaches {
     }
     if ($script:dateFolderIdCache) { $script:dateFolderIdCache.Clear() }
     if ($script:dateFolderNameCache) { $script:dateFolderNameCache.Clear() }
+    $script:transferStartTime = $null
+    if ($script:rollingHistory) { $script:rollingHistory.Clear() }
 }
 
 function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collections.Generic.List[hashtable]]$collector, $selectedPathsSet, [bool]$hasSubpaths, $config) {
@@ -309,16 +349,10 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
                 $colSubjectIdx = -1
                 $colSenderIdx = -1
                 $colDateIdx = -1
-                $colMidIdx = -1
-
                 try { $tbl.Columns.RemoveAll() } catch {}
                 try { $tbl.Columns.Add("Subject") | Out-Null; $colSubjectIdx = $tbl.Columns.Count - 1 } catch {}
                 try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null; $colSenderIdx = $tbl.Columns.Count - 1 } catch {}
                 try { $tbl.Columns.Add("ReceivedTime") | Out-Null; $colDateIdx = $tbl.Columns.Count - 1 } catch {}
-                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
-                if ($colMidIdx -lt 0) {
-                    try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001F") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
-                }
 
                 $batchSize = 5000
                 while (-not $tbl.EndOfTable) {
@@ -331,11 +365,7 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
                         $s   = if ($colSubjectIdx -ge 0 -and $colSubjectIdx -lt $colsInBatch) { $arr[$i, $colSubjectIdx] } else { $null }
                         $snd = if ($colSenderIdx -ge 0 -and $colSenderIdx -lt $colsInBatch) { $arr[$i, $colSenderIdx] } else { $null }
                         $dt  = if ($colDateIdx -ge 0 -and $colDateIdx -lt $colsInBatch) { $arr[$i, $colDateIdx] } else { $null }
-                        $mid = if ($colMidIdx -ge 0 -and $colMidIdx -lt $colsInBatch) { $arr[$i, $colMidIdx] } else { $null }
 
-                        if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
-                            [void]$seenSet.Add($mid.Trim())
-                        }
                         if ($s -or $snd -or $dt) {
                             $dtStr = if ($dt -and ($dt -is [DateTime])) { $dt.ToString('yyyyMMddHHmmss') } else { "" }
                             $cKey = "$s|$snd|$dtStr"
@@ -540,6 +570,13 @@ try {
         $weStartedOutlook = $true
         Log-Message "Nueva instancia de Outlook COM iniciada en segundo plano."
     }
+
+    # Minimizar ventana activa de Outlook para evitar que el repintado de la lista gráfica sature la CPU
+    try {
+        if ($outlook.ActiveExplorer()) {
+            $outlook.ActiveExplorer().WindowState = 1 # olMinimized
+        }
+    } catch {}
 
     $namespace = $outlook.GetNamespace("MAPI")
 
@@ -823,7 +860,6 @@ try {
                 $colDateIdx = -1
                 $colSubjIdx = -1
                 $colSenderIdx = -1
-                $colMidIdx = -1
                 $colSizeIdx = -1
                 $colSentOnIdx = -1
 
@@ -832,10 +868,6 @@ try {
                 try { $tbl.Columns.Add("ReceivedTime") | Out-Null; $colDateIdx = $tbl.Columns.Count - 1 } catch {}
                 try { $tbl.Columns.Add("Subject") | Out-Null; $colSubjIdx = $tbl.Columns.Count - 1 } catch {}
                 try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null; $colSenderIdx = $tbl.Columns.Count - 1 } catch {}
-                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
-                if ($colMidIdx -lt 0) {
-                    try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001F") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
-                }
                 try { $tbl.Columns.Add("Size") | Out-Null; $colSizeIdx = $tbl.Columns.Count - 1 } catch {}
                 try { $tbl.Columns.Add("SentOn") | Out-Null; $colSentOnIdx = $tbl.Columns.Count - 1 } catch {}
 
@@ -858,7 +890,6 @@ try {
 
                             $eSubj   = if ($colSubjIdx -ge 0 -and $colSubjIdx -lt $batchCols) { $arr[$r, $colSubjIdx] } else { "" }
                             $eSender = if ($colSenderIdx -ge 0 -and $colSenderIdx -lt $batchCols) { $arr[$r, $colSenderIdx] } else { "" }
-                            $eMid    = if ($colMidIdx -ge 0 -and $colMidIdx -lt $batchCols) { $arr[$r, $colMidIdx] } else { "" }
                             $eSize   = if ($colSizeIdx -ge 0 -and $colSizeIdx -lt $batchCols) { $arr[$r, $colSizeIdx] } else { 0 }
 
                             $tableEntries.Add(@{
@@ -866,7 +897,6 @@ try {
                                 ReceivedTime = $rTime
                                 Subject      = $eSubj
                                 Sender       = $eSender
-                                MessageID    = $eMid
                                 Size         = $eSize
                             })
                         }
@@ -876,10 +906,12 @@ try {
                     try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tbl) | Out-Null } catch {}
                 }
             } catch {
+                Log-Message "Aviso: MAPI Table no disponible en '$($cf.RelPath)' ($_). Usando iteración rápida..." "WARN"
                 $useTable = $false
             }
 
             if ($useTable -and $tableEntries.Count -gt 0) {
+                Log-Message "Procesando $($tableEntries.Count) elementos con extracción acelerada en RAM..."
                 # === RUTA A: PROCESAMIENTO ACELERADO EN RAM CON MAPI TABLE ===
                 foreach ($entry in $tableEntries) {
                     if ($pstProcessedCount % 25 -eq 0) {
@@ -987,15 +1019,12 @@ try {
                             $targetSets[$destId] = $folderSet
                         }
 
-                        $mid = $entry.MessageID
                         $dtStr = if ($rcvd) { $rcvd.ToString('yyyyMMddHHmmss') } else { "" }
                         $cKey = "$subj|$sender|$dtStr"
 
                         $isDuplicate = $false
                         if ($config -and $config.deduplication_enabled) {
                             if ($folderSet.Contains($cKey)) {
-                                $isDuplicate = $true
-                            } elseif ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "" -and $folderSet.Contains($mid.Trim())) {
                                 $isDuplicate = $true
                             }
                         }
@@ -1047,9 +1076,6 @@ try {
 
                             if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
                                 [void]$folderSet.Add($cKey)
-                                if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
-                                    [void]$folderSet.Add($mid.Trim())
-                                }
                             }
 
                             if ($processedItemsList.Count -lt 5000) {
@@ -1117,8 +1143,23 @@ try {
                     }
                 }
             } else {
-                # === RUTA B: FALLBACK CLÁSICO SI LA CARPETA NO SOPORTA MAPI TABLE ===
-                for ($idx = $itemCount; $idx -ge 1; $idx--) {
+                # === RUTA B: FALLBACK ULTRA-RÁPIDO CON LISTA DIRECTA DE ENTRYIDS EN RAM ===
+                $entryIds = New-Object 'System.Collections.Generic.List[string]'
+                try {
+                    foreach ($it in $folderItems) {
+                        try {
+                            $eIdVal = [string]$it.EntryID
+                            if (-not [string]::IsNullOrWhiteSpace($eIdVal)) {
+                                $entryIds.Add($eIdVal)
+                            }
+                        } catch {}
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($it) | Out-Null } catch {}
+                    }
+                } catch {}
+
+                Log-Message "Procesando $($entryIds.Count) elementos con iterador optimizado O(1)..."
+
+                foreach ($eId in $entryIds) {
                     if ($pstProcessedCount % 25 -eq 0) {
                         if ($AbortFile -and [System.IO.File]::Exists($AbortFile)) {
                             Log-Message "Señal de parada segura recibida. Deteniendo proceso ordenadamente..." "WARN"
@@ -1141,7 +1182,7 @@ try {
                     $item = $null
                     $copy = $null
                     try {
-                        $item = $folderItems.Item($idx)
+                        $item = $namespace.GetItemFromID($eId, $pstStore.StoreID)
                     } catch {
                         $totalErrors++
                         $pstProcessedCount++
@@ -1250,17 +1291,9 @@ try {
                         $cKey = "$subj|$sender|$($rcvd.ToString('yyyyMMddHHmmss'))"
 
                         $isDuplicate = $false
-                        $mid = $null
                         if ($config -and $config.deduplication_enabled) {
                             if ($folderSet.Contains($cKey)) {
                                 $isDuplicate = $true
-                            } else {
-                                try {
-                                    $mid = $item.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
-                                } catch {}
-                                if ($mid -and ($mid -is [string]) -and $folderSet.Contains($mid.Trim())) {
-                                    $isDuplicate = $true
-                                }
                             }
                         }
 
@@ -1322,9 +1355,6 @@ try {
 
                         if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
                             [void]$folderSet.Add($cKey)
-                            if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
-                                [void]$folderSet.Add($mid.Trim())
-                            }
                         }
 
                         if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
@@ -1349,7 +1379,7 @@ try {
                         $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
                         $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
                         try {
-                            Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo #${idx} - $errStr"
+                            Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo: $errStr"
                         } catch {}
                         try {
                             if ($processedItemsList.Count -lt 5000) {
