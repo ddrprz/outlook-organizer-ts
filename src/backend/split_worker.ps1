@@ -16,7 +16,12 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Stop"
 
 try {
-    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
+} catch {}
+try {
+    Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue | ForEach-Object {
+        $_.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
+    }
 } catch {}
 
 function Send-Telemetry([hashtable]$Payload) {

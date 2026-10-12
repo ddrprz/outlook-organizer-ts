@@ -16,7 +16,12 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Stop"
 
 try {
-    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::Normal
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
+} catch {}
+try {
+    Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue | ForEach-Object {
+        $_.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
+    }
 } catch {}
 
 function Send-Telemetry([hashtable]$Payload) {
@@ -571,6 +576,12 @@ try {
         Log-Message "Nueva instancia de Outlook COM iniciada en segundo plano."
     }
 
+    try {
+        Get-Process -Name "OUTLOOK" -ErrorAction SilentlyContinue | ForEach-Object {
+            $_.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
+        }
+    } catch {}
+
     # Minimizar ventana activa de Outlook para evitar que el repintado de la lista gráfica sature la CPU
     try {
         if ($outlook.ActiveExplorer()) {
@@ -1060,12 +1071,20 @@ try {
                             elseif ($item.Size) { try { $itemBytes = [int64]$item.Size } catch {} }
 
                             if ($config -and $config.transfer_mode -eq "Move") {
-                                $item.Move($finalDest) | Out-Null
+                                $moved = $item.Move($finalDest)
+                                if ($null -ne $moved) {
+                                    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                    $moved = $null
+                                }
                             } else {
                                 $copy = $item.Copy()
-                                $copy.Move($finalDest) | Out-Null
+                                $moved = $copy.Move($finalDest)
+                                if ($null -ne $moved) {
+                                    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                    $moved = $null
+                                }
                                 if ($null -ne $copy) {
-                                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                                    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
                                     $copy = $null
                                 }
                             }
@@ -1122,17 +1141,17 @@ try {
                         } catch {}
                     } finally {
                         if ($null -ne $copy) {
-                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
                             $copy = $null
                         }
                         if ($null -ne $item) {
-                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) } catch {}
                             $item = $null
                         }
                     }
 
                     if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                        Start-Sleep -Milliseconds ([math]::Min(250, 25 * $consecutiveThrottles))
+                        Start-Sleep -Milliseconds ([math]::Min(50, 10 * $consecutiveThrottles))
                         $consecutiveThrottles--
                     }
 
@@ -1326,12 +1345,20 @@ try {
                         $itemKb = [math]::Round([double]$itemBytes / 1024.0, 1)
 
                         if ($config -and $config.transfer_mode -eq "Move") {
-                            $item.Move($finalDest) | Out-Null
+                            $moved = $item.Move($finalDest)
+                            if ($null -ne $moved) {
+                                try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                $moved = $null
+                            }
                         } else {
                             $copy = $item.Copy()
-                            $copy.Move($finalDest) | Out-Null
+                            $moved = $copy.Move($finalDest)
+                            if ($null -ne $moved) {
+                                try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                $moved = $null
+                            }
                             if ($null -ne $copy) {
-                                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                                try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
                                 $copy = $null
                             }
                         }
@@ -1358,7 +1385,7 @@ try {
                         }
 
                         if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                            Start-Sleep -Milliseconds ([math]::Min(250, 25 * $consecutiveThrottles))
+                            Start-Sleep -Milliseconds ([math]::Min(50, 10 * $consecutiveThrottles))
                             $consecutiveThrottles--
                         }
 
@@ -1401,11 +1428,11 @@ try {
                     }
                     finally {
                         if ($null -ne $copy) {
-                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
                             $copy = $null
                         }
                         if ($null -ne $item) {
-                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) } catch {}
                             $item = $null
                         }
                     }

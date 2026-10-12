@@ -58,14 +58,14 @@ pub struct SplitWorkerConfig {
 pub struct BackendRunner;
 
 #[cfg(windows)]
-fn configure_low_overhead_command(cmd: &mut Command) {
-    const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x00004000;
+fn configure_worker_command(cmd: &mut Command) {
+    const HIGH_PRIORITY_CLASS: u32 = 0x00000080;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    cmd.creation_flags(BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW);
+    cmd.creation_flags(HIGH_PRIORITY_CLASS | CREATE_NO_WINDOW);
 }
 
 #[cfg(not(windows))]
-fn configure_low_overhead_command(_cmd: &mut Command) {}
+fn configure_worker_command(_cmd: &mut Command) {}
 
 impl BackendRunner {
     pub fn spawn_worker(
@@ -103,7 +103,7 @@ impl BackendRunner {
         fs::write(&config_path, config_json)?;
 
         let mut cmd = Command::new("powershell");
-        configure_low_overhead_command(&mut cmd);
+        configure_worker_command(&mut cmd);
         let mut child = cmd
             .arg("-Sta")
             .arg("-NoProfile")
@@ -209,7 +209,7 @@ impl BackendRunner {
         fs::write(&config_path, config_json)?;
 
         let mut cmd = Command::new("powershell");
-        configure_low_overhead_command(&mut cmd);
+        configure_worker_command(&mut cmd);
         let mut child = cmd
             .arg("-Sta")
             .arg("-NoProfile")
@@ -296,7 +296,7 @@ impl BackendRunner {
         let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
 
         let mut cmd = Command::new("powershell");
-        configure_low_overhead_command(&mut cmd);
+        configure_worker_command(&mut cmd);
         cmd.arg("-Sta")
             .arg("-NoProfile")
             .arg("-ExecutionPolicy")
@@ -389,7 +389,7 @@ impl BackendRunner {
         let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
 
         let mut cmd = Command::new("powershell");
-        configure_low_overhead_command(&mut cmd);
+        configure_worker_command(&mut cmd);
         cmd.arg("-Sta")
             .arg("-NoProfile")
             .arg("-ExecutionPolicy")

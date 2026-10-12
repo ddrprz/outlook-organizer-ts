@@ -9,7 +9,7 @@ $OutputEncoding           = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Stop"
 
 try {
-    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High
 } catch {}
 
 if (-not $PstPath -or -not (Test-Path $PstPath)) {
