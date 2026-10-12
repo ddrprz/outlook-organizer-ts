@@ -327,6 +327,24 @@ pub struct PstDetail {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
+pub struct ExecutionErrorDetail {
+    #[serde(default)]
+    pub timestamp: String,
+    #[serde(default)]
+    pub error_type: String,
+    #[serde(default)]
+    pub pst_name: String,
+    #[serde(default)]
+    pub source_folder: String,
+    #[serde(default)]
+    pub subject: String,
+    #[serde(default)]
+    pub sender: String,
+    #[serde(default)]
+    pub error_message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub struct ProcessedEmailItem {
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub subject: String,
@@ -344,6 +362,8 @@ pub struct ProcessedEmailItem {
     pub status: String, // "Importado" | "Duplicado Omitido" | "Error"
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub size_kb: f64,
+    #[serde(default)]
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -1478,6 +1498,7 @@ pub struct AppState {
 
     // Historial de correos procesados y ruta de reporte
     pub processed_items: Vec<ProcessedEmailItem>,
+    pub execution_errors: Vec<ExecutionErrorDetail>,
     pub html_report_path: Option<PathBuf>,
     pub json_audit_path: Option<PathBuf>,
 
@@ -1565,6 +1586,7 @@ impl AppState {
             pst_details_cache: std::collections::HashMap::new(),
             inspecting_psts: std::collections::HashSet::new(),
             processed_items: Vec::new(),
+            execution_errors: Vec::new(),
             html_report_path: None,
             json_audit_path: None,
             split: SplitPstState::default(),
@@ -2075,6 +2097,16 @@ impl AppState {
                 self.processed_items = items;
             }
         }
+
+        let temp_errors = std::env::temp_dir().join("outlook_organizer_errors.json");
+        if temp_errors.exists()
+            && let Ok(content) = std::fs::read_to_string(&temp_errors)
+        {
+            let trimmed = content.trim_start_matches('\u{feff}');
+            if let Ok(errors) = serde_json::from_str::<Vec<ExecutionErrorDetail>>(trimmed) {
+                self.execution_errors = errors;
+            }
+        }
     }
 
     pub fn get_imported_folders_summary(&self) -> Vec<ImportedFolderReportItem> {
@@ -2235,6 +2267,7 @@ impl AppState {
                     pst_name: default_pst.clone(),
                     status: if is_dup { "Duplicado Omitido".to_string() } else { "Importado".to_string() },
                     size_kb: ((idx * 37 + 120) % 850) as f64 + 15.5,
+                    error_message: None,
                 });
                 idx += 1;
             }
