@@ -483,18 +483,22 @@ $duplicateSampleCount = 0
 $errorsList = New-Object 'System.Collections.Generic.List[hashtable]'
 
 function Record-ExecutionError([string]$errType, [string]$pst, [string]$srcFolder, [string]$subj, [string]$snd, [string]$msg) {
-    $nowStr = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    $errObj = @{
-        timestamp     = $nowStr
-        error_type    = $errType
-        pst_name      = $pst
-        source_folder = $srcFolder
-        subject       = $subj
-        sender        = $snd
-        error_message = $msg
-    }
-    $script:errorsList.Add($errObj)
-    Log-Message "[$errType] $msg" "ERROR"
+    try {
+        $nowStr = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        $errObj = @{
+            timestamp     = $nowStr
+            error_type    = if ($errType) { $errType } else { "item_error" }
+            pst_name      = if ($pst) { $pst } else { "" }
+            source_folder = if ($srcFolder) { $srcFolder } else { "" }
+            subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+            sender        = if ($snd) { $snd } else { "(Desconocido)" }
+            error_message = if ($msg) { $msg } else { "" }
+        }
+        if ($script:errorsList.Count -lt 5000) {
+            $script:errorsList.Add($errObj)
+        }
+        Log-Message "[$errType] $msg" "ERROR"
+    } catch {}
 }
 
 $weStartedOutlook = $false
@@ -1046,20 +1050,26 @@ try {
                         $pstProcessedCount++
                         $script:globalProcessedItems++
                         $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 1)
-                        Record-ExecutionError "item_error" $pstName $cf.RelPath (if ($subj) { $subj } else { "(Sin Asunto)" }) (if ($sender) { $sender } else { "(Desconocido)" }) "Aviso al procesar correo: $errStr"
-                        if ($processedItemsList.Count -lt 5000) {
-                            $processedItemsList.Add(@{
-                                subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
-                                sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                                date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
-                                source_folder = $cf.RelPath
-                                dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
-                                pst_name      = $pstName
-                                status        = "Error"
-                                size_kb       = 0.0
-                                error_message = $errStr
-                            })
-                        }
+                        $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
+                        $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
+                        try {
+                            Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo: $errStr"
+                        } catch {}
+                        try {
+                            if ($processedItemsList.Count -lt 5000) {
+                                $processedItemsList.Add(@{
+                                    subject       = $safeSubj
+                                    sender        = $safeSender
+                                    date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                    source_folder = $cf.RelPath
+                                    dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
+                                    pst_name      = $pstName
+                                    status        = "Error"
+                                    size_kb       = 0.0
+                                    error_message = $errStr
+                                })
+                            }
+                        } catch {}
                     } finally {
                         if ($null -ne $copy) {
                             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
@@ -1317,20 +1327,26 @@ try {
                     $pstProcessedCount++
                     $script:globalProcessedItems++
                     $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 1)
-                    Record-ExecutionError "item_error" $pstName $cf.RelPath (if ($subj) { $subj } else { "(Sin Asunto)" }) (if ($sender) { $sender } else { "(Desconocido)" }) "Aviso al procesar correo #${idx} - $errStr"
-                    if ($processedItemsList.Count -lt 5000) {
-                        $processedItemsList.Add(@{
-                            subject       = "(Error al leer correo: $($_.Exception.Message))"
-                            sender        = "-"
-                            date          = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-                            source_folder = $cf.RelPath
-                            dest_folder   = "-"
-                            pst_name      = $pstName
-                            status        = "Error"
-                            size_kb       = 0.0
-                            error_message = $errStr
-                        })
-                    }
+                    $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
+                    $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
+                    try {
+                        Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo #${idx} - $errStr"
+                    } catch {}
+                    try {
+                        if ($processedItemsList.Count -lt 5000) {
+                            $processedItemsList.Add(@{
+                                subject       = $safeSubj
+                                sender        = $safeSender
+                                date          = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                                source_folder = $cf.RelPath
+                                dest_folder   = "-"
+                                pst_name      = $pstName
+                                status        = "Error"
+                                size_kb       = 0.0
+                                error_message = $errStr
+                            })
+                        }
+                    } catch {}
 
                     Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                 }
