@@ -101,13 +101,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let selected_mboxes = state.selected_mailboxes();
-    let mbox_names = if selected_mboxes.is_empty() {
-        "Default mailbox".to_string()
-    } else if selected_mboxes.len() == 1 {
-        selected_mboxes[0].display_name.clone()
-    } else {
-        selected_mboxes.iter().map(|m| m.display_name.as_str()).collect::<Vec<_>>().join(", ")
-    };
+    let mbox_names = selected_mboxes
+        .first()
+        .map(|m| m.display_name.clone())
+        .unwrap_or_else(|| "Default mailbox".to_string());
 
     let mode_badge = match state.transfer_mode {
         TransferMode::Copy => Span::styled("Mode: Copy (Intact)", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),

@@ -1818,18 +1818,24 @@ impl AppState {
             .collect()
     }
 
+    pub fn select_single_mailbox(&mut self, idx: usize) {
+        if idx < self.discovered_mailboxes.len() {
+            for (i, m) in self.discovered_mailboxes.iter_mut().enumerate() {
+                m.selected = i == idx;
+            }
+        }
+    }
+
     pub fn selected_mailboxes(&self) -> Vec<&MailboxItem> {
         self.discovered_mailboxes.iter().filter(|m| m.selected).collect()
     }
 
     pub fn selected_mailboxes_display(&self) -> String {
         let selected = self.selected_mailboxes();
-        if selected.is_empty() {
-            "None selected".to_string()
-        } else if selected.len() == 1 {
-            selected[0].display_name.clone()
+        if let Some(target) = selected.first() {
+            target.display_name.clone()
         } else {
-            format!("{} mailboxes selected", selected.len())
+            "None selected".to_string()
         }
     }
 
@@ -2585,18 +2591,24 @@ mod tests {
             store_type: "SharedMailbox".to_string(),
             size_display: "500 MB".to_string(),
             file_path: None,
-            selected: true,
+            selected: false,
             ..Default::default()
         });
 
-        assert_eq!(state.selected_mailboxes().len(), 2);
-        assert_eq!(state.selected_mailboxes_display(), "2 mailboxes selected");
-
-        state.discovered_mailboxes[0].selected = false;
+        // Selecting the second mailbox deselects the first
+        state.select_single_mailbox(1);
         assert_eq!(state.selected_mailboxes().len(), 1);
         assert_eq!(state.selected_mailboxes_display(), "compartido@empresa.com");
 
-        state.discovered_mailboxes[1].selected = false;
+        // Selecting the first mailbox again deselects the second
+        state.select_single_mailbox(0);
+        assert_eq!(state.selected_mailboxes().len(), 1);
+        assert_eq!(state.selected_mailboxes_display(), "buzon.personal@empresa.com");
+
+        // Deselecting all
+        for m in &mut state.discovered_mailboxes {
+            m.selected = false;
+        }
         assert_eq!(state.selected_mailboxes().len(), 0);
         assert_eq!(state.selected_mailboxes_display(), "None selected");
     }
