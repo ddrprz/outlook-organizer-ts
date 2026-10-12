@@ -78,14 +78,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     imported_bytes,
                     duplicates,
                     errors,
+                    global_current,
+                    global_total,
                 } => {
                     state.progress.current_pst_idx = pst_index;
                     state.progress.total_psts = pst_total;
                     state.progress.current_pst_name = pst_name;
                     state.progress.current_pst_items = item_current;
                     state.progress.current_pst_total = item_total;
-                    state.progress.global_items_processed = item_current;
-                    state.progress.global_items_total = item_total;
+                    state.progress.global_items_processed = global_current.unwrap_or(item_current);
+                    if let Some(gt) = global_total {
+                        if gt > 0 {
+                            state.progress.global_items_total = gt;
+                        } else {
+                            state.progress.global_items_total = item_total;
+                        }
+                    } else {
+                        state.progress.global_items_total = item_total;
+                    }
                     state.progress.speed_mps = speed_mps;
                     state.progress.eta_seconds = eta_seconds;
                     state.progress.imported_count = imported;
@@ -993,8 +1003,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 RoutingGranularity::Years => "Years".to_string(),
                                 RoutingGranularity::YearsAndMonths => "YearsAndMonths".to_string(),
                             },
-                            specific_year: state.specific_year,
-                            specific_month: state.specific_month,
+                            specific_year: if state.routing_all_years {
+                                None
+                            } else {
+                                state.specific_year
+                            },
+                            specific_month: if state.routing_all_months {
+                                None
+                            } else {
+                                state.specific_month
+                            },
                             specific_years: if state.routing_all_years {
                                 Vec::new()
                             } else {

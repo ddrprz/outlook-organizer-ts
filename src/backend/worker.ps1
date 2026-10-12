@@ -50,6 +50,8 @@ function Emit-ProgressTelemetry([int]$currentPstIdx, [int]$totalPsts, [string]$p
             pst_name       = $pstName
             item_current   = $currentItems
             item_total     = $totalItems
+            global_current = $script:globalProcessedItems
+            global_total   = $script:globalTotalItems
             speed_mps      = $speed
             eta_seconds    = $eta
             imported       = $script:totalImported
@@ -187,20 +189,33 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
 
         $shouldInclude = $false
         if ($selectedPathsSet -and $selectedPathsSet.Count -gt 0) {
-            if ($hasSubpaths) {
-                # Modo árbol detallado: coincidencia exacta de ruta
-                if ($selectedPathsSet.Contains($subPath)) {
-                    $shouldInclude = $true
-                }
+            # 1. Coincidencia exacta de ruta relativa
+            if ($selectedPathsSet.Contains($subPath)) {
+                $shouldInclude = $true
             } else {
-                # Modo básico: coincidencia por top-level o ancestro raíz
-                $topAncestor = ($subPath -split "[\\/]")[0]
-                if ($selectedPathsSet.Contains($topAncestor) -or $selectedPathsSet.Contains($subName)) {
-                    $shouldInclude = $true
+                # 2. Coincidencia si algún ancestro directo de la carpeta está en selectedPathsSet
+                # (ej. si "Bandeja de entrada" está seleccionada, incluir automáticamente sus subcarpetas)
+                $parts = $subPath -split "[\\/]"
+                $running = ""
+                foreach ($part in $parts) {
+                    $running = if ($running -eq "") { $part } else { "$running\$part" }
+                    if ($selectedPathsSet.Contains($running)) {
+                        $shouldInclude = $true
+                        break
+                    }
+                }
+                # 3. Coincidencia por ancestro raíz o nombre de carpeta si no es subcarpeta específica
+                if (-not $shouldInclude) {
+                    $topAncestor = $parts[0]
+                    if ($selectedPathsSet.Contains($topAncestor) -or $selectedPathsSet.Contains($subName)) {
+                        $shouldInclude = $true
+                    }
                 }
             }
-        } else {
-            # Compatibilidad con flags heredados (legacy flags)
+        }
+
+        # 4. Respaldo por tipo de carpeta si no se especificaron rutas
+        if (-not $shouldInclude -and ($null -eq $selectedPathsSet -or $selectedPathsSet.Count -eq 0)) {
             switch ($fType) {
                 "inbox"   { $shouldInclude = if ($config) { [bool]$config.include_inbox } else { $true } }
                 "sent"    { $shouldInclude = if ($config) { [bool]$config.include_sent } else { $true } }
@@ -452,22 +467,32 @@ try {
     }
 
     # 4. Localizar buzón de destino
-    $destStore = $null
-    $targetName = if ($config -and $config.target_mailboxes -and $config.target_mailboxes.Count -gt 0) {
-        $config.target_mailboxes[0]
-    } else {
-        ""
-    }
+    function Get-TargetMailboxStore($ns, $cfg) {
+        $tStore = $null
+        $targetName = if ($cfg -and $cfg.target_mailboxes -and $cfg.target_mailboxes.Count -gt 0) {
+            $cfg.target_mailboxes[0]
+        } else {
+            ""
+        }
 
-    if ($targetName -and $targetName.Trim() -ne "") {
-        foreach ($s in $namespace.Stores) {
-            if ($s.DisplayName -like "*$targetName*" -or ($s.ExchangeStoreType -ne $null -and $s.DisplayName -eq $targetName)) {
-                $destStore = $s
-                break
+        if ($targetName -and $targetName.Trim() -ne "") {
+            foreach ($s in $ns.Stores) {
+                $dName = ""
+                try { $dName = $s.DisplayName } catch {}
+                if ($dName -and ($dName -like "*$targetName*" -or ($s.ExchangeStoreType -ne $null -and $dName -eq $targetName))) {
+                    $tStore = $s
+                    break
+                }
             }
         }
+
+        if ($null -eq $tStore) {
+            try { $tStore = $ns.DefaultStore } catch {}
+        }
+        return $tStore
     }
 
+    $destStore = Get-TargetMailboxStore $namespace $config
     if ($null -eq $destStore) {
         $destStore = $namespace.DefaultStore
         Log-Message "Buzón destino: usando almacén predeterminado '$($destStore.DisplayName)'."
@@ -501,12 +526,27 @@ try {
 
         Log-Message "Montando archivo PST [$($pIdx + 1)/$totalPsts]: $pstName"
 
+        # Limpiar cachés de carpetas para que cada PST resuelva referencias COM limpias y frescas
+        Clear-FolderCaches
+        if ($null -eq $destStore) {
+            $destStore = Get-TargetMailboxStore $namespace $config
+        } else {
+            try { $null = $destStore.DisplayName } catch { $destStore = Get-TargetMailboxStore $namespace $config }
+        }
+
         # Verificar si ya está montado
         $pstStore = $null
+        $fullPstPath = [System.IO.Path]::GetFullPath($pstPath).ToLowerInvariant()
         foreach ($s in $namespace.Stores) {
-            if ($s.FilePath -and ($s.FilePath.Trim().ToLower() -eq $pstPath.Trim().ToLower())) {
-                $pstStore = $s
-                break
+            $p = ""
+            try { $p = $s.FilePath } catch {}
+            if ($p) {
+                try {
+                    if ([System.IO.Path]::GetFullPath($p).ToLowerInvariant() -eq $fullPstPath) {
+                        $pstStore = $s
+                        break
+                    }
+                } catch {}
             }
         }
 
@@ -515,23 +555,38 @@ try {
             Log-Message "PST ya cargado en sesión MAPI: $($pstStore.DisplayName)."
         } else {
             try {
-                $namespace.AddStoreEx($pstPath, 1) # 1 = olStoreDefault (Unicode)
+                $namespace.AddStoreEx($pstPath, 1) # 1 = olStoreDefault
+            } catch {
+                try {
+                    $namespace.AddStoreEx($pstPath, 2) # fallback 2 = olStoreUnicode
+                } catch {
+                    Log-Message "Error al montar PST '$pstName': $_" "ERROR"
+                    $totalErrors++
+                    continue
+                }
+            }
+
+            for ($retry = 0; $retry -lt 5; $retry++) {
                 Start-Sleep -Milliseconds 150
                 foreach ($s in $namespace.Stores) {
-                    if ($s.FilePath -and ($s.FilePath.Trim().ToLower() -eq $pstPath.Trim().ToLower())) {
-                        $pstStore = $s
-                        break
+                    $p = ""
+                    try { $p = $s.FilePath } catch {}
+                    if ($p) {
+                        try {
+                            if ([System.IO.Path]::GetFullPath($p).ToLowerInvariant() -eq $fullPstPath) {
+                                $pstStore = $s
+                                break
+                            }
+                        } catch {}
                     }
                 }
-                if ($pstStore) {
-                    $wasMountedByUs = $true
-                    $storesToUnmount += $pstStore
-                    Log-Message "PST montado exitosamente en MAPI."
-                }
-            } catch {
-                Log-Message "Error al montar PST '$pstName': $_" "ERROR"
-                $totalErrors++
-                continue
+                if ($null -ne $pstStore) { break }
+            }
+
+            if ($pstStore) {
+                $wasMountedByUs = $true
+                $storesToUnmount += $pstStore
+                Log-Message "PST montado exitosamente en MAPI."
             }
         }
 
@@ -574,6 +629,7 @@ try {
         foreach ($cf in $candidateFolders) {
             try { $totalPstItems += $cf.Folder.Items.Count } catch {}
         }
+        $script:globalTotalItems += $totalPstItems
 
         Log-Message "PST '$pstName': $totalPstItems correos encontrados en carpetas seleccionadas."
 
@@ -584,6 +640,8 @@ try {
             pst_name       = $pstName
             item_current   = 0
             item_total     = $totalPstItems
+            global_current = $script:globalProcessedItems
+            global_total   = $script:globalTotalItems
             speed_mps      = 0.0
             eta_seconds    = 0
             imported       = $totalImported
@@ -694,11 +752,13 @@ try {
                     $rcvd = $entry.ReceivedTime
                     if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
                         $pstProcessedCount++
+                        $script:globalProcessedItems++
                         Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                         continue
                     }
                     if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
                         $pstProcessedCount++
+                        $script:globalProcessedItems++
                         Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                         continue
                     }
@@ -755,6 +815,7 @@ try {
                     if ($isDuplicate) {
                         $totalDuplicates++
                         $pstProcessedCount++
+                        $script:globalProcessedItems++
                         if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
                             $script:duplicateSampleCount++
                             $itemKb = 0.0
@@ -796,6 +857,7 @@ try {
                             $totalImported++
                             $totalImportedBytes += $itemBytes
                             $pstProcessedCount++
+                            $script:globalProcessedItems++
 
                             [void]$folderSet.Add($cKey)
                             if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
@@ -819,8 +881,21 @@ try {
                     } catch {
                         $totalErrors++
                         $pstProcessedCount++
+                        $script:globalProcessedItems++
                         $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 2)
                         Log-Message "Aviso al transferir correo de carpeta '$($cf.RelPath)': $_" "WARN"
+                        if ($processedItemsList.Count -lt 5000) {
+                            $processedItemsList.Add(@{
+                                subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                                date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
+                                source_folder = $cf.RelPath
+                                dest_folder   = $finalDest.Name
+                                pst_name      = $pstName
+                                status        = "Error"
+                                size_kb       = 0.0
+                            })
+                        }
                     } finally {
                         if ($null -ne $copy) {
                             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
@@ -893,6 +968,7 @@ try {
                     # Filtro por años específicos si está configurado
                     if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
                         $pstProcessedCount++
+                        $script:globalProcessedItems++
                         Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                         continue
                     }
@@ -900,6 +976,7 @@ try {
                     # Filtro por meses específicos si está configurado
                     if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
                         $pstProcessedCount++
+                        $script:globalProcessedItems++
                         Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
                         continue
                     }
@@ -963,6 +1040,7 @@ try {
                     if ($isDuplicate) {
                         $totalDuplicates++
                         $pstProcessedCount++
+                        $script:globalProcessedItems++
                         if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
                             $script:duplicateSampleCount++
                             $itemKb = 0.0
@@ -989,6 +1067,7 @@ try {
                             $totalImported++
                             $totalImportedBytes += $itemBytes
                             $pstProcessedCount++
+                            $script:globalProcessedItems++
                         } else {
                             $copy = $item.Copy()
                             $copy.Move($finalDest) | Out-Null
@@ -998,6 +1077,7 @@ try {
                             $totalImported++
                             $totalImportedBytes += $itemBytes
                             $pstProcessedCount++
+                            $script:globalProcessedItems++
                         }
 
                         if ($processedItemsList.Count -lt 5000) {
@@ -1047,6 +1127,7 @@ try {
                 catch {
                     $totalErrors++
                     $pstProcessedCount++
+                    $script:globalProcessedItems++
                     $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 2)
                     Log-Message "Aviso al procesar correo #$idx de carpeta '$($cf.RelPath)': $_" "WARN"
                     if ($processedItemsList.Count -lt 5000) {
@@ -1126,6 +1207,8 @@ try {
             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($pstStore) | Out-Null } catch {}
             $pstStore = $null
         }
+
+        Clear-FolderCaches
 
         if ($isAborted) { break }
     }
