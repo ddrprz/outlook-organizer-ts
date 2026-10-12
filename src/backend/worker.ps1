@@ -959,13 +959,17 @@ try {
                             $destId = if ($baseDestId) { [string]$baseDestId } else { "DEFAULT_DEST" }
                         }
 
-                        if (-not $targetSets.ContainsKey($destId)) {
+                        if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
                             $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
                             if ($config -and $config.deduplication_enabled -and $finalDest) {
                                 Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
                             }
                         }
-                        $folderSet = if ($targetSets.ContainsKey($destId)) { $targetSets[$destId] } else { New-Object 'System.Collections.Generic.HashSet[string]' }
+                        $folderSet = $targetSets[$destId]
+                        if ($folderSet -isnot [System.Collections.Generic.HashSet[string]]) {
+                            $folderSet = New-Object 'System.Collections.Generic.HashSet[string]'
+                            $targetSets[$destId] = $folderSet
+                        }
 
                         $mid = $entry.MessageID
                         $dtStr = if ($rcvd) { $rcvd.ToString('yyyyMMddHHmmss') } else { "" }
@@ -1025,9 +1029,11 @@ try {
                             $pstProcessedCount++
                             $script:globalProcessedItems++
 
-                            [void]$folderSet.Add($cKey)
-                            if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
-                                [void]$folderSet.Add($mid.Trim())
+                            if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
+                                [void]$folderSet.Add($cKey)
+                                if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
+                                    [void]$folderSet.Add($mid.Trim())
+                                }
                             }
 
                             if ($processedItemsList.Count -lt 5000) {
@@ -1205,13 +1211,17 @@ try {
                         $destId = if ($baseDestId) { [string]$baseDestId } else { "DEFAULT_DEST" }
                     }
 
-                    if (-not $targetSets.ContainsKey($destId)) {
+                    if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
                         $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
                         if ($config -and $config.deduplication_enabled -and $finalDest) {
                             Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
                         }
                     }
-                    $folderSet = if ($targetSets.ContainsKey($destId)) { $targetSets[$destId] } else { New-Object 'System.Collections.Generic.HashSet[string]' }
+                    $folderSet = $targetSets[$destId]
+                    if ($folderSet -isnot [System.Collections.Generic.HashSet[string]]) {
+                        $folderSet = New-Object 'System.Collections.Generic.HashSet[string]'
+                        $targetSets[$destId] = $folderSet
+                    }
 
                     $subj = $item.Subject
                     $sender = $item.SenderEmailAddress
@@ -1291,9 +1301,11 @@ try {
                         }
 
                         # Registrar claves para deduplicar futuros correos de la misma sesión
-                        [void]$folderSet.Add($cKey)
-                        if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
-                            [void]$folderSet.Add($mid.Trim())
+                        if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
+                            [void]$folderSet.Add($cKey)
+                            if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
+                                [void]$folderSet.Add($mid.Trim())
+                            }
                         }
 
                         # Throttling adaptativo inteligente (dynamic backoff) y micro-pausa cooperativa
