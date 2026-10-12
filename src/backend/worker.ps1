@@ -180,7 +180,13 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
     foreach ($sub in $folder.Folders) {
         $subName = $sub.Name
         # Ignorar carpetas internas de sistema irrelevantes
-        if ($subName -match "^(Yammer Root|Quick Step Settings|Conversation History|Social Activity Provider RSS Feeds|Sync Issues|Problemas de sincronización|Conflictos|Errores locales|Fallos del servidor)$") {
+        if ($subName -match "^(Yammer Root|Quick Step Settings|Conversation History|Social Activity Provider RSS Feeds|Sync Issues|Problemas de sincronización|Conflictos|Errores locales|Fallos del servidor|Journal|Diario|Notes|Notas|Suggested Contacts|Contactos sugeridos)$") {
+            continue
+        }
+
+        # Manejar contenedores intermedios transparentes de Outlook / Exchange (Top of Personal Folders, etc.)
+        if ($subName -match "^(Top of Personal Folders|Top of Information Store|Elementos de nivel superior del almac[eé]n personal|IPM_SUBTREE)$") {
+            Collect-CandidateFolders $sub "" $collector $selectedPathsSet $hasSubpaths $config
             continue
         }
 
@@ -188,13 +194,28 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
         $fType = Get-FolderType $subName
 
         $shouldInclude = $false
+
+        # A) Coincidencia de categoría general según flags de configuración
+        $hasCustomWildcard = $false
+        if ($selectedPathsSet -and $selectedPathsSet.Count -gt 0) {
+            if ($selectedPathsSet.Contains("Carpetas personalizadas") -or $selectedPathsSet.Contains("Carpetas personalizadas / subcarpetas")) {
+                $hasCustomWildcard = $true
+            }
+        }
+
+        $allowInbox = if ($config) { [bool]$config.include_inbox } else { $true }
+        $allowSent = if ($config) { [bool]$config.include_sent } else { $true }
+        $allowDeleted = if ($config) { [bool]$config.include_deleted } else { $false }
+        $allowCustom = if ($config) { [bool]$config.include_custom_folders } else { $true }
+        if ($hasCustomWildcard) { $allowCustom = $true }
+
+        # B) Coincidencia específica en selectedPathsSet
         if ($selectedPathsSet -and $selectedPathsSet.Count -gt 0) {
             # 1. Coincidencia exacta de ruta relativa
             if ($selectedPathsSet.Contains($subPath)) {
                 $shouldInclude = $true
             } else {
                 # 2. Coincidencia si algún ancestro directo de la carpeta está en selectedPathsSet
-                # (ej. si "Bandeja de entrada" está seleccionada, incluir automáticamente sus subcarpetas)
                 $parts = $subPath -split "[\\/]"
                 $running = ""
                 foreach ($part in $parts) {
@@ -204,7 +225,7 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
                         break
                     }
                 }
-                # 3. Coincidencia por ancestro raíz o nombre de carpeta si no es subcarpeta específica
+                # 3. Coincidencia por ancestro raíz o nombre de subcarpeta
                 if (-not $shouldInclude) {
                     $topAncestor = $parts[0]
                     if ($selectedPathsSet.Contains($topAncestor) -or $selectedPathsSet.Contains($subName)) {
@@ -214,14 +235,32 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
             }
         }
 
-        # 4. Respaldo por tipo de carpeta si no se especificaron rutas
-        if (-not $shouldInclude -and ($null -eq $selectedPathsSet -or $selectedPathsSet.Count -eq 0)) {
+        # C) Validación por tipo de carpeta independiente del idioma (Inbox vs Bandeja de entrada, etc.)
+        if (-not $shouldInclude) {
             switch ($fType) {
-                "inbox"   { $shouldInclude = if ($config) { [bool]$config.include_inbox } else { $true } }
-                "sent"    { $shouldInclude = if ($config) { [bool]$config.include_sent } else { $true } }
-                "deleted" { $shouldInclude = if ($config) { [bool]$config.include_deleted } else { $false } }
-                "custom"  { $shouldInclude = if ($config) { [bool]$config.include_custom_folders } else { $true } }
-                default   { $shouldInclude = $true }
+                "inbox" {
+                    if ($allowInbox -or ($selectedPathsSet -and ($selectedPathsSet.Contains("Bandeja de entrada") -or $selectedPathsSet.Contains("Inbox")))) {
+                        $shouldInclude = $true
+                    }
+                }
+                "sent" {
+                    if ($allowSent -or ($selectedPathsSet -and ($selectedPathsSet.Contains("Elementos enviados") -or $selectedPathsSet.Contains("Sent Items") -or $selectedPathsSet.Contains("Sent")))) {
+                        $shouldInclude = $true
+                    }
+                }
+                "deleted" {
+                    if ($allowDeleted -or ($selectedPathsSet -and ($selectedPathsSet.Contains("Elementos eliminados") -or $selectedPathsSet.Contains("Deleted Items")))) {
+                        $shouldInclude = $true
+                    }
+                }
+                "custom" {
+                    if ($allowCustom -or $null -eq $selectedPathsSet -or $selectedPathsSet.Count -eq 0) {
+                        $shouldInclude = $true
+                    }
+                }
+                default {
+                    if ($allowCustom) { $shouldInclude = $true }
+                }
             }
         }
 
@@ -246,23 +285,32 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
         try {
             $tbl = $targetFolder.GetTable()
             if ($tbl) {
+                $colSubjectIdx = -1
+                $colSenderIdx = -1
+                $colDateIdx = -1
+                $colMidIdx = -1
+
                 try { $tbl.Columns.RemoveAll() } catch {}
-                try { $tbl.Columns.Add("Subject") | Out-Null } catch {}
-                try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null } catch {}
-                try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
-                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null } catch {}
+                try { $tbl.Columns.Add("Subject") | Out-Null; $colSubjectIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null; $colSenderIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("ReceivedTime") | Out-Null; $colDateIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
+                if ($colMidIdx -lt 0) {
+                    try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001F") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
+                }
 
                 $batchSize = 5000
                 while (-not $tbl.EndOfTable) {
                     $arr = $tbl.GetArray($batchSize)
                     $rowsInBatch = $arr.GetLength(0)
+                    $colsInBatch = $arr.GetLength(1)
                     if ($rowsInBatch -eq 0) { break }
 
                     for ($i = 0; $i -lt $rowsInBatch; $i++) {
-                        $s = $arr[$i, 0]
-                        $snd = $arr[$i, 1]
-                        $dt = $arr[$i, 2]
-                        $mid = $arr[$i, 3]
+                        $s   = if ($colSubjectIdx -ge 0 -and $colSubjectIdx -lt $colsInBatch) { $arr[$i, $colSubjectIdx] } else { $null }
+                        $snd = if ($colSenderIdx -ge 0 -and $colSenderIdx -lt $colsInBatch) { $arr[$i, $colSenderIdx] } else { $null }
+                        $dt  = if ($colDateIdx -ge 0 -and $colDateIdx -lt $colsInBatch) { $arr[$i, $colDateIdx] } else { $null }
+                        $mid = if ($colMidIdx -ge 0 -and $colMidIdx -lt $colsInBatch) { $arr[$i, $colMidIdx] } else { $null }
 
                         if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
                             [void]$seenSet.Add($mid.Trim())
@@ -286,32 +334,41 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
 
         # Fallback a iteración clásica únicamente si GetTable no estuvo disponible
         if (-not $indexedWithTable) {
-            $items = $targetFolder.Items
-            $count = $items.Count
-            for ($k = 1; $k -le $count; $k++) {
-                $existing = $null
-                try {
-                    $existing = $items.Item($k)
-                    $mid = $null
+            $items = $null
+            try {
+                $items = $targetFolder.Items
+                $count = $items.Count
+                $maxInspect = [math]::Min($count, 10000)
+                for ($k = 1; $k -le $maxInspect; $k++) {
+                    $existing = $null
                     try {
-                        $mid = $existing.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                        $existing = $items.Item($k)
+                        $mid = $null
+                        try {
+                            $mid = $existing.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                        } catch {}
+                        if ($mid -and $mid.Trim() -ne "") {
+                            [void]$seenSet.Add($mid.Trim())
+                        }
+                        $subj = $existing.Subject
+                        $sender = $existing.SenderEmailAddress
+                        $t = $null
+                        try { $t = $existing.ReceivedTime } catch {}
+                        if ($null -ne $t) {
+                            $cKey = "$subj|$sender|$($t.ToString('yyyyMMddHHmmss'))"
+                            [void]$seenSet.Add($cKey)
+                        }
                     } catch {}
-                    if ($mid -and $mid.Trim() -ne "") {
-                        [void]$seenSet.Add($mid.Trim())
+                    finally {
+                        if ($null -ne $existing) {
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null } catch {}
+                        }
                     }
-                    $subj = $existing.Subject
-                    $sender = $existing.SenderEmailAddress
-                    $t = $null
-                    try { $t = $existing.ReceivedTime } catch {}
-                    if ($null -ne $t) {
-                        $cKey = "$subj|$sender|$($t.ToString('yyyyMMddHHmmss'))"
-                        [void]$seenSet.Add($cKey)
-                    }
-                } catch {}
-                finally {
-                    if ($null -ne $existing) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null } catch {}
-                    }
+                }
+            } catch {}
+            finally {
+                if ($null -ne $items) {
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($items) | Out-Null } catch {}
                 }
             }
         }
@@ -404,6 +461,22 @@ $dateFolderCache = @{}
 $consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 $duplicateSampleCount = 0
+$errorsList = New-Object 'System.Collections.Generic.List[hashtable]'
+
+function Record-ExecutionError([string]$errType, [string]$pst, [string]$srcFolder, [string]$subj, [string]$snd, [string]$msg) {
+    $nowStr = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $errObj = @{
+        timestamp     = $nowStr
+        error_type    = $errType
+        pst_name      = $pst
+        source_folder = $srcFolder
+        subject       = $subj
+        sender        = $snd
+        error_message = $msg
+    }
+    $script:errorsList.Add($errObj)
+    Log-Message "[$errType] $msg" "ERROR"
+}
 
 $weStartedOutlook = $false
 try {
@@ -519,7 +592,7 @@ try {
         if (-not $pstName) { $pstName = $pstPath }
 
         if (-not (Test-Path $pstPath)) {
-            Log-Message "Archivo PST no encontrado en disco: $pstPath" "ERROR"
+            Record-ExecutionError "pst_error" $pstPath "" "" "" "Archivo PST no encontrado en disco: $pstPath"
             $totalErrors++
             continue
         }
@@ -560,7 +633,7 @@ try {
                 try {
                     $namespace.AddStoreEx($pstPath, 2) # fallback 2 = olStoreUnicode
                 } catch {
-                    Log-Message "Error al montar PST '$pstName': $_" "ERROR"
+                    Record-ExecutionError "pst_error" $pstName "" "" "" "Error al montar PST '$pstName': $_"
                     $totalErrors++
                     continue
                 }
@@ -591,7 +664,7 @@ try {
         }
 
         if ($null -eq $pstStore) {
-            Log-Message "No se pudo acceder al almacén MAPI de: $pstName" "ERROR"
+            Record-ExecutionError "pst_error" $pstName "" "" "" "No se pudo acceder al almacén MAPI de: $pstName"
             $totalErrors++
             continue
         }
@@ -601,7 +674,7 @@ try {
         try {
             $pstRoot = $pstStore.GetRootFolder()
         } catch {
-            Log-Message "No se pudo obtener carpeta raíz de: $pstName" "ERROR"
+            Record-ExecutionError "pst_error" $pstName "" "" "" "No se pudo obtener carpeta raíz de: $pstName"
             $totalErrors++
             continue
         }
@@ -664,7 +737,7 @@ try {
                 $folderItems = $srcFolder.Items
                 $itemCount = $folderItems.Count
             } catch {
-                Log-Message "No se pudieron leer elementos de carpeta '$($cf.Name)': $_" "WARN"
+                Record-ExecutionError "folder_error" $pstName $cf.RelPath "" "" "No se pudieron leer elementos de carpeta '$($cf.Name)': $_"
                 continue
             }
 
@@ -681,35 +754,47 @@ try {
 
             try {
                 $tbl = $srcFolder.GetTable()
+                $colEidIdx = -1
+                $colDateIdx = -1
+                $colSubjIdx = -1
+                $colSenderIdx = -1
+                $colMidIdx = -1
+                $colSizeIdx = -1
+                $colSentOnIdx = -1
+
                 try { $tbl.Columns.RemoveAll() } catch {}
-                try { $tbl.Columns.Add("EntryID") | Out-Null } catch {}
-                try { $tbl.Columns.Add("ReceivedTime") | Out-Null } catch {}
-                try { $tbl.Columns.Add("Subject") | Out-Null } catch {}
-                try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null } catch {}
-                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null } catch {}
-                try { $tbl.Columns.Add("Size") | Out-Null } catch {}
-                try { $tbl.Columns.Add("SentOn") | Out-Null } catch {}
+                try { $tbl.Columns.Add("EntryID") | Out-Null; $colEidIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("ReceivedTime") | Out-Null; $colDateIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("Subject") | Out-Null; $colSubjIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null; $colSenderIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
+                if ($colMidIdx -lt 0) {
+                    try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001F") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
+                }
+                try { $tbl.Columns.Add("Size") | Out-Null; $colSizeIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("SentOn") | Out-Null; $colSentOnIdx = $tbl.Columns.Count - 1 } catch {}
 
                 $batchSize = 5000
                 while (-not $tbl.EndOfTable) {
                     $arr = $tbl.GetArray($batchSize)
                     $batchRows = $arr.GetLength(0)
+                    $batchCols = $arr.GetLength(1)
                     if ($batchRows -eq 0) { break }
                     for ($r = 0; $r -lt $batchRows; $r++) {
-                        $eId = $arr[$r, 0]
+                        $eId = if ($colEidIdx -ge 0 -and $colEidIdx -lt $batchCols) { $arr[$r, $colEidIdx] } else { $null }
                         if ($eId) {
-                            $rTime = $arr[$r, 1]
-                            if ($null -eq $rTime -or -not ($rTime -is [DateTime]) -or $rTime.Year -lt 1980) {
-                                $rTime = $arr[$r, 6]
+                            $rTime = if ($colDateIdx -ge 0 -and $colDateIdx -lt $batchCols) { $arr[$r, $colDateIdx] } else { $null }
+                            if (($null -eq $rTime -or -not ($rTime -is [DateTime]) -or $rTime.Year -lt 1980) -and $colSentOnIdx -ge 0 -and $colSentOnIdx -lt $batchCols) {
+                                $rTime = $arr[$r, $colSentOnIdx]
                             }
                             if ($null -eq $rTime -or -not ($rTime -is [DateTime])) {
                                 $rTime = Get-Date
                             }
 
-                            $eSubj = $arr[$r, 2]
-                            $eSender = $arr[$r, 3]
-                            $eMid = $arr[$r, 4]
-                            $eSize = $arr[$r, 5]
+                            $eSubj   = if ($colSubjIdx -ge 0 -and $colSubjIdx -lt $batchCols) { $arr[$r, $colSubjIdx] } else { "" }
+                            $eSender = if ($colSenderIdx -ge 0 -and $colSenderIdx -lt $batchCols) { $arr[$r, $colSenderIdx] } else { "" }
+                            $eMid    = if ($colMidIdx -ge 0 -and $colMidIdx -lt $batchCols) { $arr[$r, $colMidIdx] } else { "" }
+                            $eSize   = if ($colSizeIdx -ge 0 -and $colSizeIdx -lt $batchCols) { $arr[$r, $colSizeIdx] } else { 0 }
 
                             $tableEntries.Add(@{
                                 EntryID      = $eId
@@ -879,11 +964,12 @@ try {
                             }
                         }
                     } catch {
+                        $errStr = "$_"
                         $totalErrors++
                         $pstProcessedCount++
                         $script:globalProcessedItems++
-                        $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 2)
-                        Log-Message "Aviso al transferir correo de carpeta '$($cf.RelPath)': $_" "WARN"
+                        $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 1)
+                        Record-ExecutionError "item_error" $pstName $cf.RelPath (if ($subj) { $subj } else { "(Sin Asunto)" }) (if ($sender) { $sender } else { "(Desconocido)" }) "Aviso al transferir correo: $errStr"
                         if ($processedItemsList.Count -lt 5000) {
                             $processedItemsList.Add(@{
                                 subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
@@ -894,6 +980,7 @@ try {
                                 pst_name      = $pstName
                                 status        = "Error"
                                 size_kb       = 0.0
+                                error_message = $errStr
                             })
                         }
                     } finally {
@@ -1125,11 +1212,12 @@ try {
                     }
                 }
                 catch {
+                    $errStr = "$_"
                     $totalErrors++
                     $pstProcessedCount++
                     $script:globalProcessedItems++
-                    $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 2)
-                    Log-Message "Aviso al procesar correo #$idx de carpeta '$($cf.RelPath)': $_" "WARN"
+                    $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 1)
+                    Record-ExecutionError "item_error" $pstName $cf.RelPath (if ($subj) { $subj } else { "(Sin Asunto)" }) (if ($sender) { $sender } else { "(Desconocido)" }) "Aviso al procesar correo #${idx} - $errStr"
                     if ($processedItemsList.Count -lt 5000) {
                         $processedItemsList.Add(@{
                             subject       = "(Error al leer correo: $($_.Exception.Message))"
@@ -1140,6 +1228,7 @@ try {
                             pst_name      = $pstName
                             status        = "Error"
                             size_kb       = 0.0
+                            error_message = $errStr
                         })
                     }
 
@@ -1213,7 +1302,7 @@ try {
         if ($isAborted) { break }
     }
 
-    # Guardar reporte de elementos procesados en archivo temporal JSON para el informe interactivo HTML
+    # Guardar reporte de elementos procesados y registro de errores en archivos temporales JSON para el informe interactivo HTML y auditoría
     $itemsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_items.json"
     try {
         $itemsJson = $processedItemsList | ConvertTo-Json -Depth 3 -Compress
@@ -1221,6 +1310,15 @@ try {
         Log-Message "Historial de correos ($($processedItemsList.Count) items) preparado para informe interactivo."
     } catch {
         Log-Message "Aviso al escribir historial temporal de correos: $_" "WARN"
+    }
+
+    $errorsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_errors.json"
+    try {
+        $errorsJson = $errorsList | ConvertTo-Json -Depth 3 -Compress
+        [System.IO.File]::WriteAllText($errorsTempFile, $errorsJson, [System.Text.Encoding]::UTF8)
+        Log-Message "Registro de incidencias ($($errorsList.Count) errores) preparado para auditoría e informe."
+    } catch {
+        Log-Message "Aviso al escribir registro temporal de errores: $_" "WARN"
     }
 
     $finalStatus = if ($isAborted) { "aborted" } else { "completed" }
@@ -1235,7 +1333,7 @@ try {
     Log-Message "Operación finalizada con estado: $finalStatus. Total importados: $totalImported, Duplicados: $totalDuplicates, Errores: $totalErrors."
 }
 catch {
-    Log-Message "Error fatal en automatización COM: $_" "ERROR"
+    Record-ExecutionError "fatal_error" "" "" "" "" "Error fatal en automatización COM: $_"
     Send-Telemetry @{
         type           = "finished"
         status         = "failed"

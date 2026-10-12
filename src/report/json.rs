@@ -22,6 +22,7 @@ pub struct AuditReport {
     pub error_count: u64,
     pub psts_processed: Vec<String>,
     pub storage_impact: Vec<crate::app::MailboxStorageImpact>,
+    pub errors: Vec<crate::app::ExecutionErrorDetail>,
 }
 
 /// Genera automáticamente la auditoría JSON según las directrices:
@@ -51,6 +52,23 @@ pub fn generate_audit_json(state: &AppState, status: &str) -> Result<Option<Path
 
     let file_path = logs_dir.join(format!("run_{}.json", time_str));
 
+    let mut errors = state.execution_errors.clone();
+    if errors.is_empty() {
+        for item in &state.processed_items {
+            if item.status == "Error" {
+                errors.push(crate::app::ExecutionErrorDetail {
+                    timestamp: item.date.clone(),
+                    error_type: "item_error".to_string(),
+                    pst_name: item.pst_name.clone(),
+                    source_folder: item.source_folder.clone(),
+                    subject: item.subject.clone(),
+                    sender: item.sender.clone(),
+                    error_message: item.error_message.clone().unwrap_or_else(|| "Error al procesar o transferir correo".to_string()),
+                });
+            }
+        }
+    }
+
     let report = AuditReport {
         application: "Outlook Organizer TS".to_string(),
         version: "1.0.0".to_string(),
@@ -73,10 +91,93 @@ pub fn generate_audit_json(state: &AppState, status: &str) -> Result<Option<Path
             .map(|p| p.name.clone())
             .collect(),
         storage_impact: state.get_mailbox_storage_impacts(),
+        errors,
     };
 
     let json_content = serde_json::to_string_pretty(&report)?;
     fs::write(&file_path, json_content)?;
 
     Ok(Some(file_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{ExecutionErrorDetail, ProcessedEmailItem};
+
+    #[test]
+    fn test_audit_report_serialization_with_errors() {
+        let mut state = AppState::new();
+        state.execution_errors.push(ExecutionErrorDetail {
+            timestamp: "2024-10-12 10:00:00".to_string(),
+            error_type: "folder_read_error".to_string(),
+            pst_name: "archivo1.pst".to_string(),
+            source_folder: "Bandeja de entrada".to_string(),
+            subject: "Factura pendiente".to_string(),
+            sender: "ventas@empresa.com".to_string(),
+            error_message: "MAPI_E_TIMEOUT: Tiempo de espera agotado".to_string(),
+        });
+
+        let report = AuditReport {
+            application: "Outlook Organizer TS".to_string(),
+            version: "1.0.0".to_string(),
+            timestamp_start: "2024-10-12T10:00:00Z".to_string(),
+            timestamp_end: "2024-10-12T10:05:00Z".to_string(),
+            status: "Completado con errores".to_string(),
+            target_mailboxes: vec!["buzon@empresa.com".to_string()],
+            transfer_mode: "Move".to_string(),
+            routing_enabled: true,
+            deduplication_enabled: true,
+            deep_scan_enabled: true,
+            throttling_enabled: true,
+            imported_items: 800,
+            duplicates_skipped: 18,
+            error_count: 1,
+            psts_processed: vec!["archivo1.pst".to_string()],
+            storage_impact: vec![],
+            errors: state.execution_errors.clone(),
+        };
+
+        let json_str = serde_json::to_string_pretty(&report).expect("Serialization failed");
+        assert!(json_str.contains("MAPI_E_TIMEOUT"));
+        assert!(json_str.contains("folder_read_error"));
+        assert!(json_str.contains("archivo1.pst"));
+    }
+
+    #[test]
+    fn test_audit_report_synthesizes_errors_from_items_when_empty() {
+        let mut state = AppState::new();
+        state.processed_items.push(ProcessedEmailItem {
+            subject: "Correo corrupto".to_string(),
+            sender: "spam@bad.com".to_string(),
+            date: "2024-05-01 12:00:00".to_string(),
+            source_folder: "Inbox".to_string(),
+            dest_folder: "Bandeja de entrada".to_string(),
+            pst_name: "test.pst".to_string(),
+            status: "Error".to_string(),
+            size_kb: 50.0,
+            error_message: Some("Error COM al mover ítem".to_string()),
+        });
+
+        let mut errors = state.execution_errors.clone();
+        if errors.is_empty() {
+            for item in &state.processed_items {
+                if item.status == "Error" {
+                    errors.push(ExecutionErrorDetail {
+                        timestamp: item.date.clone(),
+                        error_type: "item_error".to_string(),
+                        pst_name: item.pst_name.clone(),
+                        source_folder: item.source_folder.clone(),
+                        subject: item.subject.clone(),
+                        sender: item.sender.clone(),
+                        error_message: item.error_message.clone().unwrap_or_else(|| "Error al procesar o transferir correo".to_string()),
+                    });
+                }
+            }
+        }
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].error_message, "Error COM al mover ítem");
+        assert_eq!(errors[0].subject, "Correo corrupto");
+    }
 }

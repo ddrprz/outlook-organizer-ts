@@ -100,9 +100,45 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
     let emails = state.get_effective_email_items();
     let logs: Vec<String> = state.activity_log.iter().cloned().collect();
 
+    let mut errors = state.execution_errors.clone();
+    if errors.is_empty() {
+        for item in &emails {
+            if item.status == "Error" {
+                errors.push(crate::app::ExecutionErrorDetail {
+                    timestamp: item.date.clone(),
+                    error_type: "item_error".to_string(),
+                    pst_name: item.pst_name.clone(),
+                    source_folder: item.source_folder.clone(),
+                    subject: item.subject.clone(),
+                    sender: item.sender.clone(),
+                    error_message: item.error_message.clone().unwrap_or_else(|| "Error al procesar o transferir correo".to_string()),
+                });
+            }
+        }
+    }
+
+    let error_banner = if errors_count > 0 {
+        format!(
+            r#"<div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 2rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.85rem;">
+            <svg style="color: var(--danger); width: 26px; height: 26px; flex-shrink: 0;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div>
+              <strong style="color: var(--danger); font-size: 1rem;">Se detectaron {} incidencias durante la operación</strong>
+              <div style="color: var(--text-muted); font-size: 0.85rem; margin-top: 2px;">Los detalles técnicos completos y causas raíz de cada fallo están documentados en la pestaña de incidencias.</div>
+            </div>
+          </div>
+          <button onclick="switchTab('tab-errors')" style="background: var(--danger); color: white; border: none; padding: 0.5rem 1rem; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: pointer;">Ver Detalle de Incidencias</button>
+        </div>"#,
+            errors_count
+        )
+    } else {
+        String::new()
+    };
+
     let folders_json = serde_json::to_string(&folders).unwrap_or_else(|_| "[]".to_string());
     let emails_json = serde_json::to_string(&emails).unwrap_or_else(|_| "[]".to_string());
     let logs_json = serde_json::to_string(&logs).unwrap_or_else(|_| "[]".to_string());
+    let errors_json = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_string());
 
     let template = get_html_template();
 
@@ -126,9 +162,11 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
         .replace("__DATE_FILTER_INFO__", &date_filter_str)
         .replace("__PST_ROWS__", &selected_psts_rows)
         .replace("__STORAGE_IMPACT_SECTION__", &build_storage_impact_html(state))
+        .replace("__ERROR_BANNER__", &error_banner)
         .replace("__FOLDERS_JSON__", &folders_json)
         .replace("__EMAILS_JSON__", &emails_json)
-        .replace("__LOGS_JSON__", &logs_json);
+        .replace("__LOGS_JSON__", &logs_json)
+        .replace("__ERRORS_JSON__", &errors_json);
 
     fs::write(&target_path, rendered)?;
     Ok(target_path)
@@ -1550,10 +1588,15 @@ fn get_html_template() -> &'static str {
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         Registro de Telemetría <span class="tab-badge" id="logTabCount">0</span>
       </button>
+      <button class="tab-btn" id="btn-tab-errors" onclick="switchTab('tab-errors')">
+        <svg class="icon icon-danger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Incidencias &amp; Errores <span class="tab-badge" id="errorTabCount">0</span>
+      </button>
     </nav>
 
     <!-- TAB 1: Resumen & Auditoría -->
     <section id="tab-summary" class="tab-content active">
+      __ERROR_BANNER__
       __STORAGE_IMPACT_SECTION__
 
       <div class="table-card" style="margin-bottom: 2rem;">
@@ -1770,6 +1813,42 @@ fn get_html_template() -> &'static str {
       </div>
     </section>
 
+    <!-- TAB 5: Incidencias & Errores Detallados -->
+    <section id="tab-errors" class="tab-content">
+      <div class="filter-panel">
+        <div class="search-group">
+          <span class="search-icon-wrapper">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
+          <input type="text" id="errorSearch" class="search-input" placeholder="Buscar incidencias por mensaje de error, archivo PST, asunto o carpeta..." oninput="onErrorSearchChange()">
+          <button id="errorSearchClear" class="search-clear" onclick="clearErrorSearch()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-responsive">
+          <table id="errorsTable">
+            <thead>
+              <tr>
+                <th style="width: 45px;">#</th>
+                <th class="sortable" onclick="sortErrors('timestamp')">Fecha / Hora ⇅</th>
+                <th class="sortable" onclick="sortErrors('error_type')">Tipo de Fallo ⇅</th>
+                <th class="sortable" onclick="sortErrors('pst_name')">Archivo PST ⇅</th>
+                <th class="sortable" onclick="sortErrors('source_folder')">Carpeta Origen ⇅</th>
+                <th class="sortable" onclick="sortErrors('subject')">Elemento Afectado ⇅</th>
+                <th>Causa Raíz / Detalle Técnico del Error</th>
+              </tr>
+            </thead>
+            <tbody id="errorsTableBody">
+              <!-- Renderizado dinámico vía JavaScript -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- Footer -->
     <footer class="footer">
       <div>
@@ -1787,17 +1866,20 @@ fn get_html_template() -> &'static str {
   <script type="application/json" id="rawFoldersData">__FOLDERS_JSON__</script>
   <script type="application/json" id="rawEmailsData">__EMAILS_JSON__</script>
   <script type="application/json" id="rawLogsData">__LOGS_JSON__</script>
+  <script type="application/json" id="rawErrorsData">__ERRORS_JSON__</script>
 
   <!-- Lógica Interactiva en Vanilla JavaScript -->
   <script>
     let folders = [];
     let emails = [];
     let logs = [];
+    let errors = [];
 
     try {
       folders = JSON.parse(document.getElementById("rawFoldersData").textContent || "[]");
       emails = JSON.parse(document.getElementById("rawEmailsData").textContent || "[]");
       logs = JSON.parse(document.getElementById("rawLogsData").textContent || "[]");
+      errors = JSON.parse(document.getElementById("rawErrorsData").textContent || "[]");
     } catch(e) {
       console.error("Error al cargar datos JSON:", e);
     }
@@ -1806,6 +1888,14 @@ fn get_html_template() -> &'static str {
     document.getElementById("folderTabCount").innerText = folders.length.toLocaleString();
     document.getElementById("emailTabCount").innerText = emails.length.toLocaleString();
     document.getElementById("logTabCount").innerText = logs.length.toLocaleString();
+    const errCountEl = document.getElementById("errorTabCount");
+    if (errCountEl) {
+      errCountEl.innerText = errors.length.toLocaleString();
+      if (errors.length > 0) {
+        errCountEl.style.background = "var(--danger)";
+        errCountEl.style.color = "white";
+      }
+    }
 
     // Estado de Pestañas
     function switchTab(tabId) {
@@ -2064,10 +2154,15 @@ fn get_html_template() -> &'static str {
         const highlightedSender = highlightText(item.sender || "-", q);
         const sizeStr = item.size_kb ? formatSizeKb(item.size_kb) : "-";
 
+        let errorDetailHtml = "";
+        if (item.status === "Error" && item.error_message) {
+          errorDetailHtml = `<div style="font-size: 0.75rem; color: var(--danger); margin-top: 4px; background: rgba(239,68,68,0.1); padding: 3px 6px; border-radius: 4px; border: 1px solid rgba(239,68,68,0.2); word-break: break-all;">⚠️ ${escapeHtml(item.error_message)}</div>`;
+        }
+
         return `
           <tr>
             <td style="color: var(--text-dim); font-size: 0.78rem;">${itemNumber}</td>
-            <td><strong>${highlightedSubject}</strong></td>
+            <td><strong>${highlightedSubject}</strong>${errorDetailHtml}</td>
             <td class="muted-cell">${highlightedSender}</td>
             <td class="muted-cell" style="white-space: nowrap;">${escapeHtml(item.date || '-')}</td>
             <td>${arrowRightSvg} ${escapeHtml(item.source_folder || '-')}</td>
@@ -2124,6 +2219,91 @@ fn get_html_template() -> &'static str {
         else if (l.includes("COMPLETADO") || l.includes("[FIN]") || l.includes("exitosamente")) cls = "log-success";
         return `<div class="log-line ${cls}">${escapeHtml(l)}</div>`;
       }).join("");
+    }
+
+    // ==========================================
+    // TAB 5: Lógica de Incidencias & Errores
+    // ==========================================
+    let errorSortCol = "timestamp";
+    let errorSortAsc = false;
+
+    function renderErrorsTable() {
+      const q = (document.getElementById("errorSearch") ? document.getElementById("errorSearch").value : "").trim().toLowerCase();
+      const tbody = document.getElementById("errorsTableBody");
+      if (!tbody) return;
+
+      const filtered = errors.filter(err => {
+        if (!q) return true;
+        return (err.error_message && err.error_message.toLowerCase().includes(q)) ||
+               (err.pst_name && err.pst_name.toLowerCase().includes(q)) ||
+               (err.source_folder && err.source_folder.toLowerCase().includes(q)) ||
+               (err.subject && err.subject.toLowerCase().includes(q)) ||
+               (err.sender && err.sender.toLowerCase().includes(q)) ||
+               (err.error_type && err.error_type.toLowerCase().includes(q));
+      });
+
+      filtered.sort((a, b) => {
+        let valA = a[errorSortCol] || "";
+        let valB = b[errorSortCol] || "";
+        if (typeof valA === "string") valA = valA.toLowerCase();
+        if (typeof valB === "string") valB = valB.toLowerCase();
+        if (valA < valB) return errorSortAsc ? -1 : 1;
+        if (valA > valB) return errorSortAsc ? 1 : -1;
+        return 0;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">${errors.length === 0 ? "✓ No se registraron incidencias ni errores durante la migración." : "No se encontraron incidencias que coincidan con la búsqueda."}</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map((err, idx) => {
+        const itemNumber = idx + 1;
+        const pst = err.pst_name || "-";
+        const folder = err.source_folder || "-";
+        let affected = "-";
+        if (err.subject) {
+          affected = `<strong>${escapeHtml(err.subject)}</strong>`;
+          if (err.sender) affected += `<br><span class="muted-cell" style="font-size: 0.78rem;">De: ${escapeHtml(err.sender)}</span>`;
+        }
+
+        return `
+          <tr>
+            <td style="color: var(--text-dim); font-size: 0.78rem;">${itemNumber}</td>
+            <td class="muted-cell" style="white-space: nowrap;">${escapeHtml(err.timestamp || '-')}</td>
+            <td><span class="badge badge-error">${escapeHtml(err.error_type || 'Error')}</span></td>
+            <td><strong>${escapeHtml(pst)}</strong></td>
+            <td>${escapeHtml(folder)}</td>
+            <td>${affected}</td>
+            <td style="color: var(--danger); font-family: monospace; font-size: 0.82rem; word-break: break-all; max-width: 380px;">${escapeHtml(err.error_message || 'Fallo desconocido')}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    function sortErrors(col) {
+      if (errorSortCol === col) {
+        errorSortAsc = !errorSortAsc;
+      } else {
+        errorSortCol = col;
+        errorSortAsc = true;
+      }
+      renderErrorsTable();
+    }
+
+    function onErrorSearchChange() {
+      const q = document.getElementById("errorSearch") ? document.getElementById("errorSearch").value : "";
+      const clr = document.getElementById("errorSearchClear");
+      if (clr) clr.style.display = q ? "block" : "none";
+      renderErrorsTable();
+    }
+
+    function clearErrorSearch() {
+      const el = document.getElementById("errorSearch");
+      if (el) el.value = "";
+      const clr = document.getElementById("errorSearchClear");
+      if (clr) clr.style.display = "none";
+      renderErrorsTable();
     }
 
     // ==========================================
@@ -2209,6 +2389,7 @@ fn get_html_template() -> &'static str {
     renderFoldersTable();
     renderEmailsTable();
     renderLogs();
+    renderErrorsTable();
   </script>
 </body>
 </html>"#
@@ -2249,6 +2430,8 @@ mod tests {
         assert!(content.contains("Auditoría de Almacenamiento MAPI: Antes vs. Después"));
         assert!(content.contains("ESTADO ANTES DE IMPORTAR"));
         assert!(content.contains("ESTADO DESPUÉS DE IMPORTAR"));
+        assert!(content.contains("Incidencias &amp; Errores"));
+        assert!(content.contains("rawErrorsData"));
         let logs_dir = PathBuf::from("logs");
         let _ = fs::create_dir_all(&logs_dir);
         let preview_path = logs_dir.join("preview_report.html");
