@@ -95,35 +95,34 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let selected_mailboxes = state.selected_mailboxes();
-    let selected_count = selected_mailboxes.len();
+    let selected_mbox = selected_mailboxes.first();
     let total_count = state.discovered_mailboxes.len();
-
-    let combined_free_gb: f64 = selected_mailboxes.iter().map(|m| m.get_free_gb()).sum();
-    let combined_total_gb: f64 = selected_mailboxes.iter().map(|m| m.get_total_gb()).sum();
 
     let mut header_line2 = vec![
         Span::styled("Detected mailboxes: ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled(format!("{}", total_count), Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled(" | Selected as target: ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled(
-            format!("{}", selected_count),
-            Style::default().fg(if selected_count > 0 { Theme::SUCCESS } else { Theme::WARNING }).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(" | Selected target: ", Style::default().fg(Theme::TEXT_MUTED)),
     ];
 
-    if selected_count > 0 {
-        header_line2.push(Span::styled(" | Free capacity in selected: ", Style::default().fg(Theme::TEXT_MUTED)));
-        let combined_total_fmt = if combined_total_gb.fract() == 0.0 {
-            format!("{:.0} GB", combined_total_gb)
+    if let Some(target) = selected_mbox {
+        header_line2.push(Span::styled(
+            format!("{} ({})", target.display_name, target.store_type),
+            Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD),
+        ));
+        header_line2.push(Span::styled(" | Free capacity: ", Style::default().fg(Theme::TEXT_MUTED)));
+        let target_total_gb = target.get_total_gb();
+        let target_free_gb = target.get_free_gb();
+        let total_fmt = if target_total_gb.fract() == 0.0 {
+            format!("{:.0} GB", target_total_gb)
         } else {
-            format!("{:.1} GB", combined_total_gb)
+            format!("{:.1} GB", target_total_gb)
         };
         header_line2.push(Span::styled(
-            format!("{:.1} GB / {}", combined_free_gb, combined_total_fmt),
+            format!("{:.1} GB / {}", target_free_gb, total_fmt),
             Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD),
         ));
     } else {
-        header_line2.push(Span::styled(" (Press [Space] to select at least one mailbox)", Style::default().fg(Theme::TEXT_MUTED)));
+        header_line2.push(Span::styled("None (Press [Space] to select target mailbox)", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)));
     }
 
     let header_lines = vec![
@@ -170,8 +169,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
         let rows = state.discovered_mailboxes.iter().enumerate().map(|(idx, item)| {
             let is_focused = idx == state.selected_mailbox_idx;
-            let checkbox = if item.selected { "[x]" } else { "[ ]" };
-            let sel_cell = Cell::from(checkbox).style(if item.selected {
+            let radio = if item.selected { "(●)" } else { "(○)" };
+            let sel_cell = Cell::from(radio).style(if item.selected {
                 Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Theme::TEXT_MUTED)
@@ -236,7 +235,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-                .title(" Available Target Mailboxes (Space: Toggle) "),
+                .title(" Available Target Mailboxes (Single Target: Space/Enter) "),
         );
 
         f.render_widget(table, chunks[1]);
@@ -366,15 +365,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         Span::styled("[↑/↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled("Navigate   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[Space] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Toggle   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[A] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("All   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[N] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("None   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Select Target   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[R] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled("Reload from Outlook   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[Enter] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled("Continue", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Continue   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[Esc] ", Style::default().fg(Theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+        Span::styled("Back", Style::default().fg(Theme::TEXT_MUTED)),
     ]);
     f.render_widget(Paragraph::new(help_line).alignment(Alignment::Center), chunks[next_chunk_idx]);
 }

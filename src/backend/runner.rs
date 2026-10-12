@@ -324,7 +324,17 @@ impl BackendRunner {
                     });
 
                     if !items.is_empty() {
-                        if !items.iter().any(|m| m.selected) {
+                        let mut selected_found = false;
+                        for m in &mut items {
+                            if m.selected {
+                                if !selected_found {
+                                    selected_found = true;
+                                } else {
+                                    m.selected = false;
+                                }
+                            }
+                        }
+                        if !selected_found {
                             items[0].selected = true;
                         }
                         return items;

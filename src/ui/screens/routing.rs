@@ -331,13 +331,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     // 3. VISTA PREVIA DEL ENRUTAMIENTO MAPI EN VIVO
     // =========================================================================
     let selected_mboxes = state.selected_mailboxes();
-    let mbox_names = if selected_mboxes.is_empty() {
-        "Default mailbox".to_string()
-    } else if selected_mboxes.len() == 1 {
-        selected_mboxes[0].display_name.clone()
-    } else {
-        selected_mboxes.iter().map(|m| m.display_name.as_str()).collect::<Vec<_>>().join(" | ")
-    };
+    let mbox_names = selected_mboxes
+        .first()
+        .map(|m| m.display_name.clone())
+        .unwrap_or_else(|| "Default mailbox".to_string());
 
     let preview_title = format!(" Live MAPI Routing Preview into: [{}] ", mbox_names);
     let preview_block = Block::default()

@@ -164,6 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if !items.is_empty() {
                         state.discovered_mailboxes = items;
                         state.selected_mailbox_idx = 0;
+                        state.select_single_mailbox(0);
                     }
                 }
                 BackendMessage::PstDetailLoaded { pst_path, pst_name, detail } => {
@@ -573,24 +574,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Char(' ') => {
-                        if let Some(item) = state
-                            .discovered_mailboxes
-                            .get_mut(state.selected_mailbox_idx)
-                        {
-                            item.selected = !item.selected;
-                        }
+                        state.select_single_mailbox(state.selected_mailbox_idx);
                         state.mailbox_warning_notice = None;
-                    }
-                    KeyCode::Char('a') | KeyCode::Char('A') => {
-                        for item in &mut state.discovered_mailboxes {
-                            item.selected = true;
-                        }
-                        state.mailbox_warning_notice = None;
-                    }
-                    KeyCode::Char('n') | KeyCode::Char('N') => {
-                        for item in &mut state.discovered_mailboxes {
-                            item.selected = false;
-                        }
                     }
                     KeyCode::Char('r') | KeyCode::Char('R') => {
                         state.is_loading_mailboxes = true;
@@ -606,9 +591,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     KeyCode::Enter => {
                         if state.selected_mailboxes().is_empty() {
+                            state.select_single_mailbox(state.selected_mailbox_idx);
+                        }
+                        if state.selected_mailboxes().is_empty() {
                             state.mailbox_warning_notice = Some(
-                                "Debe seleccionar al menos un buzón de destino para continuar."
-                                    .to_string(),
+                                "Please select a target mailbox to continue.".to_string(),
                             );
                         } else {
                             state.mailbox_warning_notice = None;

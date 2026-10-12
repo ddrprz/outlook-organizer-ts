@@ -85,13 +85,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     };
 
     let selected_mailboxes = state.selected_mailboxes();
-    let mailbox_summary_str = if selected_mailboxes.is_empty() {
-        "None selected (▲ At least one required)".to_string()
-    } else if selected_mailboxes.len() == 1 {
-        format!("{} ({})", selected_mailboxes[0].display_name, selected_mailboxes[0].store_type)
+    let mailbox_summary_str = if let Some(target) = selected_mailboxes.first() {
+        format!("{} ({})", target.display_name, target.store_type)
     } else {
-        let names = selected_mailboxes.iter().map(|m| m.display_name.as_str()).collect::<Vec<_>>().join(", ");
-        format!("{} mailboxes selected: {}", selected_mailboxes.len(), names)
+        "None selected (▲ Target mailbox required)".to_string()
     };
 
     let summary_lines = vec![
@@ -110,7 +107,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             ),
         ]),
         Line::from(vec![
-            Span::styled("• Target Mailbox(es):   ", Style::default().fg(Theme::TEXT_MUTED)),
+            Span::styled("• Target Mailbox:       ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(mailbox_summary_str, Style::default().fg(Theme::TEXT_MAIN).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
