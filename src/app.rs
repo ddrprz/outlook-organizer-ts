@@ -2072,11 +2072,14 @@ impl AppState {
     }
 
     pub fn get_imported_folders_summary(&self) -> Vec<ImportedFolderReportItem> {
-        let default_pst = self
-            .selected_psts()
-            .first()
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| "Archivo.pst".to_string());
+        let selected = self.selected_psts();
+        let default_pst = if selected.is_empty() {
+            "Archivo.pst".to_string()
+        } else if selected.len() == 1 {
+            selected[0].name.clone()
+        } else {
+            selected.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+        };
 
         let mut results = Vec::new();
         for node in &self.folder_tree.nodes {
@@ -2100,6 +2103,28 @@ impl AppState {
                 node.path.clone()
             };
 
+            let psts_for_node: Vec<String> = self
+                .selected_psts()
+                .iter()
+                .filter(|p| {
+                    if let Some(detail) = self.pst_details_cache.get(&p.path) {
+                        detail.folders.iter().any(|f| {
+                            let f_path = if f.path.is_empty() { &f.name } else { &f.path };
+                            f_path == &node.path
+                        })
+                    } else {
+                        true
+                    }
+                })
+                .map(|p| p.name.clone())
+                .collect();
+
+            let pst_name = if psts_for_node.is_empty() {
+                default_pst.clone()
+            } else {
+                psts_for_node.join(", ")
+            };
+
             let (count, size) = if node.count > 0 || node.size_mb > 0.0 {
                 (node.count, node.size_mb)
             } else {
@@ -2118,7 +2143,7 @@ impl AppState {
             };
 
             results.push(ImportedFolderReportItem {
-                pst_name: default_pst.clone(),
+                pst_name,
                 source_folder: node.path.clone(),
                 dest_folder: dest_name,
                 total_items: count,
