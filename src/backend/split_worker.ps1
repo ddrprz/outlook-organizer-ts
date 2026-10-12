@@ -524,16 +524,16 @@ try {
 
                     # Resolver nombre único con (1) (2) si ya existe en disco
                     $targetPstPath = ""
-                    if ($targetPathCache.ContainsKey($targetKey)) {
+                    if ($targetKey -and $targetPathCache.ContainsKey($targetKey)) {
                         $targetPstPath = $targetPathCache[$targetKey]
                     } else {
                         $targetPstPath = Get-UniquePstPath $outputDir $baseFileName
-                        $targetPathCache[$targetKey] = $targetPstPath
+                        if ($targetKey) { $targetPathCache[$targetKey] = $targetPstPath }
                     }
                     $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
 
                     # Monitoreo preventivo del límite de 47.5 GB: si el PST alcanzó ~47 GB, rotar volumen
-                    if ($generatedPsts.ContainsKey($targetPstPath) -and ($generatedPsts[$targetPstPath].items_count -gt 0) -and ($generatedPsts[$targetPstPath].items_count % 50 -eq 0)) {
+                    if ($targetPstPath -and $generatedPsts.ContainsKey($targetPstPath) -and ($generatedPsts[$targetPstPath].items_count -gt 0) -and ($generatedPsts[$targetPstPath].items_count % 50 -eq 0)) {
                         if (Test-Path $targetPstPath) {
                             try {
                                 $currLen = (Get-Item -LiteralPath $targetPstPath).Length
@@ -543,7 +543,7 @@ try {
                                     Log-Message "Aviso: '$targetFileName' alcanzó el límite de 47.5 GB ($('{0:N2}' -f ($currLen/1GB)) GB). Rotando a nuevo volumen: $nextVolName..." "WARN"
                                     $targetPstPath = $nextVol
                                     $targetFileName = $nextVolName
-                                    $targetPathCache[$targetKey] = $targetPstPath
+                                    if ($targetKey) { $targetPathCache[$targetKey] = $targetPstPath }
                                 }
                             } catch {}
                         }
@@ -551,7 +551,7 @@ try {
 
                     # Montar o recuperar almacén destino de forma segura
                     $targetStore = $null
-                    if ($openTargetStores.ContainsKey($targetPstPath)) {
+                    if ($targetPstPath -and $openTargetStores.ContainsKey($targetPstPath)) {
                         $targetStore = $openTargetStores[$targetPstPath]
                     } else {
                         Log-Message "Inicializando archivo PST de salida: $targetFileName"
@@ -560,11 +560,13 @@ try {
                             $script:totalErrors++
                             continue
                         }
-                        $openTargetStores[$targetPstPath] = $targetStore
-                        $generatedPsts[$targetPstPath] = @{
-                            file_path   = $targetPstPath
-                            file_name   = $targetFileName
-                            items_count = 0
+                        if ($targetPstPath) {
+                            $openTargetStores[$targetPstPath] = $targetStore
+                            $generatedPsts[$targetPstPath] = @{
+                                file_path   = $targetPstPath
+                                file_name   = $targetFileName
+                                items_count = 0
+                            }
                         }
                     }
 
@@ -578,11 +580,11 @@ try {
 
                     $cacheKey = "$targetPstPath|$($cf.RelPath)"
                     $destFolder = $null
-                    if ($targetFolderCache.ContainsKey($cacheKey)) {
+                    if ($cacheKey -and $targetFolderCache.ContainsKey($cacheKey)) {
                         $destFolder = $targetFolderCache[$cacheKey]
                     } else {
                         $destFolder = Ensure-FolderHierarchy $targetRoot $cf.RelPath
-                        $targetFolderCache[$cacheKey] = $destFolder
+                        if ($cacheKey) { $targetFolderCache[$cacheKey] = $destFolder }
                     }
 
                     # Cargar el ítem específico por EntryID y transferir
@@ -708,11 +710,11 @@ try {
                         $targetKey = if ($partitionMode -eq "ByYear") { "$y" } elseif ($partitionMode -eq "ByYearMonth") { "${y}_{0:D2}" -f $m } else { "single" }
                         $baseFileName = if ($partitionMode -eq "ByYear") { "${defaultPrefix}_$y.pst" } elseif ($partitionMode -eq "ByYearMonth") { "${defaultPrefix}_${y}_{0:D2}.pst" -f $m } else { "${defaultPrefix}_filtrado.pst" }
 
-                        $targetPstPath = if ($targetPathCache.ContainsKey($targetKey)) { $targetPathCache[$targetKey] } else { $p = Get-UniquePstPath $outputDir $baseFileName; $targetPathCache[$targetKey] = $p; $p }
+                        $targetPstPath = if ($targetKey -and $targetPathCache.ContainsKey($targetKey)) { $targetPathCache[$targetKey] } else { $p = Get-UniquePstPath $outputDir $baseFileName; if ($targetKey) { $targetPathCache[$targetKey] = $p }; $p }
                         $targetFileName = [System.IO.Path]::GetFileName($targetPstPath)
 
                         # Monitoreo preventivo del límite de 47.5 GB: si el PST alcanzó ~47 GB, rotar volumen
-                        if ($generatedPsts.ContainsKey($targetPstPath) -and ($generatedPsts[$targetPstPath].items_count -gt 0) -and ($generatedPsts[$targetPstPath].items_count % 50 -eq 0)) {
+                        if ($targetPstPath -and $generatedPsts.ContainsKey($targetPstPath) -and ($generatedPsts[$targetPstPath].items_count -gt 0) -and ($generatedPsts[$targetPstPath].items_count % 50 -eq 0)) {
                             if (Test-Path $targetPstPath) {
                                 try {
                                     $currLen = (Get-Item -LiteralPath $targetPstPath).Length
@@ -722,16 +724,22 @@ try {
                                         Log-Message "Aviso: '$targetFileName' alcanzó el límite de 47.5 GB ($('{0:N2}' -f ($currLen/1GB)) GB). Rotando a nuevo volumen: $nextVolName..." "WARN"
                                         $targetPstPath = $nextVol
                                         $targetFileName = $nextVolName
-                                        $targetPathCache[$targetKey] = $targetPstPath
+                                        if ($targetKey) { $targetPathCache[$targetKey] = $targetPstPath }
                                     }
                                 } catch {}
                             }
                         }
 
-                        $targetStore = if ($openTargetStores.ContainsKey($targetPstPath)) { $openTargetStores[$targetPstPath] } else {
+                        $targetStore = if ($targetPstPath -and $openTargetStores.ContainsKey($targetPstPath)) { $openTargetStores[$targetPstPath] } else {
                             Log-Message "Inicializando archivo PST de salida: $targetFileName"
                             $st = Get-OrMountTargetStore $namespace $targetPstPath $unmountRef
-                            if ($st) { $openTargetStores[$targetPstPath] = $st; $generatedPsts[$targetPstPath] = @{ file_path = $targetPstPath; file_name = $targetFileName; items_count = 0 }; $st } else { $null }
+                            if ($st) {
+                                if ($targetPstPath) {
+                                    $openTargetStores[$targetPstPath] = $st
+                                    $generatedPsts[$targetPstPath] = @{ file_path = $targetPstPath; file_name = $targetFileName; items_count = 0 }
+                                }
+                                $st
+                            } else { $null }
                         }
 
                         if ($null -eq $targetStore) {
@@ -743,7 +751,7 @@ try {
                         $targetRoot = $null
                         try { $targetRoot = $targetStore.GetRootFolder() } catch {}
                         $cacheKey = "$targetPstPath|$($cf.RelPath)"
-                        $destFolder = if ($targetFolderCache.ContainsKey($cacheKey)) { $targetFolderCache[$cacheKey] } else { $df = Ensure-FolderHierarchy $targetRoot $cf.RelPath; $targetFolderCache[$cacheKey] = $df; $df }
+                        $destFolder = if ($cacheKey -and $targetFolderCache.ContainsKey($cacheKey)) { $targetFolderCache[$cacheKey] } else { $df = Ensure-FolderHierarchy $targetRoot $cf.RelPath; if ($cacheKey) { $targetFolderCache[$cacheKey] = $df }; $df }
 
                         try {
                             if ($transferMode -eq "Move") {

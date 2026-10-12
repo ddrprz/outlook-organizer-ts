@@ -147,7 +147,7 @@ function Get-DestFolderByPath($destStore, [string]$relPath, [string]$folderType)
 
 function Get-CachedDestBaseFolder($destStore, [string]$relPath, [string]$folderType) {
     $cacheKey = "$relPath|$folderType"
-    if ($script:destFolderCache.ContainsKey($cacheKey)) {
+    if ($cacheKey -and $script:destFolderCache.ContainsKey($cacheKey)) {
         return $script:destFolderCache[$cacheKey]
     }
     $f = Get-DestFolderByPath $destStore $relPath $folderType
@@ -669,7 +669,10 @@ try {
             # Registrar StoreIDs previos para detección inequívoca tras AddStoreEx
             $storesBefore = @{}
             foreach ($s in $namespace.Stores) {
-                try { $storesBefore[$s.StoreID] = $true } catch {}
+                try {
+                    $sId = $s.StoreID
+                    if ($sId) { $storesBefore[$sId] = $true }
+                } catch {}
             }
 
             try {
@@ -691,7 +694,8 @@ try {
 
                 foreach ($s in $namespace.Stores) {
                     try {
-                        if (-not $storesBefore.ContainsKey($s.StoreID)) {
+                        $sId = $s.StoreID
+                        if ($sId -and -not $storesBefore.ContainsKey($sId)) {
                             $pstStore = $s
                             break
                         }
@@ -881,96 +885,121 @@ try {
                         }
                     }
 
-                    $rcvd = $entry.ReceivedTime
-                    if ($null -ne $allowedYearsSet -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
-                        $pstProcessedCount++
-                        $script:globalProcessedItems++
-                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
-                        continue
-                    }
-                    if ($null -ne $allowedMonthsSet -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
-                        $pstProcessedCount++
-                        $script:globalProcessedItems++
-                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
-                        continue
-                    }
-
-                    # Determinar carpeta de destino final con enrutamiento y caché O(1)
-                    $finalDest = $baseDest
-                    if ($config -and $config.routing_enabled) {
-                        $granularity = if ($config.routing_granularity) { $config.routing_granularity } else { "Mirror" }
-                        if ($granularity -ne "Mirror") {
-                            $y = $rcvd.Year
-                            $m = $rcvd.Month
-                            $dateKey = "$baseDestId|$granularity|$y|$m"
-                            if ($script:dateFolderCache.ContainsKey($dateKey)) {
-                                $finalDest = $script:dateFolderCache[$dateKey]
-                            } else {
-                                if ($granularity -eq "YearsAndMonths") {
-                                    $yearName = "$y"
-                                    $yearFolder = Get-OrCreateFolder $baseDest $yearName
-                                    $mName = if ($monthNames.ContainsKey($m)) { $monthNames[$m] } else { "{0:D2}" -f $m }
-                                    $finalDest = Get-OrCreateFolder $yearFolder $mName
-                                } elseif ($granularity -eq "Years") {
-                                    $yearName = "$y"
-                                    $finalDest = Get-OrCreateFolder $baseDest $yearName
-                                }
-                                $script:dateFolderCache[$dateKey] = $finalDest
-                            }
-                        }
-                    }
-
-                    # Deduplicación inteligente en memoria
-                    $destId = $finalDest.EntryID
-                    if (-not $targetSets.ContainsKey($destId)) {
-                        $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
-                        if ($config -and $config.deduplication_enabled) {
-                            Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
-                        }
-                    }
-                    $folderSet = $targetSets[$destId]
-
-                    $subj = $entry.Subject
-                    $sender = $entry.Sender
-                    $mid = $entry.MessageID
-                    $cKey = "$subj|$sender|$($rcvd.ToString('yyyyMMddHHmmss'))"
-
-                    $isDuplicate = $false
-                    if ($config -and $config.deduplication_enabled) {
-                        if ($folderSet.Contains($cKey)) {
-                            $isDuplicate = $true
-                        } elseif ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "" -and $folderSet.Contains($mid.Trim())) {
-                            $isDuplicate = $true
-                        }
-                    }
-
-                    if ($isDuplicate) {
-                        $totalDuplicates++
-                        $pstProcessedCount++
-                        $script:globalProcessedItems++
-                        if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
-                            $script:duplicateSampleCount++
-                            $itemKb = 0.0
-                            if ($entry.Size) { try { $itemKb = [math]::Round([double]$entry.Size / 1024.0, 1) } catch {} }
-                            $processedItemsList.Add(@{
-                                subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
-                                sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                                date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
-                                source_folder = $cf.RelPath
-                                dest_folder   = $finalDest.Name
-                                pst_name      = $pstName
-                                status        = "Duplicado Omitido"
-                                size_kb       = $itemKb
-                            })
-                        }
-                        Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
-                        continue
-                    }
-
-                    # Transferencia directa O(1) vía GetItemFromID
                     $item = $null
                     $copy = $null
+                    $subj = if ($entry.Subject) { $entry.Subject } else { "" }
+                    $sender = if ($entry.Sender) { $entry.Sender } else { "" }
+                    $rcvd = $entry.ReceivedTime
+
                     try {
+                        if ($null -ne $allowedYearsSet -and $null -ne $rcvd -and -not $allowedYearsSet.Contains([int]$rcvd.Year)) {
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+                            Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+                            continue
+                        }
+                        if ($null -ne $allowedMonthsSet -and $null -ne $rcvd -and -not $allowedMonthsSet.Contains([int]$rcvd.Month)) {
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+                            Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+                            continue
+                        }
+
+                        # Determinar carpeta de destino final con enrutamiento y caché O(1)
+                        $finalDest = $baseDest
+                        if ($null -eq $finalDest) {
+                            $finalDest = Get-CachedDestBaseFolder $destStore $cf.RelPath $cf.Type
+                        }
+                        if ($null -eq $finalDest) {
+                            try { $finalDest = $destStore.GetDefaultFolder(6) } catch {}
+                        }
+
+                        if ($config -and $config.routing_enabled -and $rcvd) {
+                            $granularity = if ($config.routing_granularity) { $config.routing_granularity } else { "Mirror" }
+                            if ($granularity -ne "Mirror") {
+                                $y = $rcvd.Year
+                                $m = $rcvd.Month
+                                $dateKey = "$baseDestId|$granularity|$y|$m"
+                                if ($dateKey -and $script:dateFolderCache.ContainsKey($dateKey)) {
+                                    $cachedDest = $script:dateFolderCache[$dateKey]
+                                    if ($null -ne $cachedDest) { $finalDest = $cachedDest }
+                                } else {
+                                    $routedDest = $null
+                                    if ($granularity -eq "YearsAndMonths") {
+                                        $yearName = "$y"
+                                        $yearFolder = if ($baseDest) { Get-OrCreateFolder $baseDest $yearName } else { $null }
+                                        $mName = if ($m -and $monthNames.ContainsKey($m)) { $monthNames[$m] } else { "{0:D2}" -f $m }
+                                        if ($yearFolder) {
+                                            $routedDest = Get-OrCreateFolder $yearFolder $mName
+                                        }
+                                    } elseif ($granularity -eq "Years") {
+                                        $yearName = "$y"
+                                        if ($baseDest) {
+                                            $routedDest = Get-OrCreateFolder $baseDest $yearName
+                                        }
+                                    }
+                                    if ($routedDest) {
+                                        $finalDest = $routedDest
+                                        if ($dateKey) { $script:dateFolderCache[$dateKey] = $routedDest }
+                                    }
+                                }
+                            }
+                        }
+
+                        # Deduplicación inteligente en memoria con destId 100% seguro contra null
+                        [string]$destId = ""
+                        if ($finalDest) {
+                            try { $destId = [string]$finalDest.EntryID } catch {}
+                        }
+                        if ([string]::IsNullOrWhiteSpace($destId)) {
+                            $destId = if ($baseDestId) { [string]$baseDestId } else { "DEFAULT_DEST" }
+                        }
+
+                        if (-not $targetSets.ContainsKey($destId)) {
+                            $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
+                            if ($config -and $config.deduplication_enabled -and $finalDest) {
+                                Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
+                            }
+                        }
+                        $folderSet = if ($targetSets.ContainsKey($destId)) { $targetSets[$destId] } else { New-Object 'System.Collections.Generic.HashSet[string]' }
+
+                        $mid = $entry.MessageID
+                        $dtStr = if ($rcvd) { $rcvd.ToString('yyyyMMddHHmmss') } else { "" }
+                        $cKey = "$subj|$sender|$dtStr"
+
+                        $isDuplicate = $false
+                        if ($config -and $config.deduplication_enabled) {
+                            if ($folderSet.Contains($cKey)) {
+                                $isDuplicate = $true
+                            } elseif ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "" -and $folderSet.Contains($mid.Trim())) {
+                                $isDuplicate = $true
+                            }
+                        }
+
+                        if ($isDuplicate) {
+                            $totalDuplicates++
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+                            if ($script:duplicateSampleCount -lt 500 -and $processedItemsList.Count -lt 5000) {
+                                $script:duplicateSampleCount++
+                                $itemKb = 0.0
+                                if ($entry.Size) { try { $itemKb = [math]::Round([double]$entry.Size / 1024.0, 1) } catch {} }
+                                $processedItemsList.Add(@{
+                                    subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                    sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                                    date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                    source_folder = $cf.RelPath
+                                    dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
+                                    pst_name      = $pstName
+                                    status        = "Duplicado Omitido"
+                                    size_kb       = $itemKb
+                                })
+                            }
+                            Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
+                            continue
+                        }
+
+                        # Transferencia directa O(1) vía GetItemFromID
                         $item = $namespace.GetItemFromID($entry.EntryID, $pstStore.StoreID)
                         if ($null -ne $item) {
                             $itemBytes = [int64]0
@@ -984,6 +1013,7 @@ try {
                                 $copy.Move($finalDest) | Out-Null
                                 if ($null -ne $copy) {
                                     try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                                    $copy = $null
                                 }
                             }
                             $totalImported++
@@ -1001,9 +1031,9 @@ try {
                                 $processedItemsList.Add(@{
                                     subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
                                     sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                                    date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
+                                    date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
                                     source_folder = $cf.RelPath
-                                    dest_folder   = $finalDest.Name
+                                    dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
                                     pst_name      = $pstName
                                     status        = "Importado"
                                     size_kb       = $itemKb
@@ -1016,14 +1046,14 @@ try {
                         $pstProcessedCount++
                         $script:globalProcessedItems++
                         $consecutiveThrottles = [math]::Min(15, $consecutiveThrottles + 1)
-                        Record-ExecutionError "item_error" $pstName $cf.RelPath (if ($subj) { $subj } else { "(Sin Asunto)" }) (if ($sender) { $sender } else { "(Desconocido)" }) "Aviso al transferir correo: $errStr"
+                        Record-ExecutionError "item_error" $pstName $cf.RelPath (if ($subj) { $subj } else { "(Sin Asunto)" }) (if ($sender) { $sender } else { "(Desconocido)" }) "Aviso al procesar correo: $errStr"
                         if ($processedItemsList.Count -lt 5000) {
                             $processedItemsList.Add(@{
                                 subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
                                 sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                                date          = $rcvd.ToString("yyyy-MM-dd HH:mm:ss")
+                                date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
                                 source_folder = $cf.RelPath
-                                dest_folder   = $finalDest.Name
+                                dest_folder   = if ($finalDest) { $finalDest.Name } else { "-" }
                                 pst_name      = $pstName
                                 status        = "Error"
                                 size_kb       = 0.0
@@ -1117,38 +1147,61 @@ try {
 
                     # Determinar carpeta de destino final con enrutamiento y caché O(1)
                     $finalDest = $baseDest
-                    if ($config -and $config.routing_enabled) {
+                    if ($null -eq $finalDest) {
+                        $finalDest = Get-CachedDestBaseFolder $destStore $cf.RelPath $cf.Type
+                    }
+                    if ($null -eq $finalDest) {
+                        try { $finalDest = $destStore.GetDefaultFolder(6) } catch {}
+                    }
+
+                    if ($config -and $config.routing_enabled -and $rcvd) {
                         $granularity = if ($config.routing_granularity) { $config.routing_granularity } else { "Mirror" }
                         if ($granularity -ne "Mirror") {
                             $y = $rcvd.Year
                             $m = $rcvd.Month
                             $dateKey = "$baseDestId|$granularity|$y|$m"
-                            if ($script:dateFolderCache.ContainsKey($dateKey)) {
-                                $finalDest = $script:dateFolderCache[$dateKey]
+                            if ($dateKey -and $script:dateFolderCache.ContainsKey($dateKey)) {
+                                $cachedDest = $script:dateFolderCache[$dateKey]
+                                if ($null -ne $cachedDest) { $finalDest = $cachedDest }
                             } else {
+                                $routedDest = $null
                                 if ($granularity -eq "YearsAndMonths") {
                                     $yearName = "$y"
-                                    $yearFolder = Get-OrCreateFolder $baseDest $yearName
-                                    $mName = if ($monthNames.ContainsKey($m)) { $monthNames[$m] } else { "{0:D2}" -f $m }
-                                    $finalDest = Get-OrCreateFolder $yearFolder $mName
+                                    $yearFolder = if ($baseDest) { Get-OrCreateFolder $baseDest $yearName } else { $null }
+                                    $mName = if ($m -and $monthNames.ContainsKey($m)) { $monthNames[$m] } else { "{0:D2}" -f $m }
+                                    if ($yearFolder) {
+                                        $routedDest = Get-OrCreateFolder $yearFolder $mName
+                                    }
                                 } elseif ($granularity -eq "Years") {
                                     $yearName = "$y"
-                                    $finalDest = Get-OrCreateFolder $baseDest $yearName
+                                    if ($baseDest) {
+                                        $routedDest = Get-OrCreateFolder $baseDest $yearName
+                                    }
                                 }
-                                $script:dateFolderCache[$dateKey] = $finalDest
+                                if ($routedDest) {
+                                    $finalDest = $routedDest
+                                    if ($dateKey) { $script:dateFolderCache[$dateKey] = $routedDest }
+                                }
                             }
                         }
                     }
 
-                    # Deduplicación inteligente con MAPI Table
-                    $destId = $finalDest.EntryID
+                    # Deduplicación inteligente con MAPI Table (destId 100% seguro contra null)
+                    [string]$destId = ""
+                    if ($finalDest) {
+                        try { $destId = [string]$finalDest.EntryID } catch {}
+                    }
+                    if ([string]::IsNullOrWhiteSpace($destId)) {
+                        $destId = if ($baseDestId) { [string]$baseDestId } else { "DEFAULT_DEST" }
+                    }
+
                     if (-not $targetSets.ContainsKey($destId)) {
                         $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
-                        if ($config -and $config.deduplication_enabled) {
+                        if ($config -and $config.deduplication_enabled -and $finalDest) {
                             Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
                         }
                     }
-                    $folderSet = $targetSets[$destId]
+                    $folderSet = if ($targetSets.ContainsKey($destId)) { $targetSets[$destId] } else { New-Object 'System.Collections.Generic.HashSet[string]' }
 
                     $subj = $item.Subject
                     $sender = $item.SenderEmailAddress
