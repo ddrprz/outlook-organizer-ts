@@ -93,7 +93,10 @@ try {
     if (-not $pstStore) {
         $storesBefore = @{}
         foreach ($s in $namespace.Stores) {
-            try { $storesBefore[$s.StoreID] = $true } catch {}
+            try {
+                $sId = $s.StoreID
+                if ($sId) { $storesBefore[$sId] = $true }
+            } catch {}
         }
 
         try {
@@ -111,7 +114,8 @@ try {
 
             foreach ($s in $namespace.Stores) {
                 try {
-                    if (-not $storesBefore.ContainsKey($s.StoreID)) {
+                    $sId = $s.StoreID
+                    if ($sId -and -not $storesBefore.ContainsKey($sId)) {
                         $pstStore = $s
                         break
                     }
