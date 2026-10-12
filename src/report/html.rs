@@ -116,6 +116,17 @@ pub fn generate_html_report(state: &AppState, custom_path: Option<PathBuf>) -> R
             }
         }
     }
+    if errors.is_empty() && errors_count > 0 {
+        errors.push(crate::app::ExecutionErrorDetail {
+            timestamp: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            error_type: "incidencia_ejecucion".to_string(),
+            pst_name: state.selected_psts().first().map(|p| p.name.clone()).unwrap_or_else(|| "Archivo PST".to_string()),
+            source_folder: "-".to_string(),
+            subject: "Incidencia detectada durante la migración".to_string(),
+            sender: "-".to_string(),
+            error_message: format!("Se detectaron {} incidencias/errores durante la operación. Revise los registros de telemetría para más detalles.", errors_count),
+        });
+    }
 
     let error_banner = if errors_count > 0 {
         format!(

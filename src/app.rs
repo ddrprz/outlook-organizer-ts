@@ -328,20 +328,36 @@ pub struct PstDetail {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub struct ExecutionErrorDetail {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub timestamp: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub error_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub pst_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub source_folder: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub subject: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub sender: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub error_message: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub enum OneOrMany<T> {
+    One(T),
+    Many(Vec<T>),
+}
+
+impl<T> OneOrMany<T> {
+    pub fn into_vec(self) -> Vec<T> {
+        match self {
+            OneOrMany::One(item) => vec![item],
+            OneOrMany::Many(vec) => vec,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
@@ -739,6 +755,25 @@ impl FolderTreeState {
         if nodes.is_empty() {
             self.init_defaults();
         } else {
+            let has_custom = nodes.iter().any(|n| {
+                let l = n.name.to_lowercase();
+                !l.contains("bandeja de entrada") && !l.contains("inbox")
+                    && !l.contains("elementos enviados") && !l.contains("sent")
+                    && !l.contains("elementos eliminados") && !l.contains("deleted")
+            });
+            if !has_custom {
+                nodes.push(FolderTreeNode {
+                    name: "Carpetas personalizadas / subcarpetas".to_string(),
+                    path: "Carpetas personalizadas".to_string(),
+                    parent_path: None,
+                    count: 0,
+                    size_mb: 0.0,
+                    selected: true,
+                    expanded: false,
+                    level: 0,
+                    has_children: false,
+                });
+            }
             self.nodes = nodes;
             self.selected_idx = 0;
         }
@@ -2080,10 +2115,16 @@ impl AppState {
             });
             self.include_custom_folders = paths.iter().any(|p| {
                 let l = p.to_lowercase();
-                !l.contains("bandeja de entrada") && !l.contains("inbox")
-                    && !l.contains("elementos enviados") && !l.contains("sent items")
-                    && !l.contains("elementos eliminados") && !l.contains("deleted items")
+                l.contains("personalizadas")
+                    || (!l.contains("bandeja de entrada") && !l.contains("inbox")
+                        && !l.contains("elementos enviados") && !l.contains("sent items")
+                        && !l.contains("elementos eliminados") && !l.contains("deleted items"))
             });
+        } else {
+            self.include_inbox = true;
+            self.include_sent = true;
+            self.include_deleted = false;
+            self.include_custom_folders = true;
         }
     }
 
@@ -2092,8 +2133,10 @@ impl AppState {
         if temp_items.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_items)
         {
-            let trimmed = content.trim_start_matches('\u{feff}');
-            if let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(trimmed) {
+            let trimmed = content.trim_start_matches('\u{feff}').trim();
+            if let Ok(res) = serde_json::from_str::<OneOrMany<ProcessedEmailItem>>(trimmed) {
+                self.processed_items = res.into_vec();
+            } else if let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(trimmed) {
                 self.processed_items = items;
             }
         }
@@ -2102,8 +2145,10 @@ impl AppState {
         if temp_errors.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_errors)
         {
-            let trimmed = content.trim_start_matches('\u{feff}');
-            if let Ok(errors) = serde_json::from_str::<Vec<ExecutionErrorDetail>>(trimmed) {
+            let trimmed = content.trim_start_matches('\u{feff}').trim();
+            if let Ok(res) = serde_json::from_str::<OneOrMany<ExecutionErrorDetail>>(trimmed) {
+                self.execution_errors = res.into_vec();
+            } else if let Ok(errors) = serde_json::from_str::<Vec<ExecutionErrorDetail>>(trimmed) {
                 self.execution_errors = errors;
             }
         }
@@ -2213,8 +2258,13 @@ impl AppState {
         if temp_items.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_items)
         {
-            let trimmed = content.trim_start_matches('\u{feff}');
-            if let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(trimmed)
+            let trimmed = content.trim_start_matches('\u{feff}').trim();
+            if let Ok(res) = serde_json::from_str::<OneOrMany<ProcessedEmailItem>>(trimmed) {
+                let items = res.into_vec();
+                if !items.is_empty() {
+                    return items;
+                }
+            } else if let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(trimmed)
                 && !items.is_empty()
             {
                 return items;

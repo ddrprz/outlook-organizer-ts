@@ -89,6 +89,10 @@ impl BackendRunner {
         if items_path.exists() {
             let _ = fs::remove_file(&items_path);
         }
+        let errors_path = temp_dir.join("outlook_organizer_errors.json");
+        if errors_path.exists() {
+            let _ = fs::remove_file(&errors_path);
+        }
 
         // Escribir script y archivo de configuración JSON con BOM UTF-8 para PowerShell 5.1
         let script_content = include_str!("worker.ps1");

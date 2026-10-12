@@ -68,6 +68,17 @@ pub fn generate_audit_json(state: &AppState, status: &str) -> Result<Option<Path
             }
         }
     }
+    if errors.is_empty() && state.progress.error_count > 0 {
+        errors.push(crate::app::ExecutionErrorDetail {
+            timestamp: now.format("%Y-%m-%d %H:%M:%S").to_string(),
+            error_type: "incidencia_ejecucion".to_string(),
+            pst_name: state.selected_psts().first().map(|p| p.name.clone()).unwrap_or_else(|| "Archivo PST".to_string()),
+            source_folder: "-".to_string(),
+            subject: "Incidencia detectada durante la migración".to_string(),
+            sender: "-".to_string(),
+            error_message: format!("Se detectaron {} incidencias/errores durante la operación. Revise los registros de telemetría para más detalles.", state.progress.error_count),
+        });
+    }
 
     let report = AuditReport {
         application: "Outlook Organizer TS".to_string(),
