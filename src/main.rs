@@ -22,14 +22,15 @@ use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use app::{AppState, ExplorerItemType, RoutingGranularity, RoutingModal, TransferMode, WizardStep};
 use backend::{messages::BackendMessage, runner::BackendRunner};
-use report::{html::generate_html_report, json::generate_audit_json};
+use report::{html::generate_html_report, json::{generate_audit_json, generate_transfer_audit_json}};
 use ui::{
     footer::render_footer,
     header::render_header,
     screens::{
         completion, deduplication, execution, explorer, filters, folders_mode, mailbox,
         pst_detail_view, pst_source, routing, split_completion, split_config, split_execution,
-        split_filter, split_select, split_summary, summary, welcome,
+        split_filter, split_select, split_summary, summary, transfer_completion,
+        transfer_execution, transfer_filter, transfer_select, transfer_summary, welcome,
     },
 };
 
@@ -124,18 +125,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     state.progress.duplicates_skipped = duplicates;
                     state.progress.error_count = errors;
-                    state.load_processed_items_from_temp();
-                    state.log_event(format!("[DONE] Operation finished with status: {}", status));
 
-                    // Auditoría JSON automática (solo si es .exe de producción)
-                    if let Ok(Some(path)) = generate_audit_json(&state, &status) {
-                        state.json_audit_path = Some(path.clone());
-                        state
-                            .log_event(format!("[AUDIT] JSON saved to: {}", path.display()));
+                    if state.step == WizardStep::TransferExecution {
+                        state.load_transfer_items_from_temp();
+                        state.log_event(format!("[DONE] Mailbox transfer finished with status: {}", status));
+                        state.transfer.execution_status = status.clone();
+                        state.transfer.total_transferred = imported;
+
+                        if let Ok(Some(path)) = generate_transfer_audit_json(&state, &status) {
+                            state.json_audit_path = Some(path.clone());
+                            state.log_event(format!("[AUDIT] Transfer JSON saved to: {}", path.display()));
+                        }
+                        state.step = WizardStep::TransferCompletion;
+                        state.cleanup_pause_file();
+                    } else {
+                        state.load_processed_items_from_temp();
+                        state.log_event(format!("[DONE] Operation finished with status: {}", status));
+
+                        // Auditoría JSON automática (solo si es .exe de producción)
+                        if let Ok(Some(path)) = generate_audit_json(&state, &status) {
+                            state.json_audit_path = Some(path.clone());
+                            state.log_event(format!("[AUDIT] JSON saved to: {}", path.display()));
+                        }
+
+                        state.step = WizardStep::Completion;
+                        state.cleanup_pause_file();
                     }
-
-                    state.step = WizardStep::Completion;
-                    state.cleanup_pause_file();
                 }
                 BackendMessage::SplitFinished {
                     status,
@@ -188,6 +203,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         state.next_step();
                                     }
                                 }
+                            }
+                            if let Some(src_idx) = state.transfer.source_mailbox_idx
+                                && let Some(m) = state.discovered_mailboxes.get(src_idx)
+                                && (m.display_name == pst_path || m.display_name == pst_name) {
+                                state.apply_mailbox_detail_to_transfer(&d);
                             }
                             state.sync_folder_tree_from_selected_psts();
                         }
@@ -282,7 +302,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Captura universal de Ctrl+C para parada segura o salida
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                if state.step == WizardStep::Execution {
+                if state.step == WizardStep::Execution || state.step == WizardStep::TransferExecution {
                     if !state.progress.graceful_cancelling {
                         state.open_cancel_modal();
                     }
@@ -357,7 +377,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
-                                if state.welcome_menu_idx + 1 < 5 {
+                                if state.welcome_menu_idx + 1 < 6 {
                                     state.welcome_menu_idx += 1;
                                 }
                             }
@@ -367,25 +387,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             KeyCode::Char('2') => {
                                 state.welcome_menu_idx = 1;
-                                open_file_explorer(&mut state);
+                                start_transfer(&mut state, tx.clone());
                             }
                             KeyCode::Char('3') => {
                                 state.welcome_menu_idx = 2;
+                                open_file_explorer(&mut state);
+                            }
+                            KeyCode::Char('4') => {
+                                state.welcome_menu_idx = 3;
                                 start_split_pst(&mut state);
                             }
-                            KeyCode::Char('4') | KeyCode::Char('p') | KeyCode::Char('P') => {
-                                state.welcome_menu_idx = 3;
+                            KeyCode::Char('5') | KeyCode::Char('p') | KeyCode::Char('P') => {
+                                state.welcome_menu_idx = 4;
                                 state.is_editing_profile = true;
                             }
-                            KeyCode::Char('5') => {
+                            KeyCode::Char('6') => {
                                 state.should_quit = true;
                             }
                             KeyCode::Enter => match state.welcome_menu_idx {
                                 0 => start_import_or_explore(&mut state),
-                                1 => open_file_explorer(&mut state),
-                                2 => start_split_pst(&mut state),
-                                3 => state.is_editing_profile = true,
-                                4 => state.should_quit = true,
+                                1 => start_transfer(&mut state, tx.clone()),
+                                2 => open_file_explorer(&mut state),
+                                3 => start_split_pst(&mut state),
+                                4 => state.is_editing_profile = true,
+                                5 => state.should_quit = true,
                                 _ => {}
                             },
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -1436,6 +1461,365 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     _ => {}
                 },
+                WizardStep::TransferSelect => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if state.transfer.table_cursor > 0 {
+                            state.transfer.table_cursor -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if state.transfer.table_cursor + 1 < state.discovered_mailboxes.len() {
+                            state.transfer.table_cursor += 1;
+                        }
+                    }
+                    KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('1') => {
+                        state.select_transfer_source(state.transfer.table_cursor);
+                    }
+                    KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('2') => {
+                        state.select_transfer_target(state.transfer.table_cursor);
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        if let Some(m) = state.discovered_mailboxes.get(state.transfer.table_cursor) {
+                            let m_name = m.display_name.clone();
+                            let need_inspect = state.open_pst_detail(m_name.clone(), m_name.clone());
+                            if need_inspect {
+                                let profile = if state.use_default_profile {
+                                    None
+                                } else {
+                                    Some(state.custom_profile_name.clone())
+                                };
+                                BackendRunner::trigger_mailbox_inspection(m_name, profile, tx.clone());
+                            }
+                        }
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        state.is_loading_mailboxes = true;
+                        state.transfer.warning_notice = None;
+                        let profile = if state.use_default_profile {
+                            None
+                        } else {
+                            Some(state.custom_profile_name.clone())
+                        };
+                        BackendRunner::trigger_mailbox_discovery(profile, tx.clone());
+                    }
+                    KeyCode::Enter => {
+                        if state.transfer.source_mailbox_idx.is_none() {
+                            state.select_transfer_source(state.transfer.table_cursor);
+                        } else if state.transfer.target_mailbox_idx.is_none() {
+                            state.select_transfer_target(state.transfer.table_cursor);
+                        }
+
+                        if state.transfer.source_mailbox_idx.is_none() {
+                            state.transfer.warning_notice = Some("Por favor selecciona un buzón de origen [S].".to_string());
+                        } else if state.transfer.target_mailbox_idx.is_none() {
+                            state.transfer.warning_notice = Some("Por favor selecciona un buzón de destino [T].".to_string());
+                        } else if state.transfer.source_mailbox_idx == state.transfer.target_mailbox_idx {
+                            state.transfer.warning_notice = Some("El buzón de origen y de destino no pueden ser el mismo.".to_string());
+                        } else {
+                            state.transfer.warning_notice = None;
+                            if let Some(src_name) = state.get_transfer_source_mailbox().map(|s| s.display_name.clone()) {
+                                if let Some(d) = state.pst_details_cache.get(&src_name).cloned() {
+                                    state.apply_mailbox_detail_to_transfer(&d);
+                                } else {
+                                    let profile = if state.use_default_profile {
+                                        None
+                                    } else {
+                                        Some(state.custom_profile_name.clone())
+                                    };
+                                    BackendRunner::trigger_mailbox_inspection(src_name, profile, tx.clone());
+                                }
+                            }
+                            state.step = WizardStep::TransferFilter;
+                        }
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.transfer.warning_notice = None;
+                        state.step = WizardStep::Welcome;
+                    }
+                    KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        state.should_quit = true;
+                    }
+                    _ => {}
+                },
+                WizardStep::TransferFilter => match key.code {
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        state.transfer.filter_section_cursor = (state.transfer.filter_section_cursor + 1) % 4;
+                    }
+                    KeyCode::Char('1') => state.transfer.filter_section_cursor = 0,
+                    KeyCode::Char('2') => state.transfer.filter_section_cursor = 1,
+                    KeyCode::Char('3') => state.transfer.filter_section_cursor = 2,
+                    KeyCode::Char('4') => state.transfer.filter_section_cursor = 3,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        match state.transfer.filter_section_cursor {
+                            1 => {
+                                if state.transfer.year_cursor > 0 {
+                                    state.transfer.year_cursor -= 1;
+                                }
+                            }
+                            2 => {
+                                if state.transfer.month_cursor > 0 {
+                                    state.transfer.month_cursor -= 1;
+                                }
+                            }
+                            3 if state.transfer.folder_cursor > 0 => {
+                                state.transfer.folder_cursor -= 1;
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        match state.transfer.filter_section_cursor {
+                            1 => {
+                                let max_y = state.transfer.available_years.len();
+                                if state.transfer.year_cursor < max_y {
+                                    state.transfer.year_cursor += 1;
+                                }
+                            }
+                            2 => {
+                                if state.transfer.month_cursor < 12 {
+                                    state.transfer.month_cursor += 1;
+                                }
+                            }
+                            3 if state.transfer.folder_cursor < 3 => {
+                                state.transfer.folder_cursor += 1;
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        match state.transfer.filter_section_cursor {
+                            0 => {
+                                state.transfer.transfer_mode = match state.transfer.transfer_mode {
+                                    TransferMode::Copy => TransferMode::Move,
+                                    TransferMode::Move => TransferMode::Copy,
+                                };
+                            }
+                            1 => {
+                                if state.transfer.year_cursor == 0 {
+                                    state.transfer.all_years = !state.transfer.all_years;
+                                    if state.transfer.all_years {
+                                        state.transfer.selected_years.clear();
+                                    }
+                                } else {
+                                    state.transfer.all_years = false;
+                                    let y_idx = state.transfer.year_cursor - 1;
+                                    if let Some(&y) = state.transfer.available_years.get(y_idx) {
+                                        if state.transfer.selected_years.contains(&y) {
+                                            state.transfer.selected_years.remove(&y);
+                                        } else {
+                                            state.transfer.selected_years.insert(y);
+                                        }
+                                    }
+                                }
+                            }
+                            2 => {
+                                if state.transfer.month_cursor == 0 {
+                                    state.transfer.all_months = !state.transfer.all_months;
+                                    if state.transfer.all_months {
+                                        state.transfer.selected_months.clear();
+                                    }
+                                } else {
+                                    state.transfer.all_months = false;
+                                    let m = state.transfer.month_cursor as u32;
+                                    if state.transfer.selected_months.contains(&m) {
+                                        state.transfer.selected_months.remove(&m);
+                                    } else {
+                                        state.transfer.selected_months.insert(m);
+                                    }
+                                }
+                            }
+                            3 => {
+                                match state.transfer.folder_cursor {
+                                    0 => state.transfer.include_inbox = !state.transfer.include_inbox,
+                                    1 => state.transfer.include_sent = !state.transfer.include_sent,
+                                    2 => state.transfer.include_deleted = !state.transfer.include_deleted,
+                                    3 => state.transfer.include_custom_folders = !state.transfer.include_custom_folders,
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        if state.transfer.filter_section_cursor == 1 {
+                            state.transfer.all_years = !state.transfer.all_years;
+                            if state.transfer.all_years {
+                                state.transfer.selected_years.clear();
+                            }
+                        } else if state.transfer.filter_section_cursor == 2 {
+                            state.transfer.all_months = !state.transfer.all_months;
+                            if state.transfer.all_months {
+                                state.transfer.selected_months.clear();
+                            }
+                        } else {
+                            state.transfer.all_years = true;
+                            state.transfer.all_months = true;
+                            state.transfer.selected_years.clear();
+                            state.transfer.selected_months.clear();
+                        }
+                    }
+                    KeyCode::Enter => {
+                        state.step = WizardStep::TransferSummary;
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.step = WizardStep::TransferSelect;
+                    }
+                    _ => {}
+                },
+                WizardStep::TransferSummary => match key.code {
+                    KeyCode::Enter => {
+                        let src_name = state
+                            .get_transfer_source_mailbox()
+                            .map(|m| m.display_name.clone())
+                            .unwrap_or_default();
+                        let dst_name = state
+                            .get_transfer_target_mailbox()
+                            .map(|m| m.display_name.clone())
+                            .unwrap_or_default();
+
+                        state.progress.reset();
+                        state.progress.total_psts = 1;
+                        state.progress.current_pst_idx = 1;
+                        state.progress.current_pst_name = src_name.clone();
+                        state.progress.current_pst_items = 0;
+                        state.progress.current_pst_total = 0;
+                        state.progress.imported_count = 0;
+                        state.progress.duplicates_skipped = 0;
+                        state.progress.error_count = 0;
+                        state.progress.graceful_cancelling = false;
+
+                        state.step = WizardStep::TransferExecution;
+                        state.log_event(format!(
+                            "[TRANSFER] Iniciando transferencia de '{}' hacia '{}'...",
+                            src_name, dst_name
+                        ));
+
+                        let allowed_years: Vec<u32> = if state.transfer.all_years {
+                            Vec::new()
+                        } else {
+                            state.transfer.selected_years.iter().copied().collect()
+                        };
+                        let allowed_months: Vec<u32> = if state.transfer.all_months {
+                            Vec::new()
+                        } else {
+                            state.transfer.selected_months.iter().copied().collect()
+                        };
+
+                        let config = crate::backend::runner::TransferWorkerConfig {
+                            profile_name: if state.use_default_profile {
+                                None
+                            } else {
+                                Some(state.custom_profile_name.clone())
+                            },
+                            source_mailbox: src_name,
+                            target_mailbox: dst_name,
+                            transfer_mode: match state.transfer.transfer_mode {
+                                TransferMode::Copy => "Copy".to_string(),
+                                TransferMode::Move => "Move".to_string(),
+                            },
+                            allowed_years,
+                            allowed_months,
+                            include_inbox: state.transfer.include_inbox,
+                            include_sent: state.transfer.include_sent,
+                            include_deleted: state.transfer.include_deleted,
+                            include_custom_folders: state.transfer.include_custom_folders,
+                            deduplication_enabled: state.transfer.deduplication_enabled,
+                            adaptive_throttling: state.transfer.adaptive_throttling_enabled,
+                        };
+
+                        match BackendRunner::spawn_transfer_worker(&config, tx.clone()) {
+                            Ok((child, abort_path, pause_path)) => {
+                                worker_child = Some(child);
+                                worker_abort_file = Some(abort_path);
+                                state.pause_file = Some(pause_path);
+                            }
+                            Err(e) => {
+                                state.log_event(format!(
+                                    "[ERROR] No se pudo iniciar el proceso de transferencia: {}",
+                                    e
+                                ));
+                            }
+                        }
+                    }
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.step = WizardStep::TransferFilter;
+                    }
+                    KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        state.step = WizardStep::Welcome;
+                    }
+                    _ => {}
+                },
+                WizardStep::TransferExecution => {
+                    if state.show_cancel_modal {
+                        match key.code {
+                            KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                                state.cancel_modal_selected_yes = !state.cancel_modal_selected_yes;
+                            }
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Char('s') | KeyCode::Char('S') => {
+                                state.close_cancel_modal();
+                                state.progress.graceful_cancelling = true;
+                                state.log_event("[SYSTEM] Safe stop confirmed. Stopping transfer and releasing stores...".to_string());
+                                if let Some(ref path) = worker_abort_file {
+                                    let _ = std::fs::File::create(path);
+                                }
+                                if let Some(ref mut child) = worker_child
+                                    && let Some(ref mut stdin) = child.stdin
+                                {
+                                    use tokio::io::AsyncWriteExt;
+                                    let _ = stdin.write_all(b"abort\n").await;
+                                }
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                state.close_cancel_modal();
+                                state.log_event("[SYSTEM] Safe stop dismissed. Continuing transfer...".to_string());
+                            }
+                            KeyCode::Enter => {
+                                if state.cancel_modal_selected_yes {
+                                    state.close_cancel_modal();
+                                    state.progress.graceful_cancelling = true;
+                                    state.log_event("[SYSTEM] Safe stop confirmed. Stopping transfer and releasing stores...".to_string());
+                                    if let Some(ref path) = worker_abort_file {
+                                        let _ = std::fs::File::create(path);
+                                    }
+                                    if let Some(ref mut child) = worker_child
+                                        && let Some(ref mut stdin) = child.stdin
+                                    {
+                                        use tokio::io::AsyncWriteExt;
+                                        let _ = stdin.write_all(b"abort\n").await;
+                                    }
+                                } else {
+                                    state.close_cancel_modal();
+                                    state.log_event("[SYSTEM] Safe stop dismissed. Continuing transfer...".to_string());
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        match key.code {
+                            KeyCode::Char('p') | KeyCode::Char('P') => {
+                                state.toggle_pause();
+                            }
+                            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q')
+                                if !state.progress.graceful_cancelling =>
+                            {
+                                state.open_cancel_modal();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                WizardStep::TransferCompletion => match key.code {
+                    KeyCode::Char('o') | KeyCode::Char('O') => {
+                        let logs_dir = PathBuf::from("logs");
+                        let _ = std::process::Command::new("explorer")
+                            .arg(&logs_dir)
+                            .spawn();
+                    }
+                    KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                        state.step = WizardStep::Welcome;
+                    }
+                    _ => {}
+                },
             }
         }
     }
@@ -1459,6 +1843,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+fn start_transfer(
+    state: &mut AppState,
+    tx: tokio::sync::mpsc::UnboundedSender<backend::messages::BackendMessage>,
+) {
+    if state.discovered_mailboxes.is_empty() {
+        state.is_loading_mailboxes = true;
+        state.transfer.warning_notice = None;
+        let profile = if state.use_default_profile {
+            None
+        } else {
+            Some(state.custom_profile_name.clone())
+        };
+        BackendRunner::trigger_mailbox_discovery(profile, tx);
+    }
+    state.transfer.table_cursor = 0;
+    state.transfer.warning_notice = None;
+    state.step = WizardStep::TransferSelect;
 }
 
 fn start_import_or_explore(state: &mut AppState) {
@@ -1553,6 +1956,11 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::SplitSummary => split_summary::render(f, chunks[1], state),
         WizardStep::SplitExecution => split_execution::render(f, chunks[1], state),
         WizardStep::SplitCompletion => split_completion::render(f, chunks[1], state),
+        WizardStep::TransferSelect => transfer_select::render(f, chunks[1], state),
+        WizardStep::TransferFilter => transfer_filter::render(f, chunks[1], state),
+        WizardStep::TransferSummary => transfer_summary::render(f, chunks[1], state),
+        WizardStep::TransferExecution => transfer_execution::render(f, chunks[1], state),
+        WizardStep::TransferCompletion => transfer_completion::render(f, chunks[1], state),
     }
 
     // 3. Footer con Marca de Agua Timeless Support
@@ -1698,6 +2106,47 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::SplitCompletion => vec![
             ("O", "Open Folder"),
             ("Enter/Q", "Main Menu"),
+        ],
+        WizardStep::TransferSelect => vec![
+            ("↑/↓", "Navigate"),
+            ("S", "Source"),
+            ("T", "Target"),
+            ("D", "Details"),
+            ("R", "Refresh"),
+            ("Enter", "Continue"),
+            ("Esc", "Menu"),
+        ],
+        WizardStep::TransferFilter => vec![
+            ("Tab", "Section"),
+            ("↑/↓", "Navigate"),
+            ("Space", "Toggle"),
+            ("A", "All"),
+            ("Enter", "Next"),
+            ("Esc", "Back"),
+        ],
+        WizardStep::TransferSummary => vec![
+            ("Enter", "Start Transfer"),
+            ("Esc", "Back"),
+            ("Q", "Menu"),
+        ],
+        WizardStep::TransferExecution => {
+            if state.show_cancel_modal {
+                vec![
+                    ("←/→/Tab", "Choose"),
+                    ("Enter", "Confirm"),
+                    ("Y", "Yes"),
+                    ("N/Esc", "No"),
+                ]
+            } else if state.progress.graceful_cancelling {
+                vec![("Wait...", "Releasing COM")]
+            } else {
+                let p_label = if state.progress.is_paused { "Resume" } else { "Pause" };
+                vec![("P", p_label), ("Esc/Q", "Safe Stop")]
+            }
+        }
+        WizardStep::TransferCompletion => vec![
+            ("O", "Open Logs"),
+            ("Enter/Esc/Q", "Main Menu"),
         ],
     };
 

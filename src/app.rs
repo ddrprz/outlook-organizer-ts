@@ -24,6 +24,12 @@ pub enum WizardStep {
     SplitSummary,
     SplitExecution,
     SplitCompletion,
+    // Pasos del Asistente para Transferencia entre Buzones (Transfer)
+    TransferSelect,
+    TransferFilter,
+    TransferSummary,
+    TransferExecution,
+    TransferCompletion,
 }
 
 impl WizardStep {
@@ -47,6 +53,11 @@ impl WizardStep {
             WizardStep::SplitSummary => "Split PST: Pre-Flight Summary",
             WizardStep::SplitExecution => "Split PST: Processing & Splitting",
             WizardStep::SplitCompletion => "Split PST: Operation Complete",
+            WizardStep::TransferSelect => "Mailbox Transfer: Source & Target Selection",
+            WizardStep::TransferFilter => "Mailbox Transfer: Date & Folder Filters",
+            WizardStep::TransferSummary => "Mailbox Transfer: Pre-Flight Summary",
+            WizardStep::TransferExecution => "Mailbox Transfer: Processing & Sync",
+            WizardStep::TransferCompletion => "Mailbox Transfer: Operation Complete",
         }
     }
 
@@ -70,6 +81,11 @@ impl WizardStep {
             WizardStep::SplitSummary => 4,
             WizardStep::SplitExecution => 4,
             WizardStep::SplitCompletion => 4,
+            WizardStep::TransferSelect => 1,
+            WizardStep::TransferFilter => 2,
+            WizardStep::TransferSummary => 3,
+            WizardStep::TransferExecution => 4,
+            WizardStep::TransferCompletion => 4,
         }
     }
 
@@ -80,7 +96,12 @@ impl WizardStep {
             | WizardStep::SplitConfig
             | WizardStep::SplitSummary
             | WizardStep::SplitExecution
-            | WizardStep::SplitCompletion => 4,
+            | WizardStep::SplitCompletion
+            | WizardStep::TransferSelect
+            | WizardStep::TransferFilter
+            | WizardStep::TransferSummary
+            | WizardStep::TransferExecution
+            | WizardStep::TransferCompletion => 4,
             _ => 7,
         }
     }
@@ -1385,6 +1406,65 @@ pub enum TransferMode {
     Move,
 }
 
+#[derive(Debug, Clone)]
+pub struct TransferState {
+    pub source_mailbox_idx: Option<usize>,
+    pub target_mailbox_idx: Option<usize>,
+    pub table_cursor: usize,
+    pub transfer_mode: TransferMode,
+    pub selected_years: std::collections::BTreeSet<u32>,
+    pub selected_months: std::collections::BTreeSet<u32>,
+    pub all_years: bool,
+    pub all_months: bool,
+    pub available_years: Vec<u32>,
+    pub available_months: Vec<u32>,
+    pub include_inbox: bool,
+    pub include_sent: bool,
+    pub include_deleted: bool,
+    pub include_custom_folders: bool,
+    pub deduplication_enabled: bool,
+    pub adaptive_throttling_enabled: bool,
+    pub is_inspecting_source: bool,
+    pub filter_section_cursor: usize, // 0: Transfer Mode, 1: Years, 2: Months, 3: Folders
+    pub year_cursor: usize,
+    pub month_cursor: usize,
+    pub folder_cursor: usize,
+    pub warning_notice: Option<String>,
+    pub execution_status: String,
+    pub total_transferred: u64,
+}
+
+impl Default for TransferState {
+    fn default() -> Self {
+        Self {
+            source_mailbox_idx: None,
+            target_mailbox_idx: None,
+            table_cursor: 0,
+            transfer_mode: TransferMode::Copy,
+            selected_years: std::collections::BTreeSet::new(),
+            selected_months: std::collections::BTreeSet::new(),
+            all_years: true,
+            all_months: true,
+            available_years: Vec::new(),
+            available_months: (1..=12).collect(),
+            include_inbox: true,
+            include_sent: true,
+            include_deleted: false,
+            include_custom_folders: true,
+            deduplication_enabled: true,
+            adaptive_throttling_enabled: true,
+            is_inspecting_source: false,
+            filter_section_cursor: 0,
+            year_cursor: 0,
+            month_cursor: 0,
+            folder_cursor: 0,
+            warning_notice: None,
+            execution_status: "Listo".to_string(),
+            total_transferred: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RoutingGranularity {
     #[default]
@@ -1540,6 +1620,9 @@ pub struct AppState {
     // Estado del Asistente para Separar PSTs
     pub split: SplitPstState,
 
+    // Estado del Asistente para Transferencia entre Buzones
+    pub transfer: TransferState,
+
     // Archivo de señal de pausa reactiva
     pub pause_file: Option<PathBuf>,
 }
@@ -1625,6 +1708,7 @@ impl AppState {
             html_report_path: None,
             json_audit_path: None,
             split: SplitPstState::default(),
+            transfer: TransferState::default(),
             pause_file: None,
         }
     }
@@ -2154,6 +2238,88 @@ impl AppState {
         }
     }
 
+    pub fn select_transfer_source(&mut self, idx: usize) {
+        if idx < self.discovered_mailboxes.len() {
+            self.transfer.source_mailbox_idx = Some(idx);
+            self.transfer.warning_notice = None;
+            if self.transfer.target_mailbox_idx == Some(idx) {
+                self.transfer.target_mailbox_idx = None;
+            }
+            if let Some(m) = self.discovered_mailboxes.get(idx) {
+                let m_name = m.display_name.clone();
+                if let Some(detail) = self.pst_details_cache.get(&m_name).cloned() {
+                    self.apply_mailbox_detail_to_transfer(&detail);
+                }
+            }
+        }
+    }
+
+    pub fn select_transfer_target(&mut self, idx: usize) {
+        if idx < self.discovered_mailboxes.len() {
+            if self.transfer.source_mailbox_idx == Some(idx) {
+                self.transfer.warning_notice = Some("El buzón de destino debe ser diferente al de origen.".to_string());
+                return;
+            }
+            self.transfer.target_mailbox_idx = Some(idx);
+            self.transfer.warning_notice = None;
+        }
+    }
+
+    pub fn get_transfer_source_mailbox(&self) -> Option<&MailboxItem> {
+        self.transfer.source_mailbox_idx.and_then(|i| self.discovered_mailboxes.get(i))
+    }
+
+    pub fn get_transfer_target_mailbox(&self) -> Option<&MailboxItem> {
+        self.transfer.target_mailbox_idx.and_then(|i| self.discovered_mailboxes.get(i))
+    }
+
+    pub fn apply_mailbox_detail_to_transfer(&mut self, detail: &PstDetail) {
+        let mut years = detail.years.clone();
+        years.sort();
+        years.dedup();
+        self.transfer.available_years = years;
+
+        let mut months: Vec<u32> = Vec::new();
+        for month_list in detail.year_months.values() {
+            for &m in month_list {
+                months.push(m);
+            }
+        }
+        months.sort();
+        months.dedup();
+        if !months.is_empty() {
+            self.transfer.available_months = months;
+        } else if self.transfer.available_months.is_empty() {
+            self.transfer.available_months = (1..=12).collect();
+        }
+    }
+
+    pub fn load_transfer_items_from_temp(&mut self) {
+        let temp_items = std::env::temp_dir().join("outlook_organizer_transfer_items.json");
+        if temp_items.exists()
+            && let Ok(content) = std::fs::read_to_string(&temp_items)
+        {
+            let trimmed = content.trim_start_matches('\u{feff}').trim();
+            if let Ok(res) = serde_json::from_str::<OneOrMany<ProcessedEmailItem>>(trimmed) {
+                self.processed_items = res.into_vec();
+            } else if let Ok(items) = serde_json::from_str::<Vec<ProcessedEmailItem>>(trimmed) {
+                self.processed_items = items;
+            }
+        }
+
+        let temp_errors = std::env::temp_dir().join("outlook_organizer_transfer_errors.json");
+        if temp_errors.exists()
+            && let Ok(content) = std::fs::read_to_string(&temp_errors)
+        {
+            let trimmed = content.trim_start_matches('\u{feff}').trim();
+            if let Ok(res) = serde_json::from_str::<OneOrMany<ExecutionErrorDetail>>(trimmed) {
+                self.execution_errors = res.into_vec();
+            } else if let Ok(errors) = serde_json::from_str::<Vec<ExecutionErrorDetail>>(trimmed) {
+                self.execution_errors = errors;
+            }
+        }
+    }
+
     pub fn get_imported_folders_summary(&self) -> Vec<ImportedFolderReportItem> {
         let selected = self.selected_psts();
         let default_pst = if selected.is_empty() {
@@ -2367,6 +2533,12 @@ impl AppState {
             WizardStep::SplitSummary => WizardStep::SplitExecution,
             WizardStep::SplitExecution => WizardStep::SplitCompletion,
             WizardStep::SplitCompletion => WizardStep::Welcome,
+            // Pasos de Transferencia entre Buzones
+            WizardStep::TransferSelect => WizardStep::TransferFilter,
+            WizardStep::TransferFilter => WizardStep::TransferSummary,
+            WizardStep::TransferSummary => WizardStep::TransferExecution,
+            WizardStep::TransferExecution => WizardStep::TransferCompletion,
+            WizardStep::TransferCompletion => WizardStep::Welcome,
         };
     }
 
@@ -2398,6 +2570,12 @@ impl AppState {
             WizardStep::SplitSummary => WizardStep::SplitConfig,
             WizardStep::SplitExecution => WizardStep::SplitSummary,
             WizardStep::SplitCompletion => WizardStep::Welcome,
+            // Pasos de Transferencia entre Buzones
+            WizardStep::TransferSelect => WizardStep::Welcome,
+            WizardStep::TransferFilter => WizardStep::TransferSelect,
+            WizardStep::TransferSummary => WizardStep::TransferFilter,
+            WizardStep::TransferExecution => WizardStep::TransferSummary,
+            WizardStep::TransferCompletion => WizardStep::Welcome,
         };
     }
 
@@ -3718,6 +3896,92 @@ mod tests {
         assert_eq!(unique3, "salida (2).pst");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_transfer_mailbox_selection_and_conflict() {
+        let mut state = AppState::new();
+        state.discovered_mailboxes = vec![
+            MailboxItem {
+                display_name: "Buzón Origen".to_string(),
+                store_type: "Primary".to_string(),
+                used_bytes: Some(2 * 1024 * 1024 * 1024),
+                total_bytes: Some(50 * 1024 * 1024 * 1024),
+                ..Default::default()
+            },
+            MailboxItem {
+                display_name: "Buzón Destino".to_string(),
+                store_type: "Shared".to_string(),
+                used_bytes: Some(1024 * 1024 * 1024),
+                total_bytes: Some(50 * 1024 * 1024 * 1024),
+                ..Default::default()
+            },
+        ];
+
+        // 1. Seleccionar origen idx 0
+        state.select_transfer_source(0);
+        assert_eq!(state.transfer.source_mailbox_idx, Some(0));
+        assert_eq!(state.get_transfer_source_mailbox().unwrap().display_name, "Buzón Origen");
+
+        // 2. Intentar seleccionar el mismo idx 0 como destino -> advertencia y rechazo
+        state.select_transfer_target(0);
+        assert_eq!(state.transfer.target_mailbox_idx, None);
+        assert!(state.transfer.warning_notice.is_some());
+
+        // 3. Seleccionar idx 1 como destino -> éxito y limpia advertencia
+        state.select_transfer_target(1);
+        assert_eq!(state.transfer.target_mailbox_idx, Some(1));
+        assert_eq!(state.get_transfer_target_mailbox().unwrap().display_name, "Buzón Destino");
+        assert!(state.transfer.warning_notice.is_none());
+    }
+
+    #[test]
+    fn test_transfer_apply_mailbox_detail_dynamic_dates() {
+        let mut state = AppState::new();
+        let mut year_months = std::collections::BTreeMap::new();
+        year_months.insert("2023".to_string(), vec![4, 11]);
+        year_months.insert("2024".to_string(), vec![1, 2]);
+
+        let detail = PstDetail {
+            file_name: "ventas".to_string(),
+            file_path: "SharedMailbox://ventas".to_string(),
+            size_mb: 500.0,
+            total_items: 120,
+            years: vec![2023, 2024],
+            year_months,
+            ..Default::default()
+        };
+
+        state.apply_mailbox_detail_to_transfer(&detail);
+        assert_eq!(state.transfer.available_years, vec![2023, 2024]);
+        assert_eq!(state.transfer.available_months, vec![1, 2, 4, 11]);
+    }
+
+    #[test]
+    fn test_transfer_step_transitions() {
+        let mut state = AppState::new();
+        state.step = WizardStep::TransferSelect;
+        state.next_step();
+        assert_eq!(state.step, WizardStep::TransferFilter);
+        state.next_step();
+        assert_eq!(state.step, WizardStep::TransferSummary);
+        state.next_step();
+        assert_eq!(state.step, WizardStep::TransferExecution);
+        state.next_step();
+        assert_eq!(state.step, WizardStep::TransferCompletion);
+
+        // Desde TransferCompletion, volver atrás regresa al Menú Principal (Welcome)
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::Welcome);
+
+        // Comprobar retroceso paso a paso desde el resumen
+        state.step = WizardStep::TransferSummary;
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::TransferFilter);
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::TransferSelect);
+        state.prev_step();
+        assert_eq!(state.step, WizardStep::Welcome);
     }
 }
 

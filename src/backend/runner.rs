@@ -54,6 +54,24 @@ pub struct SplitWorkerConfig {
     pub adaptive_throttling: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TransferWorkerConfig {
+    pub profile_name: Option<String>,
+    pub source_mailbox: String,
+    pub target_mailbox: String,
+    pub transfer_mode: String,
+    #[serde(default)]
+    pub allowed_years: Vec<u32>,
+    #[serde(default)]
+    pub allowed_months: Vec<u32>,
+    pub include_inbox: bool,
+    pub include_sent: bool,
+    pub include_deleted: bool,
+    pub include_custom_folders: bool,
+    pub deduplication_enabled: bool,
+    pub adaptive_throttling: bool,
+}
+
 /// Ejecuta el worker de PowerShell de forma completamente asíncrona sin bloquear la UI
 pub struct BackendRunner;
 
@@ -288,6 +306,118 @@ impl BackendRunner {
         Ok((child, abort_path, pause_path))
     }
 
+    pub fn spawn_transfer_worker(
+        config: &TransferWorkerConfig,
+        tx: UnboundedSender<BackendMessage>,
+    ) -> Result<(tokio::process::Child, PathBuf, PathBuf), std::io::Error> {
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("outlook_organizer_transfer_worker.ps1");
+        let config_path = temp_dir.join("outlook_organizer_transfer_config.json");
+        let abort_path = temp_dir.join("outlook_organizer_transfer_abort.flag");
+        let pause_path = temp_dir.join("outlook_organizer_transfer_pause.flag");
+
+        if abort_path.exists() {
+            let _ = fs::remove_file(&abort_path);
+        }
+        if pause_path.exists() {
+            let _ = fs::remove_file(&pause_path);
+        }
+        let items_path = temp_dir.join("outlook_organizer_transfer_items.json");
+        if items_path.exists() {
+            let _ = fs::remove_file(&items_path);
+        }
+        let errors_path = temp_dir.join("outlook_organizer_transfer_errors.json");
+        if errors_path.exists() {
+            let _ = fs::remove_file(&errors_path);
+        }
+
+        let script_content = include_str!("transfer_worker.ps1").trim_start_matches('\u{feff}');
+        fs::write(&script_path, format!("\u{feff}{script_content}"))?;
+
+        let config_json = serde_json::to_string_pretty(config)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        fs::write(&config_path, config_json)?;
+
+        let mut cmd = Command::new("powershell");
+        configure_worker_command(&mut cmd);
+        let mut child = cmd
+            .arg("-Sta")
+            .arg("-NoProfile")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-File")
+            .arg(&script_path)
+            .arg("-ConfigFile")
+            .arg(&config_path)
+            .arg("-AbortFile")
+            .arg(&abort_path)
+            .arg("-PauseFile")
+            .arg(&pause_path)
+            .stdout(Stdio::piped())
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let tx_out = tx.clone();
+
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stdout);
+            let mut buf = Vec::new();
+
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf).trim().to_string();
+                        if line.is_empty() {
+                            continue;
+                        }
+
+                        if let Ok(msg) = serde_json::from_str::<BackendMessage>(&line) {
+                            let _ = tx_out.send(msg);
+                        } else {
+                            let _ = tx_out.send(BackendMessage::Log {
+                                timestamp: "LIVE".to_string(),
+                                level: "INFO".to_string(),
+                                message: line,
+                            });
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let stderr = child.stderr.take().expect("Failed to capture stderr");
+        let tx_err = tx.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut buf = Vec::new();
+
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf).trim().to_string();
+                        if !line.is_empty() {
+                            let _ = tx_err.send(BackendMessage::Log {
+                                timestamp: "WARN".to_string(),
+                                level: "WARN".to_string(),
+                                message: format!("[PowerShell Transfer] {}", line),
+                            });
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok((child, abort_path, pause_path))
+    }
+
     /// Obtiene de forma asíncrona la lista de buzones configurados en Outlook MAPI
     pub async fn fetch_outlook_mailboxes(profile: Option<&str>) -> Vec<crate::app::MailboxItem> {
         let temp_dir = std::env::temp_dir();
@@ -434,6 +564,118 @@ impl BackendRunner {
                         && let Some(sender) = tx {
                         let _ = sender.send(BackendMessage::PstInspectionProgress {
                             pst_path: pst_path.to_string(),
+                            folder_name: p.folder.unwrap_or_default(),
+                            scanned_items: p.items.unwrap_or(0),
+                        });
+                    }
+                } else {
+                    last_json_line = trimmed.to_string();
+                }
+            }
+        }
+
+        let status = child.wait().await;
+        match status {
+            Ok(s) if s.success() => {
+                #[derive(serde::Deserialize)]
+                struct InspectorError {
+                    error: Option<String>,
+                }
+                if let Ok(err_obj) = serde_json::from_str::<InspectorError>(&last_json_line)
+                    && let Some(err_msg) = err_obj.error {
+                    return Err(err_msg);
+                }
+
+                serde_json::from_str::<crate::app::PstDetail>(&last_json_line)
+                    .map_err(|e| format!("Error al decodificar metadatos: {} (Salida: {})", e, last_json_line))
+            }
+            Ok(_) => {
+                let mut err_msg = String::new();
+                if let Some(err) = stderr {
+                    let mut r = BufReader::new(err);
+                    let mut buf = String::new();
+                    let _ = tokio::io::AsyncReadExt::read_to_string(&mut r, &mut buf).await;
+                    err_msg = buf;
+                }
+                Err(format!("Error en subproceso PowerShell: {}", err_msg))
+            }
+            Err(e) => Err(format!("Error al esperar finalización de PowerShell: {}", e)),
+        }
+    }
+
+    /// Dispara la inspección MAPI detallada de un buzón en segundo plano
+    pub fn trigger_mailbox_inspection(
+        mailbox_name: String,
+        profile: Option<String>,
+        tx: UnboundedSender<BackendMessage>,
+    ) {
+        tokio::spawn(async move {
+            let res = Self::inspect_mailbox(&mailbox_name, profile.as_deref(), Some(&tx)).await;
+            let _ = tx.send(BackendMessage::PstDetailLoaded {
+                pst_path: mailbox_name.clone(),
+                pst_name: mailbox_name,
+                detail: res.map(Box::new),
+            });
+        });
+    }
+
+    /// Inspecciona detalladamente un buzón de Outlook usando MAPI Table
+    pub async fn inspect_mailbox(
+        mailbox_name: &str,
+        profile: Option<&str>,
+        tx: Option<&UnboundedSender<BackendMessage>>,
+    ) -> Result<crate::app::PstDetail, String> {
+        let temp_dir = std::env::temp_dir();
+        let script_path = temp_dir.join("outlook_organizer_mailbox_inspector.ps1");
+        let script_content = include_str!("mailbox_inspector.ps1").trim_start_matches('\u{feff}');
+        let _ = fs::write(&script_path, format!("\u{feff}{script_content}"));
+
+        let mut cmd = Command::new("powershell");
+        configure_worker_command(&mut cmd);
+        cmd.arg("-Sta")
+            .arg("-NoProfile")
+            .arg("-ExecutionPolicy")
+            .arg("Bypass")
+            .arg("-File")
+            .arg(&script_path)
+            .arg("-MailboxName")
+            .arg(mailbox_name);
+
+        if let Some(prof) = profile
+            && !prof.trim().is_empty() {
+            cmd.arg("-ProfileName").arg(prof);
+        }
+
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => return Err(format!("No se pudo ejecutar PowerShell: {}", e)),
+        };
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let mut last_json_line = String::new();
+
+        if let Some(out) = stdout {
+            let reader = BufReader::new(out);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Some(rest) = trimmed.strip_prefix("PROGRESS:") {
+                    #[derive(serde::Deserialize)]
+                    struct ProgressPayload {
+                        folder: Option<String>,
+                        items: Option<usize>,
+                    }
+                    if let Ok(p) = serde_json::from_str::<ProgressPayload>(rest)
+                        && let Some(sender) = tx {
+                        let _ = sender.send(BackendMessage::PstInspectionProgress {
+                            pst_path: mailbox_name.to_string(),
                             folder_name: p.folder.unwrap_or_default(),
                             scanned_items: p.items.unwrap_or(0),
                         });

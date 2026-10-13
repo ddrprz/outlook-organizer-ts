@@ -8,11 +8,16 @@ use ratatui::{
 
 use crate::{app::AppState, ui::theme::Theme};
 
-pub const MENU_ITEMS: [(&str, &str, &str); 5] = [
+pub const MENU_ITEMS: [(&str, &str, &str); 6] = [
     (
         "Import",
         "Launch the migration wizard to import PST emails into Outlook / M365 mailboxes.",
         "Step-by-step guided wizard with deduplication and temporal routing.",
+    ),
+    (
+        "Transfer",
+        "Transfer emails directly between Outlook / Exchange shared or primary mailboxes.",
+        "Select source and target mailboxes, filter by years and months, with deduplication.",
     ),
     (
         "Scan",

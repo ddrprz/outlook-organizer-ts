@@ -111,6 +111,88 @@ pub fn generate_audit_json(state: &AppState, status: &str) -> Result<Option<Path
     Ok(Some(file_path))
 }
 
+#[derive(Serialize)]
+pub struct TransferAuditReport {
+    pub application: String,
+    pub version: String,
+    pub timestamp_start: String,
+    pub timestamp_end: String,
+    pub status: String,
+    pub source_mailbox: String,
+    pub target_mailbox: String,
+    pub transfer_mode: String,
+    pub allowed_years: Vec<u32>,
+    pub allowed_months: Vec<u32>,
+    pub transferred_items: u64,
+    pub duplicates_skipped: u64,
+    pub error_count: u64,
+    pub errors: Vec<crate::app::ExecutionErrorDetail>,
+}
+
+pub fn generate_transfer_audit_json(state: &AppState, status: &str) -> Result<Option<PathBuf>, std::io::Error> {
+    let is_release_exe = if let Ok(current_exe) = env::current_exe() {
+        let path_str = current_exe.to_string_lossy().to_lowercase();
+        !path_str.contains(r"target\debug")
+    } else {
+        false
+    };
+
+    if !is_release_exe {
+        return Ok(None);
+    }
+
+    let now = Local::now();
+    let date_folder = now.format("%Y-%m-%d").to_string();
+    let time_str = now.format("%H-%M-%S").to_string();
+
+    let logs_dir = PathBuf::from("logs").join(date_folder);
+    fs::create_dir_all(&logs_dir)?;
+
+    let file_path = logs_dir.join(format!("transfer_run_{}.json", time_str));
+
+    let mut errors = state.execution_errors.clone();
+    if errors.is_empty() {
+        for item in &state.processed_items {
+            if item.status == "Error" {
+                errors.push(crate::app::ExecutionErrorDetail {
+                    timestamp: item.date.clone(),
+                    error_type: "item_error".to_string(),
+                    pst_name: item.pst_name.clone(),
+                    source_folder: item.source_folder.clone(),
+                    subject: item.subject.clone(),
+                    sender: item.sender.clone(),
+                    error_message: item.error_message.clone().unwrap_or_else(|| "Error al transferir correo".to_string()),
+                });
+            }
+        }
+    }
+
+    let src_name = state.get_transfer_source_mailbox().map(|m| m.display_name.clone()).unwrap_or_else(|| "Unknown Source".to_string());
+    let dst_name = state.get_transfer_target_mailbox().map(|m| m.display_name.clone()).unwrap_or_else(|| "Unknown Target".to_string());
+
+    let report = TransferAuditReport {
+        application: "Outlook Organizer TS".to_string(),
+        version: "1.0.0".to_string(),
+        timestamp_start: now.to_rfc3339(),
+        timestamp_end: now.to_rfc3339(),
+        status: status.to_string(),
+        source_mailbox: src_name,
+        target_mailbox: dst_name,
+        transfer_mode: format!("{:?}", state.transfer.transfer_mode),
+        allowed_years: state.transfer.selected_years.iter().copied().collect(),
+        allowed_months: state.transfer.selected_months.iter().copied().collect(),
+        transferred_items: state.progress.imported_count,
+        duplicates_skipped: state.progress.duplicates_skipped,
+        error_count: state.progress.error_count,
+        errors,
+    };
+
+    let json_content = serde_json::to_string_pretty(&report)?;
+    fs::write(&file_path, json_content)?;
+
+    Ok(Some(file_path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,4 +273,31 @@ mod tests {
         assert_eq!(errors[0].error_message, "Error COM al mover ítem");
         assert_eq!(errors[0].subject, "Correo corrupto");
     }
+
+    #[test]
+    fn test_transfer_audit_report_serialization() {
+        let report = TransferAuditReport {
+            application: "Outlook Organizer TS".to_string(),
+            version: "1.0.0".to_string(),
+            timestamp_start: "2026-10-13T10:00:00Z".to_string(),
+            timestamp_end: "2026-10-13T10:05:00Z".to_string(),
+            status: "Completado".to_string(),
+            source_mailbox: "Soporte Ventas".to_string(),
+            target_mailbox: "Archivo Historico".to_string(),
+            transfer_mode: "Move".to_string(),
+            allowed_years: vec![2023, 2024],
+            allowed_months: vec![1, 2, 3],
+            transferred_items: 250,
+            duplicates_skipped: 12,
+            error_count: 0,
+            errors: vec![],
+        };
+
+        let json_str = serde_json::to_string_pretty(&report).expect("Transfer audit serialization failed");
+        assert!(json_str.contains("Soporte Ventas"));
+        assert!(json_str.contains("Archivo Historico"));
+        assert!(json_str.contains("2023"));
+        assert!(json_str.contains("250"));
+    }
 }
+
