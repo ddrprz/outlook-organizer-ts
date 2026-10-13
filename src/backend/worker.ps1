@@ -1463,8 +1463,8 @@ try {
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
 
-        # 4. Desmontar PST si fue montado en esta ejecución
-        if ($wasMountedByUs -and -not $isAborted) {
+        # 4. Desmontar PST si fue montado en esta ejecución (incluso en caso de parada segura / aborto)
+        if ($wasMountedByUs) {
             try {
                 $rootF = $pstStore.GetRootFolder()
                 $namespace.RemoveStore($rootF)
@@ -1483,7 +1483,7 @@ try {
 
         Clear-FolderCaches
 
-        if ($isAborted) { break }
+        if ($script:isAborted) { break }
     }
 
     # Guardar reporte de elementos procesados y registro de errores en archivos temporales JSON para el informe interactivo HTML y auditoría
@@ -1558,15 +1558,44 @@ finally {
     # 3. Garantizar desmontaje de almacenes montados
     if ($storesToUnmount -and $storesToUnmount.Count -gt 0) {
         foreach ($st in $storesToUnmount) {
-            try {
-                $rootF = $st.GetRootFolder()
-                Log-Message "Desmontando PST residual: $($rootF.Name)..."
-                $namespace.RemoveStore($rootF)
-                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
+            if ($null -ne $st -and $null -ne $namespace) {
+                try {
+                    $rootF = $st.GetRootFolder()
+                    Log-Message "Desmontando PST residual: $($rootF.Name)..."
+                    $namespace.RemoveStore($rootF)
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
+                } catch {
+                    Log-Message "Aviso al desmontar PST residual: $_" "WARN"
+                }
+            }
+            if ($null -ne $st) {
                 try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($st) | Out-Null } catch {}
-            } catch {}
+            }
         }
         $storesToUnmount = @()
+    }
+
+    # 4. Verificación de respaldo en $namespace.Stores para garantizar que ningún PST procesado quedó montado
+    if ($null -ne $namespace -and $pstList) {
+        foreach ($pItem in $pstList) {
+            $pPath = $pItem.Path
+            if ($pPath) {
+                $fullP = [System.IO.Path]::GetFullPath($pPath).ToLowerInvariant()
+                foreach ($s in $namespace.Stores) {
+                    $sp = ""
+                    try { $sp = $s.FilePath } catch {}
+                    if ($sp -and [System.IO.Path]::GetFullPath($sp).ToLowerInvariant() -eq $fullP) {
+                        try {
+                            $rootF = $s.GetRootFolder()
+                            $namespace.RemoveStore($rootF)
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($rootF) | Out-Null } catch {}
+                            Log-Message "Almacén PST residual '$sp' desmontado en pase de verificación."
+                        } catch {}
+                        break
+                    }
+                }
+            }
+        }
     }
 
     if ($null -ne $destStore) {

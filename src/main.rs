@@ -286,6 +286,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if !state.progress.graceful_cancelling {
                         state.open_cancel_modal();
                     }
+                } else if state.step == WizardStep::SplitExecution {
+                    if !state.progress.graceful_cancelling {
+                        state.progress.graceful_cancelling = true;
+                        if let Some(ref path) = worker_abort_file {
+                            let _ = std::fs::File::create(path);
+                        }
+                        if let Some(ref mut child) = worker_child
+                            && let Some(ref mut stdin) = child.stdin
+                        {
+                            use tokio::io::AsyncWriteExt;
+                            let _ = stdin.write_all(b"abort\n").await;
+                        }
+                        state.log_event("[ABORT] Señal de parada segura enviada al particionador de PSTs (Ctrl+C). Desmontando almacenes...".to_string());
+                    }
                 } else {
                     state.should_quit = true;
                 }
@@ -1401,7 +1415,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(ref path) = worker_abort_file {
                             let _ = std::fs::File::create(path);
                         }
-                        state.log_event("[ABORT] Señal de parada enviada al particionador de PSTs.".to_string());
+                        if let Some(ref mut child) = worker_child
+                            && let Some(ref mut stdin) = child.stdin
+                        {
+                            use tokio::io::AsyncWriteExt;
+                            let _ = stdin.write_all(b"abort\n").await;
+                        }
+                        state.log_event("[ABORT] Señal de parada enviada al particionador de PSTs. Desmontando almacenes...".to_string());
                     }
                     _ => {}
                 },
@@ -1418,6 +1438,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             }
         }
+    }
+
+    // Si aún existe un subproceso de worker ejecutándose al salir, asegurar aborto suave y esperar desmontaje
+    if let Some(ref mut child) = worker_child {
+        if let Some(ref path) = worker_abort_file {
+            let _ = std::fs::File::create(path);
+        }
+        if let Some(ref mut stdin) = child.stdin {
+            use tokio::io::AsyncWriteExt;
+            let _ = stdin.write_all(b"abort\n").await;
+        }
+        // Esperar hasta 5 segundos a que PowerShell desmonte limpiamente los PSTs
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
     }
 
     // Restauración limpia de la terminal
