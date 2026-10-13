@@ -1,14 +1,15 @@
-﻿<#
-.SYNOPSIS
-    Motor de migración e importación Outlook COM / MAPI de alto rendimiento con
-    telemetría en tiempo real, deduplicación, enrutamiento temporal y protocolo
-    de parada segura (Graceful Shutdown) para Outlook Organizer TS.
-#>
 param (
     [string]$ConfigFile = "",
     [string]$AbortFile = "",
     [string]$PauseFile = ""
 )
+
+<#
+.SYNOPSIS
+    Motor de migración e importación Outlook COM / MAPI de alto rendimiento con
+    telemetría en tiempo real, deduplicación, enrutamiento temporal y protocolo
+    de parada segura (Graceful Shutdown) para Outlook Organizer TS.
+#>
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
@@ -1099,6 +1100,10 @@ try {
                     if ($null -ne $copy) {
                         try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
                         $copy = $null
+                    }
+                    if ($null -ne $item) {
+                        try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) } catch {}
+                        $item = $null
                     }
                 }
 

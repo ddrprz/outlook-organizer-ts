@@ -94,9 +94,9 @@ impl BackendRunner {
             let _ = fs::remove_file(&errors_path);
         }
 
-        // Escribir script y archivo de configuración JSON con BOM UTF-8 para PowerShell 5.1
-        let script_content = include_str!("worker.ps1");
-        fs::write(&script_path, format!("\u{feff}{}", script_content))?;
+        // Escribir script y archivo de configuración JSON con exactamente un BOM UTF-8 para PowerShell 5.1
+        let script_content = include_str!("worker.ps1").trim_start_matches('\u{feff}');
+        fs::write(&script_path, format!("\u{feff}{script_content}"))?;
 
         let config_json = serde_json::to_string_pretty(config)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -201,8 +201,8 @@ impl BackendRunner {
             let _ = fs::remove_file(&pause_path);
         }
 
-        let script_content = include_str!("split_worker.ps1");
-        fs::write(&script_path, format!("\u{feff}{}", script_content))?;
+        let script_content = include_str!("split_worker.ps1").trim_start_matches('\u{feff}');
+        fs::write(&script_path, format!("\u{feff}{script_content}"))?;
 
         let config_json = serde_json::to_string_pretty(config)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -292,8 +292,8 @@ impl BackendRunner {
     pub async fn fetch_outlook_mailboxes(profile: Option<&str>) -> Vec<crate::app::MailboxItem> {
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("outlook_organizer_discovery.ps1");
-        let script_content = include_str!("mailbox_discovery.ps1");
-        let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
+        let script_content = include_str!("mailbox_discovery.ps1").trim_start_matches('\u{feff}');
+        let _ = fs::write(&script_path, format!("\u{feff}{script_content}"));
 
         let mut cmd = Command::new("powershell");
         configure_worker_command(&mut cmd);
@@ -385,8 +385,8 @@ impl BackendRunner {
     ) -> Result<crate::app::PstDetail, String> {
         let temp_dir = std::env::temp_dir();
         let script_path = temp_dir.join("outlook_organizer_inspector.ps1");
-        let script_content = include_str!("pst_inspector.ps1");
-        let _ = fs::write(&script_path, format!("\u{feff}{}", script_content));
+        let script_content = include_str!("pst_inspector.ps1").trim_start_matches('\u{feff}');
+        let _ = fs::write(&script_path, format!("\u{feff}{script_content}"));
 
         let mut cmd = Command::new("powershell");
         configure_worker_command(&mut cmd);
