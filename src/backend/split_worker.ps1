@@ -1,14 +1,15 @@
+param (
+    [string]$ConfigFile = "",
+    [string]$AbortFile = "",
+    [string]$PauseFile = ""
+)
+
 <#
 .SYNOPSIS
     Motor de división y separación de archivos PST (PST Splitter) con automatización
     Outlook COM / MAPI, telemetría continua en tiempo real, optimización de escaneo MAPI Table
     y protocolo de parada segura (Graceful Shutdown) para Outlook Organizer TS.
 #>
-param (
-    [string]$ConfigFile = "",
-    [string]$AbortFile = "",
-    [string]$PauseFile = ""
-)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
