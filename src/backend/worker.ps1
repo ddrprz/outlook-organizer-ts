@@ -586,6 +586,22 @@ try {
 
     $namespace = $outlook.GetNamespace("MAPI")
 
+    # Optimización Modo Online: Desviar la vista activa de Outlook a una carpeta local ligera (Tareas)
+    # y minimizar el explorador para congelar el renderizado en pantalla de listas de correos y contadores
+    try {
+        $activeExp = $outlook.ActiveExplorer()
+        if ($null -ne $activeExp) {
+            $localTasks = $namespace.GetDefaultFolder(13) # 13 = olFolderTasks (carpeta local ligera)
+            if ($null -ne $localTasks) {
+                $activeExp.CurrentFolder = $localTasks
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($localTasks) | Out-Null } catch {}
+            }
+            $activeExp.WindowState = 1 # 1 = olMinimized
+            Log-Message "Vista activa de Outlook desviada a carpeta local y minimizada para congelar renderizado de UI."
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($activeExp) | Out-Null } catch {}
+        }
+    } catch {}
+
     # 3. Inicialización MAPI (reutilizar sesión o logon)
     $profileToUse = if ($config -and $config.profile_name) { $config.profile_name } else { "" }
     if ($profileToUse -and $profileToUse.Trim() -ne "") {
@@ -1070,23 +1086,22 @@ try {
                         if ($null -ne $item) {
                             $itemBytes = [int64]0
                             if ($entry.Size) { try { $itemBytes = [int64]$entry.Size } catch {} }
-                            elseif ($item.Size) { try { $itemBytes = [int64]$item.Size } catch {} }
 
                             if ($config -and $config.transfer_mode -eq "Move") {
                                 $moved = $item.Move($finalDest)
                                 if ($null -ne $moved) {
-                                    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
                                     $moved = $null
                                 }
                             } else {
                                 $copy = $item.Copy()
                                 $moved = $copy.Move($finalDest)
                                 if ($null -ne $moved) {
-                                    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
                                     $moved = $null
                                 }
                                 if ($null -ne $copy) {
-                                    try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
+                                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
                                     $copy = $null
                                 }
                             }
@@ -1149,11 +1164,11 @@ try {
                         } catch {}
                     } finally {
                         if ($null -ne $copy) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
                             $copy = $null
                         }
                         if ($null -ne $item) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) } catch {}
                             $item = $null
                         }
                     }
@@ -1165,8 +1180,10 @@ try {
 
                     Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
-                    if ($pstProcessedCount % 500 -eq 0) {
-                        [System.GC]::Collect(1, [System.GCCollectionMode]::Optimized)
+                    # Recolección periódica agresiva de memoria COM cada 100 correos para evitar saturación de RCWs en Modo Online
+                    if ($pstProcessedCount % 100 -eq 0) {
+                        [System.GC]::Collect()
+                        [System.GC]::WaitForPendingFinalizers()
                     }
                 }
             } else {
@@ -1339,18 +1356,18 @@ try {
                         if ($config -and $config.transfer_mode -eq "Move") {
                             $moved = $item.Move($finalDest)
                             if ($null -ne $moved) {
-                                try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
                                 $moved = $null
                             }
                         } else {
                             $copy = $item.Copy()
                             $moved = $copy.Move($finalDest)
                             if ($null -ne $moved) {
-                                try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) } catch {}
+                                try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
                                 $moved = $null
                             }
                             if ($null -ne $copy) {
-                                try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
+                                try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
                                 $copy = $null
                             }
                         }
@@ -1407,11 +1424,11 @@ try {
                         } catch {}
                     } finally {
                         if ($null -ne $copy) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
                             $copy = $null
                         }
                         if ($null -ne $item) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) } catch {}
+                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) } catch {}
                             $item = $null
                         }
                     }
@@ -1423,8 +1440,10 @@ try {
 
                     Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
-                    if ($pstProcessedCount % 500 -eq 0) {
-                        [System.GC]::Collect(1, [System.GCCollectionMode]::Optimized)
+                    # Recolección periódica agresiva de memoria COM cada 100 correos para evitar saturación de RCWs en Modo Online
+                    if ($pstProcessedCount % 100 -eq 0) {
+                        [System.GC]::Collect()
+                        [System.GC]::WaitForPendingFinalizers()
                     }
                 }
             }
@@ -1601,6 +1620,16 @@ finally {
     if ($null -ne $destStore) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($destStore) | Out-Null } catch {}
         $destStore = $null
+    }
+
+    if (-not $weStartedOutlook -and $null -ne $outlook) {
+        try {
+            $exp = $outlook.ActiveExplorer()
+            if ($null -ne $exp) {
+                $exp.WindowState = 0 # 0 = olNormalWindow
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($exp) | Out-Null } catch {}
+            }
+        } catch {}
     }
 
     if ($weStartedOutlook -and $null -ne $outlook) {

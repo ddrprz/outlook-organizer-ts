@@ -379,6 +379,20 @@ try {
         $namespace.Logon("", $null, $false, $true)
     }
 
+    # Desviar la vista activa de Outlook a una carpeta local y minimizar para acelerar procesamiento
+    try {
+        $activeExp = $outlook.ActiveExplorer()
+        if ($null -ne $activeExp) {
+            $localTasks = $namespace.GetDefaultFolder(13) # olFolderTasks
+            if ($null -ne $localTasks) {
+                $activeExp.CurrentFolder = $localTasks
+                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($localTasks) | Out-Null } catch {}
+            }
+            $activeExp.WindowState = 1 # olMinimized
+            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($activeExp) | Out-Null } catch {}
+        }
+    } catch {}
+
     $unmountRef = [ref]$storesToUnmount
     $startTime = [DateTime]::UtcNow
 
@@ -640,7 +654,7 @@ try {
                                         $copy = $item.Copy()
                                         $copy.Move($destFolder) | Out-Null
                                         if ($null -ne $copy) {
-                                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
+                                            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) | Out-Null } catch {}
                                         }
                                     }
                                     $totalTransferred++
@@ -659,11 +673,17 @@ try {
                         }
                     } finally {
                         if ($null -ne $item) {
-                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
+                            try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) | Out-Null } catch {}
                         }
                     }
 
                     Check-And-Emit-Split-Progress $targetFileName $totalProcessed $totalCandidateItems $totalTransferred $startTime
+
+                    # Recolección periódica agresiva de memoria COM cada 100 correos
+                    if ($totalProcessed % 100 -eq 0) {
+                        [System.GC]::Collect()
+                        [System.GC]::WaitForPendingFinalizers()
+                    }
                 }
             } else {
                 # === RUTA B: FALLBACK TRADICIONAL SI LA CARPETA NO SOPORTA MAPI TABLE ===
@@ -798,7 +818,7 @@ try {
                                         } else {
                                             $copy = $item.Copy()
                                             $copy.Move($destFolder) | Out-Null
-                                            if ($null -ne $copy) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {} }
+                                            if ($null -ne $copy) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) | Out-Null } catch {} }
                                         }
                                         $totalTransferred++
                                         $generatedPsts[$targetPstPath].items_count++
@@ -815,10 +835,15 @@ try {
                                 $script:totalErrors++
                             }
                         } finally {
-                            if ($null -ne $item) { try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {} }
+                            if ($null -ne $item) { try { [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) | Out-Null } catch {} }
                         }
 
                         Check-And-Emit-Split-Progress $targetFileName $totalProcessed $totalCandidateItems $totalTransferred $startTime
+
+                        if ($totalProcessed % 100 -eq 0) {
+                            [System.GC]::Collect()
+                            [System.GC]::WaitForPendingFinalizers()
+                        }
                     }
                     try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($folderItems) | Out-Null } catch {}
                 }
