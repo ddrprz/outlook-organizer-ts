@@ -124,7 +124,16 @@ function Get-OrCreateFolder($parentFolder, [string]$subfolderName) {
         if ($null -ne $existing) { return $existing }
     } catch {
         try {
-            return $parentFolder.Folders.Add($subfolderName)
+            $created = $parentFolder.Folders.Add($subfolderName)
+            if ($null -ne $created) {
+                try {
+                    $cEid = [string]$created.EntryID
+                    if (-not [string]::IsNullOrWhiteSpace($cEid) -and $null -ne $script:newlyCreatedFolderIds) {
+                        [void]$script:newlyCreatedFolderIds.Add($cEid)
+                    }
+                } catch {}
+                return $created
+            }
         } catch {
             try { return $parentFolder.Folders.Item($subfolderName) } catch {}
         }
@@ -227,6 +236,7 @@ function Clear-FolderCaches {
     }
     if ($script:dateFolderIdCache) { $script:dateFolderIdCache.Clear() }
     if ($script:dateFolderNameCache) { $script:dateFolderNameCache.Clear() }
+    if ($script:newlyCreatedFolderIds) { $script:newlyCreatedFolderIds.Clear() }
     $script:transferStartTime = $null
     if ($script:rollingHistory) { $script:rollingHistory.Clear() }
 }
@@ -352,7 +362,8 @@ function Collect-CandidateFolders($folder, [string]$currentPath, [System.Collect
     }
 }
 
-function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.HashSet[string]]$seenSet, [bool]$deepScan) {
+function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.HashSet[string]]$seenSet, [bool]$deepScan, [bool]$isOnline = $false) {
+    if ($null -eq $targetFolder) { return }
     try {
         $indexedWithTable = $false
         $tbl = $null
@@ -362,10 +373,12 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
                 $colSubjectIdx = -1
                 $colSenderIdx = -1
                 $colDateIdx = -1
+                $colMidIdx = -1
                 try { $tbl.Columns.RemoveAll() } catch {}
                 try { $tbl.Columns.Add("Subject") | Out-Null; $colSubjectIdx = $tbl.Columns.Count - 1 } catch {}
                 try { $tbl.Columns.Add("SenderEmailAddress") | Out-Null; $colSenderIdx = $tbl.Columns.Count - 1 } catch {}
                 try { $tbl.Columns.Add("ReceivedTime") | Out-Null; $colDateIdx = $tbl.Columns.Count - 1 } catch {}
+                try { $tbl.Columns.Add("http://schemas.microsoft.com/mapi/proptag/0x1035001E") | Out-Null; $colMidIdx = $tbl.Columns.Count - 1 } catch {}
 
                 $batchSize = 5000
                 while (-not $tbl.EndOfTable) {
@@ -378,11 +391,15 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
                         $s   = if ($colSubjectIdx -ge 0 -and $colSubjectIdx -lt $colsInBatch) { $arr[$i, $colSubjectIdx] } else { $null }
                         $snd = if ($colSenderIdx -ge 0 -and $colSenderIdx -lt $colsInBatch) { $arr[$i, $colSenderIdx] } else { $null }
                         $dt  = if ($colDateIdx -ge 0 -and $colDateIdx -lt $colsInBatch) { $arr[$i, $colDateIdx] } else { $null }
+                        $mid = if ($colMidIdx -ge 0 -and $colMidIdx -lt $colsInBatch) { $arr[$i, $colMidIdx] } else { $null }
 
                         if ($s -or $snd -or $dt) {
                             $dtStr = if ($dt -and ($dt -is [DateTime])) { $dt.ToString('yyyyMMddHHmmss') } else { "" }
                             $cKey = "$s|$snd|$dtStr"
                             [void]$seenSet.Add($cKey)
+                        }
+                        if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
+                            [void]$seenSet.Add($mid.Trim())
                         }
                     }
                 }
@@ -398,19 +415,22 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
 
         # Fallback a iteración clásica únicamente si GetTable no estuvo disponible
         if (-not $indexedWithTable) {
+            $maxInspect = if ($isOnline) { 100 } else { 1500 }
             $items = $null
             try {
                 $items = $targetFolder.Items
                 $count = $items.Count
-                $maxInspect = [math]::Min($count, 1500)
-                for ($k = 1; $k -le $maxInspect; $k++) {
+                $limit = [math]::Min($count, $maxInspect)
+                for ($k = 1; $k -le $limit; $k++) {
                     $existing = $null
                     try {
                         $existing = $items.Item($k)
                         $mid = $null
-                        try {
-                            $mid = $existing.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
-                        } catch {}
+                        if (-not $isOnline) {
+                            try {
+                                $mid = $existing.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x1035001E")
+                            } catch {}
+                        }
                         if ($mid -and $mid.Trim() -ne "") {
                             [void]$seenSet.Add($mid.Trim())
                         }
@@ -437,12 +457,12 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
             }
         }
 
-        if ($deepScan) {
+        if ($deepScan -and -not $isOnline) {
             $subFolders = $null
             try {
                 $subFolders = $targetFolder.Folders
                 foreach ($sub in $subFolders) {
-                    Index-TargetFolderItems $sub $seenSet $deepScan
+                    Index-TargetFolderItems $sub $seenSet $deepScan $isOnline
                     try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sub) | Out-Null } catch {}
                 }
             } catch {}
@@ -524,6 +544,7 @@ $destFolderCache = @{}
 $dateFolderCache = @{}
 $dateFolderIdCache = @{}
 $dateFolderNameCache = @{}
+$newlyCreatedFolderIds = New-Object 'System.Collections.Generic.HashSet[string]'
 $consecutiveThrottles = 0
 $processedItemsList = New-Object 'System.Collections.Generic.List[hashtable]'
 $duplicateSampleCount = 0
@@ -606,6 +627,14 @@ try {
             $activeExp.WindowState = 1 # 1 = olMinimized
             Log-Message "Vista activa de Outlook desviada a carpeta local y minimizada para congelar renderizado de UI."
             try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($activeExp) | Out-Null } catch {}
+        }
+        if ($null -ne $outlook.Explorers) {
+            foreach ($exp in $outlook.Explorers) {
+                try {
+                    $exp.WindowState = 1
+                    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($exp) | Out-Null
+                } catch {}
+            }
         }
     } catch {}
 
@@ -1055,9 +1084,10 @@ try {
                         # Deduplicación inteligente O(1) en RAM
                         if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
                             $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
-                            if ($config -and $config.deduplication_enabled -and $finalDest) {
+                            $isBrandNew = ($script:newlyCreatedFolderIds -and $script:newlyCreatedFolderIds.Contains($destId))
+                            if ($config -and $config.deduplication_enabled -and $finalDest -and -not $isBrandNew) {
                                 $effectiveDeepScan = if ($isOnlineTarget) { $false } else { [bool]$config.deep_scan_enabled }
-                                Index-TargetFolderItems $finalDest $targetSets[$destId] $effectiveDeepScan
+                                Index-TargetFolderItems $finalDest $targetSets[$destId] $effectiveDeepScan $isOnlineTarget
                             }
                         }
                         $folderSet = $targetSets[$destId]
@@ -1108,49 +1138,97 @@ try {
                             $itemBytes = [int64]0
                             if ($entry.Size) { try { $itemBytes = [int64]$entry.Size } catch {} }
 
-                            if ($config -and $config.transfer_mode -eq "Move") {
-                                $moved = $item.Move($finalDest)
-                                if ($null -ne $moved) {
-                                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
-                                    $moved = $null
+                            $transferSuccess = $false
+                            $retryCount = 0
+                            $maxRetries = if ($isOnlineTarget) { 2 } else { 0 }
+                            $lastErr = $null
+
+                            while (-not $transferSuccess -and $retryCount -le $maxRetries) {
+                                try {
+                                    if ($config -and $config.transfer_mode -eq "Move") {
+                                        $moved = $item.Move($finalDest)
+                                        if ($null -ne $moved) {
+                                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                            $moved = $null
+                                        }
+                                    } else {
+                                        $copy = $item.Copy()
+                                        $moved = $copy.Move($finalDest)
+                                        if ($null -ne $moved) {
+                                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                            $moved = $null
+                                        }
+                                        if ($null -ne $copy) {
+                                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
+                                            $copy = $null
+                                        }
+                                    }
+                                    $transferSuccess = $true
+                                    if ($consecutiveThrottles -gt 0) {
+                                        $consecutiveThrottles--
+                                    }
+                                } catch {
+                                    $lastErr = $_
+                                    $errStr = "$_"
+                                    if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
+                                        $consecutiveThrottles = [math]::Min(6, $consecutiveThrottles + 1)
+                                        $backoffMs = [math]::Min(3000, 250 * [math]::Pow(2, $consecutiveThrottles))
+                                        Log-Message "Aviso M365 (RPC Busy / Throttling en buzón en línea). Esperando ${backoffMs}ms antes de reintentar correo..." "WARN"
+                                        Start-Sleep -Milliseconds $backoffMs
+                                    }
+                                    $retryCount++
+                                }
+                            }
+
+                            if ($transferSuccess) {
+                                $script:totalImported++
+                                $script:totalImportedBytes += $itemBytes
+                                $pstProcessedCount++
+                                $script:globalProcessedItems++
+
+                                if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
+                                    [void]$folderSet.Add($cKey)
+                                    if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
+                                        [void]$folderSet.Add($mid.Trim())
+                                    }
+                                }
+
+                                if ($processedItemsList.Count -lt 5000) {
+                                    $itemKb = [math]::Round([double]$itemBytes / 1024.0, 1)
+                                    $processedItemsList.Add(@{
+                                        subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                        sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                                        date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                        source_folder = $cf.RelPath
+                                        dest_folder   = $destName
+                                        pst_name      = $pstName
+                                        status        = "Importado"
+                                        size_kb       = $itemKb
+                                    })
                                 }
                             } else {
-                                $copy = $item.Copy()
-                                $moved = $copy.Move($finalDest)
-                                if ($null -ne $moved) {
-                                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
-                                    $moved = $null
-                                }
-                                if ($null -ne $copy) {
-                                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
-                                    $copy = $null
-                                }
-                            }
-
-                            $script:totalImported++
-                            $script:totalImportedBytes += $itemBytes
-                            $pstProcessedCount++
-                            $script:globalProcessedItems++
-
-                            if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
-                                [void]$folderSet.Add($cKey)
-                                if ($mid -and ($mid -is [string]) -and $mid.Trim() -ne "") {
-                                    [void]$folderSet.Add($mid.Trim())
-                                }
-                            }
-
-                            if ($processedItemsList.Count -lt 5000) {
-                                $itemKb = [math]::Round([double]$itemBytes / 1024.0, 1)
-                                $processedItemsList.Add(@{
-                                    subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
-                                    sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                                    date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
-                                    source_folder = $cf.RelPath
-                                    dest_folder   = $destName
-                                    pst_name      = $pstName
-                                    status        = "Importado"
-                                    size_kb       = $itemKb
-                                })
+                                $errStr = if ($lastErr) { "$lastErr" } else { "Error de transferencia COM tras reintentos" }
+                                $script:totalErrors++
+                                $pstProcessedCount++
+                                $script:globalProcessedItems++
+                                $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
+                                try { Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo: $errStr" } catch {}
+                                try {
+                                    if ($processedItemsList.Count -lt 5000) {
+                                        $processedItemsList.Add(@{
+                                            subject       = $safeSubj
+                                            sender        = $safeSender
+                                            date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                            source_folder = $cf.RelPath
+                                            dest_folder   = $destName
+                                            pst_name      = $pstName
+                                            status        = "Error"
+                                            size_kb       = 0.0
+                                            error_message = $errStr
+                                        })
+                                    }
+                                } catch {}
                             }
                         } else {
                             $script:totalErrors++
@@ -1163,7 +1241,7 @@ try {
                         $pstProcessedCount++
                         $script:globalProcessedItems++
                         if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
-                            $consecutiveThrottles = [math]::Min(10, $consecutiveThrottles + 1)
+                            $consecutiveThrottles = [math]::Min(6, $consecutiveThrottles + 1)
                         }
                         $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
                         $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
@@ -1195,14 +1273,14 @@ try {
                     }
 
                     if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                        Start-Sleep -Milliseconds ([math]::Min(50, 10 * $consecutiveThrottles))
-                        $consecutiveThrottles--
+                        $throttleSleep = [math]::Min(1500, 100 * [math]::Pow(2, [math]::Min(4, $consecutiveThrottles)))
+                        Start-Sleep -Milliseconds $throttleSleep
                     }
 
                     Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
-                    # Recolección periódica agresiva de memoria COM cada 100 correos para evitar saturación de RCWs en Modo Online
-                    if ($pstProcessedCount % 100 -eq 0) {
+                    # Recolección periódica optimizada de memoria COM cada 500 correos para evitar saturación de RCWs sin causar micro-pausas
+                    if ($pstProcessedCount % 500 -eq 0) {
                         [System.GC]::Collect()
                         [System.GC]::WaitForPendingFinalizers()
                     }
@@ -1328,9 +1406,10 @@ try {
 
                         if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
                             $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
-                            if ($config -and $config.deduplication_enabled -and $finalDest) {
+                            $isBrandNew = ($script:newlyCreatedFolderIds -and $script:newlyCreatedFolderIds.Contains($destId))
+                            if ($config -and $config.deduplication_enabled -and $finalDest -and -not $isBrandNew) {
                                 $effectiveDeepScan = if ($isOnlineTarget) { $false } else { [bool]$config.deep_scan_enabled }
-                                Index-TargetFolderItems $finalDest $targetSets[$destId] $effectiveDeepScan
+                                Index-TargetFolderItems $finalDest $targetSets[$destId] $effectiveDeepScan $isOnlineTarget
                             }
                         }
                         $folderSet = $targetSets[$destId]
@@ -1375,46 +1454,96 @@ try {
                         $itemBytes = [int64]0
                         try { if ($item.Size) { $itemBytes = [int64]$item.Size } } catch {}
 
-                        if ($config -and $config.transfer_mode -eq "Move") {
-                            $moved = $item.Move($finalDest)
-                            if ($null -ne $moved) {
-                                try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
-                                $moved = $null
+                        $transferSuccess = $false
+                        $retryCount = 0
+                        $maxRetries = if ($isOnlineTarget) { 2 } else { 0 }
+                        $lastErr = $null
+
+                        while (-not $transferSuccess -and $retryCount -le $maxRetries) {
+                            try {
+                                if ($config -and $config.transfer_mode -eq "Move") {
+                                    $moved = $item.Move($finalDest)
+                                    if ($null -ne $moved) {
+                                        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                        $moved = $null
+                                    }
+                                } else {
+                                    $copy = $item.Copy()
+                                    $moved = $copy.Move($finalDest)
+                                    if ($null -ne $moved) {
+                                        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                        $moved = $null
+                                    }
+                                    if ($null -ne $copy) {
+                                        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
+                                        $copy = $null
+                                    }
+                                }
+                                $transferSuccess = $true
+                                if ($consecutiveThrottles -gt 0) {
+                                    $consecutiveThrottles--
+                                }
+                            } catch {
+                                $lastErr = $_
+                                $errStr = "$_"
+                                if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
+                                    $consecutiveThrottles = [math]::Min(6, $consecutiveThrottles + 1)
+                                    $backoffMs = [math]::Min(3000, 250 * [math]::Pow(2, $consecutiveThrottles))
+                                    Log-Message "Aviso M365 (RPC Busy / Throttling en buzón en línea). Esperando ${backoffMs}ms antes de reintentar correo..." "WARN"
+                                    Start-Sleep -Milliseconds $backoffMs
+                                }
+                                $retryCount++
+                            }
+                        }
+
+                        if ($transferSuccess) {
+                            $script:totalImported++
+                            $script:totalImportedBytes += $itemBytes
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+
+                            if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
+                                [void]$folderSet.Add($cKey)
+                            }
+
+                            if ($processedItemsList.Count -lt 5000) {
+                                $itemKb = [math]::Round([double]$itemBytes / 1024.0, 1)
+                                $processedItemsList.Add(@{
+                                    subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
+                                    sender        = if ($sender) { $sender } else { "(Desconocido)" }
+                                    date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                    source_folder = $cf.RelPath
+                                    dest_folder   = $destName
+                                    pst_name      = $pstName
+                                    status        = "Importado"
+                                    size_kb       = $itemKb
+                                })
                             }
                         } else {
-                            $copy = $item.Copy()
-                            $moved = $copy.Move($finalDest)
-                            if ($null -ne $moved) {
-                                try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
-                                $moved = $null
-                            }
-                            if ($null -ne $copy) {
-                                try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
-                                $copy = $null
-                            }
-                        }
-
-                        $script:totalImported++
-                        $script:totalImportedBytes += $itemBytes
-                        $pstProcessedCount++
-                        $script:globalProcessedItems++
-
-                        if ($folderSet -is [System.Collections.Generic.HashSet[string]]) {
-                            [void]$folderSet.Add($cKey)
-                        }
-
-                        if ($processedItemsList.Count -lt 5000) {
-                            $itemKb = [math]::Round([double]$itemBytes / 1024.0, 1)
-                            $processedItemsList.Add(@{
-                                subject       = if ($subj) { $subj } else { "(Sin Asunto)" }
-                                sender        = if ($sender) { $sender } else { "(Desconocido)" }
-                                date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
-                                source_folder = $cf.RelPath
-                                dest_folder   = $destName
-                                pst_name      = $pstName
-                                status        = "Importado"
-                                size_kb       = $itemKb
-                            })
+                            $errStr = if ($lastErr) { "$lastErr" } else { "Error de transferencia COM tras reintentos" }
+                            $script:totalErrors++
+                            $pstProcessedCount++
+                            $script:globalProcessedItems++
+                            $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
+                            $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
+                            try {
+                                Record-ExecutionError "item_error" $pstName $cf.RelPath $safeSubj $safeSender "Aviso al procesar correo: $errStr"
+                            } catch {}
+                            try {
+                                if ($processedItemsList.Count -lt 5000) {
+                                    $processedItemsList.Add(@{
+                                        subject       = $safeSubj
+                                        sender        = $safeSender
+                                        date          = if ($rcvd) { $rcvd.ToString("yyyy-MM-dd HH:mm:ss") } else { "" }
+                                        source_folder = $cf.RelPath
+                                        dest_folder   = $destName
+                                        pst_name      = $pstName
+                                        status        = "Error"
+                                        size_kb       = 0.0
+                                        error_message = $errStr
+                                    })
+                                }
+                            } catch {}
                         }
                     } catch {
                         $errStr = "$_"
@@ -1422,7 +1551,7 @@ try {
                         $pstProcessedCount++
                         $script:globalProcessedItems++
                         if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
-                            $consecutiveThrottles = [math]::Min(10, $consecutiveThrottles + 1)
+                            $consecutiveThrottles = [math]::Min(6, $consecutiveThrottles + 1)
                         }
                         $safeSubj = if ($subj) { $subj } else { "(Sin Asunto)" }
                         $safeSender = if ($sender) { $sender } else { "(Desconocido)" }
@@ -1456,14 +1585,14 @@ try {
                     }
 
                     if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                        Start-Sleep -Milliseconds ([math]::Min(50, 10 * $consecutiveThrottles))
-                        $consecutiveThrottles--
+                        $throttleSleep = [math]::Min(1500, 100 * [math]::Pow(2, [math]::Min(4, $consecutiveThrottles)))
+                        Start-Sleep -Milliseconds $throttleSleep
                     }
 
                     Check-And-Emit-Progress ($pIdx + 1) $totalPsts $pstName $pstProcessedCount $totalPstItems $startTime
 
-                    # Recolección periódica agresiva de memoria COM cada 100 correos para evitar saturación de RCWs en Modo Online
-                    if ($pstProcessedCount % 100 -eq 0) {
+                    # Recolección periódica optimizada de memoria COM cada 500 correos para evitar saturación de RCWs sin causar micro-pausas
+                    if ($pstProcessedCount % 500 -eq 0) {
                         [System.GC]::Collect()
                         [System.GC]::WaitForPendingFinalizers()
                     }

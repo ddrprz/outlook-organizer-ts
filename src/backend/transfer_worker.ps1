@@ -397,13 +397,18 @@ try {
                         }
                         if ($null -eq $rTime -or -not ($rTime -is [DateTime])) { $rTime = Get-Date }
 
+                        $eSubj = if ($colSubj -ge 0 -and $colSubj -lt $bCols) { $arr[$r, $colSubj] } else { "" }
+                        $eSnd  = if ($colSnd -ge 0 -and $colSnd -lt $bCols) { $arr[$r, $colSnd] } else { "" }
+                        $eMid  = if ($colMid -ge 0 -and $colMid -lt $bCols) { $arr[$r, $colMid] } else { "" }
+                        $eSz   = if ($colSz -ge 0 -and $colSz -lt $bCols) { $arr[$r, $colSz] } else { 0 }
+
                         $tableEntries.Add(@{
                             EntryID      = $eId
                             ReceivedTime = $rTime
-                            Subject      = if ($colSubj -ge 0 -and $colSubj -lt $bCols) { $arr[$r, $colSubj] } else { "" }
-                            Sender       = if ($colSnd -ge 0 -and $colSnd -lt $bCols) { $arr[$r, $colSnd] } else { "" }
-                            MessageID    = if ($colMid -ge 0 -and $colMid -lt $bCols) { $arr[$r, $colMid] } else { "" }
-                            Size         = if ($colSz -ge 0 -and $colSz -lt $bCols) { $arr[$r, $colSz] } else { 0 }
+                            Subject      = $eSubj
+                            Sender       = $eSnd
+                            MessageID    = $eMid
+                            Size         = $eSz
                         })
                     }
                 }
@@ -541,13 +546,14 @@ try {
             }
 
             if ($config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                Start-Sleep -Milliseconds ([math]::Min(50, 10 * $consecutiveThrottles))
-                $consecutiveThrottles--
+                $throttleSleep = [math]::Min(1500, 100 * [math]::Pow(2, [math]::Min(4, $consecutiveThrottles)))
+                Start-Sleep -Milliseconds $throttleSleep
             }
 
             Check-And-Emit-Progress $totalProcessed $totalCandidatesCount $relPath $startTime
 
-            if ($totalProcessed % 100 -eq 0) {
+            # Recolección periódica optimizada de memoria COM cada 500 correos para evitar saturación de RCWs sin micro-pausas
+            if ($totalProcessed % 500 -eq 0) {
                 [System.GC]::Collect()
                 [System.GC]::WaitForPendingFinalizers()
             }
