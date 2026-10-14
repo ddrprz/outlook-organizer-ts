@@ -445,7 +445,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Style::default().fg(Theme::TEXT_MUTED),
             ),
             Span::styled(
-                if state.deep_scan_enabled {
+                if state.is_target_online() {
+                    "Standard (Cloud Optimized)"
+                } else if state.deep_scan_enabled {
                     "MAPI Deep Scan"
                 } else {
                     "Standard Detection"

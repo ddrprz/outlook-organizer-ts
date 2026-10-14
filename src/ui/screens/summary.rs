@@ -84,14 +84,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         }
     };
 
+    let is_online = state.is_target_online();
     let selected_mailboxes = state.selected_mailboxes();
     let mailbox_summary_str = if let Some(target) = selected_mailboxes.first() {
-        format!("{} ({})", target.display_name, target.store_type)
+        if is_online {
+            format!("{} ({} - ☁ Online Mode)", target.display_name, target.store_type)
+        } else {
+            format!("{} ({})", target.display_name, target.store_type)
+        }
     } else {
         "None selected (▲ Target mailbox required)".to_string()
     };
 
-    let summary_lines = vec![
+    let mut summary_lines = vec![
         Line::from(vec![
             Span::styled("• Outlook MAPI Profile: ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(
@@ -136,13 +141,37 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("• Deduplication:        ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(if state.deduplication_enabled { "Enabled (Message-ID + Key)" } else { "Disabled" }, Style::default().fg(Theme::TEXT_MAIN)),
             Span::styled(" | Deep Scan: ", Style::default().fg(Theme::TEXT_MUTED)),
-            Span::styled(if state.deep_scan_enabled { "Yes (Recursive)" } else { "No" }, Style::default().fg(Theme::TEXT_MAIN)),
+            Span::styled(
+                if is_online {
+                    "Disabled (Auto-adjusted for Online Mailbox)"
+                } else if state.deep_scan_enabled {
+                    "Yes (Recursive)"
+                } else {
+                    "No"
+                },
+                if is_online {
+                    Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Theme::TEXT_MAIN)
+                },
+            ),
         ]),
         Line::from(vec![
             Span::styled("• Adaptive Throttling:  ", Style::default().fg(Theme::TEXT_MUTED)),
             Span::styled(if state.adaptive_throttling_enabled { "Enabled (M365 429 Protection)" } else { "Disabled" }, Style::default().fg(Theme::SUCCESS)),
         ]),
     ];
+
+    if is_online {
+        summary_lines.push(Line::from(vec![
+            Span::styled("▲ Online Notice:        ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Deep Scan auto-disabled to avoid WAN stalls (direct folder deduplication remains 100% active).",
+                Style::default().fg(Theme::WARNING),
+            ),
+        ]));
+    }
+
     f.render_widget(Paragraph::new(summary_lines), summary_inner);
 
 

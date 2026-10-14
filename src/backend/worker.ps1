@@ -118,11 +118,18 @@ function Check-And-Emit-Progress([int]$currentPstIdx, [int]$totalPsts, [string]$
 }
 
 function Get-OrCreateFolder($parentFolder, [string]$subfolderName) {
+    if ($null -eq $parentFolder -or [string]::IsNullOrWhiteSpace($subfolderName)) { return $null }
     try {
-        return $parentFolder.Folders.Item($subfolderName)
+        $existing = $parentFolder.Folders.Item($subfolderName)
+        if ($null -ne $existing) { return $existing }
     } catch {
-        return $parentFolder.Folders.Add($subfolderName)
+        try {
+            return $parentFolder.Folders.Add($subfolderName)
+        } catch {
+            try { return $parentFolder.Folders.Item($subfolderName) } catch {}
+        }
     }
+    return $null
 }
 
 function Get-FolderType([string]$folderName) {
@@ -659,6 +666,19 @@ try {
         Log-Message "Buzón destino encontrado: '$($destStore.DisplayName)'."
     }
 
+    # Detección de Buzón en Línea (Exchange Online / Microsoft 365 sin OST local en caché)
+    $destFilePath = ""
+    try { if ($destStore.FilePath) { $destFilePath = $destStore.FilePath.Trim() } } catch {}
+    $isOnlineTarget = $true
+    if ($destFilePath -and $destFilePath.ToLower().EndsWith(".ost")) {
+        $isOnlineTarget = $false
+    }
+
+    if ($isOnlineTarget) {
+        Log-Message "ADVERTENCIA: Buzón destino '$($destStore.DisplayName)' detectado en Modo En Línea (Exchange Online / Microsoft 365 sin OST local)." "WARN"
+        Log-Message "Optimizaciones en línea activas: Deep Scan desactivado automáticamente para prevenir bloqueos WAN (Deduplicación directa en carpeta destino se mantiene 100% activa)." "WARN"
+    }
+
     # 5. Determinar lista de archivos PST a procesar
     $pstList = @()
     if ($config -and $config.psts -and $config.psts.Count -gt 0) {
@@ -1036,7 +1056,8 @@ try {
                         if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
                             $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
                             if ($config -and $config.deduplication_enabled -and $finalDest) {
-                                Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
+                                $effectiveDeepScan = if ($isOnlineTarget) { $false } else { [bool]$config.deep_scan_enabled }
+                                Index-TargetFolderItems $finalDest $targetSets[$destId] $effectiveDeepScan
                             }
                         }
                         $folderSet = $targetSets[$destId]
@@ -1308,7 +1329,8 @@ try {
                         if (-not $targetSets.ContainsKey($destId) -or $null -eq $targetSets[$destId]) {
                             $targetSets[$destId] = New-Object 'System.Collections.Generic.HashSet[string]'
                             if ($config -and $config.deduplication_enabled -and $finalDest) {
-                                Index-TargetFolderItems $finalDest $targetSets[$destId] ([bool]$config.deep_scan_enabled)
+                                $effectiveDeepScan = if ($isOnlineTarget) { $false } else { [bool]$config.deep_scan_enabled }
+                                Index-TargetFolderItems $finalDest $targetSets[$destId] $effectiveDeepScan
                             }
                         }
                         $folderSet = $targetSets[$destId]

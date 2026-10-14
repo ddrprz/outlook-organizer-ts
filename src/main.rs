@@ -958,7 +958,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         state.deduplication_enabled = !state.deduplication_enabled;
                     }
                     KeyCode::Char('p') | KeyCode::Char('P') => {
-                        state.deep_scan_enabled = !state.deep_scan_enabled;
+                        if state.is_target_online() {
+                            state.deep_scan_enabled = false;
+                        } else {
+                            state.deep_scan_enabled = !state.deep_scan_enabled;
+                        }
                     }
                     _ => handle_navigation_keys(&mut state, key.code),
                 },

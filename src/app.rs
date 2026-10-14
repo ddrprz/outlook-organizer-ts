@@ -1033,6 +1033,16 @@ impl Default for MailboxItem {
 }
 
 impl MailboxItem {
+    /// Comprueba si el buzón opera en Modo En Línea (sin archivo local .ost)
+    pub fn is_online(&self) -> bool {
+        if let Some(ref path) = self.file_path {
+            let p = path.trim().to_lowercase();
+            !p.ends_with(".ost")
+        } else {
+            true
+        }
+    }
+
     /// Devuelve el porcentaje de ocupación (0.0 .. 100.0)
     pub fn get_usage_percent(&self) -> f64 {
         if let Some(pct) = self.usage_percent
@@ -1964,11 +1974,18 @@ impl AppState {
             for (i, m) in self.discovered_mailboxes.iter_mut().enumerate() {
                 m.selected = i == idx;
             }
+            if self.is_target_online() {
+                self.deep_scan_enabled = false;
+            }
         }
     }
 
     pub fn selected_mailboxes(&self) -> Vec<&MailboxItem> {
         self.discovered_mailboxes.iter().filter(|m| m.selected).collect()
+    }
+
+    pub fn is_target_online(&self) -> bool {
+        self.selected_mailboxes().iter().any(|m| m.is_online())
     }
 
     pub fn selected_mailboxes_display(&self) -> String {
@@ -3982,6 +3999,58 @@ mod tests {
         assert_eq!(state.step, WizardStep::TransferSelect);
         state.prev_step();
         assert_eq!(state.step, WizardStep::Welcome);
+    }
+
+    #[test]
+    fn test_mailbox_item_is_online() {
+        let cached_mb = MailboxItem {
+            display_name: "Usuario Local".to_string(),
+            file_path: Some("C:\\Users\\user\\AppData\\Local\\Microsoft\\Outlook\\user.ost".to_string()),
+            ..Default::default()
+        };
+        assert!(!cached_mb.is_online());
+
+        let online_mb = MailboxItem {
+            display_name: "Buzón Compartido Ventas".to_string(),
+            file_path: None,
+            ..Default::default()
+        };
+        assert!(online_mb.is_online());
+
+        let non_ost_mb = MailboxItem {
+            display_name: "Buzón Remoto".to_string(),
+            file_path: Some("ExchangeOnline://ventas@empresa.com".to_string()),
+            ..Default::default()
+        };
+        assert!(non_ost_mb.is_online());
+    }
+
+    #[test]
+    fn test_online_mailbox_disables_deep_scan_on_selection() {
+        let mut state = AppState::new();
+        state.deep_scan_enabled = true;
+        state.discovered_mailboxes = vec![
+            MailboxItem {
+                display_name: "Buzón Local OST".to_string(),
+                file_path: Some("C:\\path\\outlook.ost".to_string()),
+                ..Default::default()
+            },
+            MailboxItem {
+                display_name: "Buzón Compartido Cloud".to_string(),
+                file_path: None,
+                ..Default::default()
+            },
+        ];
+
+        // Seleccionar buzón local: no desactiva deep scan automáticamente
+        state.select_single_mailbox(0);
+        assert!(!state.is_target_online());
+        assert!(state.deep_scan_enabled);
+
+        // Seleccionar buzón en línea: desactiva automáticamente deep scan
+        state.select_single_mailbox(1);
+        assert!(state.is_target_online());
+        assert!(!state.deep_scan_enabled);
     }
 }
 
