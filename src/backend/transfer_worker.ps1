@@ -486,24 +486,22 @@ try {
                     if ($config.transfer_mode -eq "Move") {
                         $moved = $item.Move($destFolder)
                         if ($null -ne $moved) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) | Out-Null } catch {}
                             $moved = $null
                         }
                     } else {
                         $copy = $item.Copy()
                         $moved = $copy.Move($destFolder)
                         if ($null -ne $moved) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) | Out-Null } catch {}
                             $moved = $null
                         }
-                        if ($null -ne $copy) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
-                            $copy = $null
-                        }
+                        $copy = $null
                     }
 
                     $script:totalImported++
                     $script:totalImportedBytes += $itemBytes
+                    $consecutiveThrottles = 0
 
                     if ($seenSet) {
                         [void]$seenSet.Add($cKey)
@@ -531,22 +529,22 @@ try {
                 $errStr = "$_"
                 $script:totalErrors++
                 if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
-                    $consecutiveThrottles = [math]::Min(10, $consecutiveThrottles + 1)
+                    $consecutiveThrottles = [math]::Min(4, $consecutiveThrottles + 1)
                 }
                 Record-ExecutionError "transfer_error" $relPath $subj $sender "Error al transferir correo: $errStr"
             } finally {
                 if ($null -ne $copy) {
-                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
                     $copy = $null
                 }
                 if ($null -ne $item) {
-                    try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) } catch {}
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
                     $item = $null
                 }
             }
 
             if ($config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                $throttleSleep = [math]::Min(1500, 100 * [math]::Pow(2, [math]::Min(4, $consecutiveThrottles)))
+                $throttleSleep = [math]::Min(250, 50 * [math]::Pow(2, [math]::Min(3, $consecutiveThrottles)))
                 Start-Sleep -Milliseconds $throttleSleep
             }
 

@@ -413,18 +413,19 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
             }
         }
 
-        # Fallback a iteración clásica únicamente si GetTable no estuvo disponible
+        # Fallback a iteracion clasica solo si GetTable no estuvo disponible
         if (-not $indexedWithTable) {
-            $maxInspect = if ($isOnline) { 100 } else { 1500 }
+            $maxInspect = if ($isOnline) { 50 } else { 500 }
             $items = $null
             try {
                 $items = $targetFolder.Items
-                $count = $items.Count
-                $limit = [math]::Min($count, $maxInspect)
-                for ($k = 1; $k -le $limit; $k++) {
-                    $existing = $null
+                $enum = $items.GetEnumerator()
+                $k = 0
+                while ($enum.MoveNext() -and $k -lt $maxInspect) {
+                    $k++
+                    $existing = $enum.Current
+                    if ($null -eq $existing) { continue }
                     try {
-                        $existing = $items.Item($k)
                         $mid = $null
                         if (-not $isOnline) {
                             try {
@@ -434,8 +435,8 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
                         if ($mid -and $mid.Trim() -ne "") {
                             [void]$seenSet.Add($mid.Trim())
                         }
-                        $subj = $existing.Subject
-                        $sender = $existing.SenderEmailAddress
+                        $subj = [string]$existing.Subject
+                        $sender = [string]$existing.SenderEmailAddress
                         $t = $null
                         try { $t = $existing.ReceivedTime } catch {}
                         if ($null -ne $t) {
@@ -444,9 +445,7 @@ function Index-TargetFolderItems($targetFolder, [System.Collections.Generic.Hash
                         }
                     } catch {}
                     finally {
-                        if ($null -ne $existing) {
-                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null } catch {}
-                        }
+                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($existing) | Out-Null } catch {}
                     }
                 }
             } catch {}
@@ -1148,31 +1147,26 @@ try {
                                     if ($config -and $config.transfer_mode -eq "Move") {
                                         $moved = $item.Move($finalDest)
                                         if ($null -ne $moved) {
-                                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) | Out-Null } catch {}
                                             $moved = $null
                                         }
                                     } else {
                                         $copy = $item.Copy()
                                         $moved = $copy.Move($finalDest)
                                         if ($null -ne $moved) {
-                                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) | Out-Null } catch {}
                                             $moved = $null
                                         }
-                                        if ($null -ne $copy) {
-                                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
-                                            $copy = $null
-                                        }
+                                        $copy = $null
                                     }
                                     $transferSuccess = $true
-                                    if ($consecutiveThrottles -gt 0) {
-                                        $consecutiveThrottles--
-                                    }
+                                    $consecutiveThrottles = 0
                                 } catch {
                                     $lastErr = $_
                                     $errStr = "$_"
                                     if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
-                                        $consecutiveThrottles = [math]::Min(6, $consecutiveThrottles + 1)
-                                        $backoffMs = [math]::Min(3000, 250 * [math]::Pow(2, $consecutiveThrottles))
+                                        $consecutiveThrottles = [math]::Min(4, $consecutiveThrottles + 1)
+                                        $backoffMs = [math]::Min(1200, 150 * [math]::Pow(2, $consecutiveThrottles))
                                         Log-Message "Aviso M365 (RPC Busy / Throttling en buzón en línea). Esperando ${backoffMs}ms antes de reintentar correo..." "WARN"
                                         Start-Sleep -Milliseconds $backoffMs
                                     }
@@ -1263,17 +1257,17 @@ try {
                         } catch {}
                     } finally {
                         if ($null -ne $copy) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
                             $copy = $null
                         }
                         if ($null -ne $item) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) } catch {}
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
                             $item = $null
                         }
                     }
 
                     if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                        $throttleSleep = [math]::Min(1500, 100 * [math]::Pow(2, [math]::Min(4, $consecutiveThrottles)))
+                        $throttleSleep = [math]::Min(250, 50 * [math]::Pow(2, [math]::Min(3, $consecutiveThrottles)))
                         Start-Sleep -Milliseconds $throttleSleep
                     }
 
@@ -1464,31 +1458,26 @@ try {
                                 if ($config -and $config.transfer_mode -eq "Move") {
                                     $moved = $item.Move($finalDest)
                                     if ($null -ne $moved) {
-                                        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) | Out-Null } catch {}
                                         $moved = $null
                                     }
                                 } else {
                                     $copy = $item.Copy()
                                     $moved = $copy.Move($finalDest)
                                     if ($null -ne $moved) {
-                                        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($moved) } catch {}
+                                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($moved) | Out-Null } catch {}
                                         $moved = $null
                                     }
-                                    if ($null -ne $copy) {
-                                        try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
-                                        $copy = $null
-                                    }
+                                    $copy = $null
                                 }
                                 $transferSuccess = $true
-                                if ($consecutiveThrottles -gt 0) {
-                                    $consecutiveThrottles--
-                                }
+                                $consecutiveThrottles = 0
                             } catch {
                                 $lastErr = $_
                                 $errStr = "$_"
                                 if ($errStr -match "0x8001010A|0x80040115|busy|throttle|retry|backoff|quota") {
-                                    $consecutiveThrottles = [math]::Min(6, $consecutiveThrottles + 1)
-                                    $backoffMs = [math]::Min(3000, 250 * [math]::Pow(2, $consecutiveThrottles))
+                                    $consecutiveThrottles = [math]::Min(4, $consecutiveThrottles + 1)
+                                    $backoffMs = [math]::Min(1200, 150 * [math]::Pow(2, $consecutiveThrottles))
                                     Log-Message "Aviso M365 (RPC Busy / Throttling en buzón en línea). Esperando ${backoffMs}ms antes de reintentar correo..." "WARN"
                                     Start-Sleep -Milliseconds $backoffMs
                                 }
@@ -1575,17 +1564,17 @@ try {
                         } catch {}
                     } finally {
                         if ($null -ne $copy) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($copy) } catch {}
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($copy) | Out-Null } catch {}
                             $copy = $null
                         }
                         if ($null -ne $item) {
-                            try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) } catch {}
+                            try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($item) | Out-Null } catch {}
                             $item = $null
                         }
                     }
 
                     if ($config -and $config.adaptive_throttling -and $consecutiveThrottles -gt 0) {
-                        $throttleSleep = [math]::Min(1500, 100 * [math]::Pow(2, [math]::Min(4, $consecutiveThrottles)))
+                        $throttleSleep = [math]::Min(250, 50 * [math]::Pow(2, [math]::Min(3, $consecutiveThrottles)))
                         Start-Sleep -Milliseconds $throttleSleep
                     }
 
