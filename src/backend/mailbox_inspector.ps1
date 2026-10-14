@@ -124,7 +124,21 @@ try {
         } catch { $subCount = 0 }
         $hasChildren = [bool]($subCount -gt 0)
 
-        $folderSizeBytes = 0
+        # 1. Obtención instantánea del tamaño de la carpeta vía MAPI PropertyAccessor (0 ms)
+        $folderSizeBytes = [int64]0
+        try {
+            $fPa = $folder.PropertyAccessor
+            if ($null -ne $fPa) {
+                try { $folderSizeBytes = [int64]$fPa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080014") } catch {}
+                if ($folderSizeBytes -le 0) {
+                    try { $folderSizeBytes = [int64]$fPa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x36E40014") } catch {}
+                }
+                if ($folderSizeBytes -le 0) {
+                    try { $folderSizeBytes = [int64]$fPa.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x0E080003") } catch {}
+                }
+            }
+        } catch {}
+
         $fCountsByYear = @{}
         $fCountsByMonth = @{}
         $fSizesByYear = @{}
@@ -132,9 +146,60 @@ try {
 
         if ($fCount -gt 0) {
             Emit-Progress $relPath $script:totalEmails
+            $script:totalEmails += $fCount
 
+            # 2. Límites temporales ultrarrápidos (Min y Max Date) mediante índice del servidor
+            $fMaxDate = $null
+            $fMinDate = $null
+
+            # Fecha más reciente (Top 1 descendente)
+            try {
+                $tblDesc = $folder.GetTable()
+                if ($null -ne $tblDesc) {
+                    try { $tblDesc.Columns.RemoveAll() } catch {}
+                    try { $tblDesc.Columns.Add("ReceivedTime") | Out-Null } catch {}
+                    try { $tblDesc.Sort("ReceivedTime", $true) | Out-Null } catch {}
+                    if (-not $tblDesc.EndOfTable) {
+                        $r = $tblDesc.GetRow()
+                        $rt = $r["ReceivedTime"]
+                        if ($rt -is [DateTime] -and $rt.Year -ge 1980 -and $rt.Year -le 2100) {
+                            $fMaxDate = $rt
+                            if ($null -eq $script:maxDate -or $rt -gt $script:maxDate) {
+                                $script:maxDate = $rt
+                            }
+                        }
+                    }
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tblDesc) | Out-Null } catch {}
+                }
+            } catch {}
+
+            # Fecha más antigua (Top 1 ascendente)
+            try {
+                $tblAsc = $folder.GetTable()
+                if ($null -ne $tblAsc) {
+                    try { $tblAsc.Columns.RemoveAll() } catch {}
+                    try { $tblAsc.Columns.Add("ReceivedTime") | Out-Null } catch {}
+                    try { $tblAsc.Sort("ReceivedTime", $false) | Out-Null } catch {}
+                    if (-not $tblAsc.EndOfTable) {
+                        $r = $tblAsc.GetRow()
+                        $rt = $r["ReceivedTime"]
+                        if ($rt -is [DateTime] -and $rt.Year -ge 1980 -and $rt.Year -le 2100) {
+                            $fMinDate = $rt
+                            if ($null -eq $script:minDate -or $rt -lt $script:minDate) {
+                                $script:minDate = $rt
+                            }
+                        }
+                    }
+                    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tblAsc) | Out-Null } catch {}
+                }
+            } catch {}
+
+            # 3. Muestreo ágil de distribución (máximo 300 ítems para no penalizar la red)
+            $sampleLimit = if ($fCount -gt 300) { 300 } else { $fCount }
             $tbl = $null
-            $tableSuccess = $false
+            $sampledCount = 0
+            $sampledBytes = [int64]0
+
             try {
                 $tbl = $folder.GetTable()
                 if ($null -ne $tbl) {
@@ -147,132 +212,118 @@ try {
                     try { $tbl.Columns.Add("Size") | Out-Null; $colSizeIdx = $tbl.Columns.Count - 1 } catch {}
                     try { $tbl.Columns.Add("SentOn") | Out-Null; $colSentIdx = $tbl.Columns.Count - 1 } catch {}
 
-                    $batchSize = 5000
-                    while (-not $tbl.EndOfTable) {
-                        $arr = $tbl.GetArray($batchSize)
-                        $bRows = $arr.GetLength(0)
-                        $bCols = $arr.GetLength(1)
-                        if ($bRows -eq 0) { break }
+                    if ($fCount -gt 300) {
+                        try { $tbl.Sort("ReceivedTime", $true) | Out-Null } catch {}
+                    }
 
-                        for ($i = 0; $i -lt $bRows; $i++) {
-                            $rTime = if ($colDateIdx -ge 0 -and $colDateIdx -lt $bCols) { $arr[$i, $colDateIdx] } else { $null }
-                            if (($null -eq $rTime -or -not ($rTime -is [DateTime]) -or $rTime.Year -lt 1980) -and $colSentIdx -ge 0 -and $colSentIdx -lt $bCols) {
-                                $rTime = $arr[$i, $colSentIdx]
+                    $arr = $tbl.GetArray($sampleLimit)
+                    $bRows = $arr.GetLength(0)
+                    $bCols = $arr.GetLength(1)
+
+                    for ($i = 0; $i -lt $bRows; $i++) {
+                        $rTime = if ($colDateIdx -ge 0 -and $colDateIdx -lt $bCols) { $arr[$i, $colDateIdx] } else { $null }
+                        if (($null -eq $rTime -or -not ($rTime -is [DateTime]) -or $rTime.Year -lt 1980) -and $colSentIdx -ge 0 -and $colSentIdx -lt $bCols) {
+                            $rTime = $arr[$i, $colSentIdx]
+                        }
+
+                        $sz = if ($colSizeIdx -ge 0 -and $colSizeIdx -lt $bCols) { $arr[$i, $colSizeIdx] } else { 0 }
+                        $numSz = [int64]0
+                        if ($sz) {
+                            try { $numSz = [int64]$sz } catch { $numSz = 0 }
+                        }
+                        $sampledBytes += $numSz
+                        $sampledCount++
+
+                        if ($null -ne $rTime -and ($rTime -is [DateTime]) -and $rTime.Year -ge 1980 -and $rTime.Year -le 2100) {
+                            $y = $rTime.Year
+                            $m = $rTime.Month
+                            $yKey = "$y"
+                            $ymKey = "{0}-{1:D2}" -f $y, $m
+
+                            $fCountsByYear[$yKey] = [int]($fCountsByYear[$yKey] + 1)
+                            $fCountsByMonth[$ymKey] = [int]($fCountsByMonth[$ymKey] + 1)
+                            $fSizesByYear[$yKey] = [int64]($fSizesByYear[$yKey] + $numSz)
+                            $fSizesByMonth[$ymKey] = [int64]($fSizesByMonth[$ymKey] + $numSz)
+
+                            if (-not $script:allYearsMap.ContainsKey($y)) {
+                                $script:allYearsMap[$y] = $true
                             }
-
-                            $sz = if ($colSizeIdx -ge 0 -and $colSizeIdx -lt $bCols) { $arr[$i, $colSizeIdx] } else { 0 }
-                            $numSz = [int64]0
-                            if ($sz) {
-                                try { $numSz = [int64]$sz } catch { $numSz = 0 }
+                            if (-not $script:allYearMonthsMap.ContainsKey($yKey)) {
+                                $script:allYearMonthsMap[$yKey] = @{}
                             }
-                            $folderSizeBytes += $numSz
+                            $script:allYearMonthsMap[$yKey][$m] = $true
 
-                            if ($null -ne $rTime -and ($rTime -is [DateTime]) -and $rTime.Year -ge 1980 -and $rTime.Year -le 2100) {
-                                $y = $rTime.Year
-                                $m = $rTime.Month
-                                $yKey = "$y"
-                                $ymKey = "{0}-{1:D2}" -f $y, $m
-
-                                $fCountsByYear[$yKey] = [int]($fCountsByYear[$yKey] + 1)
-                                $fCountsByMonth[$ymKey] = [int]($fCountsByMonth[$ymKey] + 1)
-                                $fSizesByYear[$yKey] = [int64]($fSizesByYear[$yKey] + $numSz)
-                                $fSizesByMonth[$ymKey] = [int64]($fSizesByMonth[$ymKey] + $numSz)
-
-                                $script:globalCountsByYear[$yKey] = [int]($script:globalCountsByYear[$yKey] + 1)
-                                $script:globalCountsByMonth[$ymKey] = [int]($script:globalCountsByMonth[$ymKey] + 1)
-                                $script:globalSizesByYear[$yKey] = [int64]($script:globalSizesByYear[$yKey] + $numSz)
-                                $script:globalSizesByMonth[$ymKey] = [int64]($script:globalSizesByMonth[$ymKey] + $numSz)
-
-                                if (-not $script:allYearsMap.ContainsKey($y)) {
-                                    $script:allYearsMap[$y] = $true
-                                }
-                                if (-not $script:allYearMonthsMap.ContainsKey($yKey)) {
-                                    $script:allYearMonthsMap[$yKey] = @{}
-                                }
-                                $script:allYearMonthsMap[$yKey][$m] = $true
-
-                                if ($null -eq $script:minDate -or $rTime -lt $script:minDate) {
-                                    $script:minDate = $rTime
-                                }
-                                if ($null -eq $script:maxDate -or $rTime -gt $script:maxDate) {
-                                    $script:maxDate = $rTime
-                                }
+                            if ($null -eq $script:minDate -or $rTime -lt $script:minDate) {
+                                $script:minDate = $rTime
                             }
-
-                            $script:totalEmails++
+                            if ($null -eq $script:maxDate -or $rTime -gt $script:maxDate) {
+                                $script:maxDate = $rTime
+                            }
                         }
                     }
-                    $tableSuccess = $true
                 }
-            } catch {
-                $tableSuccess = $false
-            } finally {
+            } catch {}
+            finally {
                 if ($null -ne $tbl) {
                     try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($tbl) | Out-Null } catch {}
                 }
             }
 
-            # Fallback seguro por si GetTable no estuvo disponible
-            if (-not $tableSuccess) {
-                $items = $null
-                try {
-                    $items = $folder.Items
-                    $itemCount = $items.Count
-                    for ($idx = 1; $idx -le $itemCount; $idx++) {
-                        $itm = $null
-                        try {
-                            $itm = $items.Item($idx)
-                            $rTime = $null
-                            try { $rTime = $itm.ReceivedTime } catch {}
-                            if ($null -eq $rTime) { try { $rTime = $itm.SentOn } catch {} }
+            # Si el tamaño de la carpeta no se pudo leer directamente de MAPI, estimarlo del muestreo
+            if ($folderSizeBytes -le 0) {
+                if ($sampledCount -gt 0 -and $sampledBytes -gt 0) {
+                    $avgItemSize = [double]$sampledBytes / [double]$sampledCount
+                    $folderSizeBytes = [int64]($avgItemSize * $fCount)
+                } else {
+                    $folderSizeBytes = [int64]($fCount * 50KB)
+                }
+            }
 
-                            $sz = 0
-                            try { $sz = [int64]$itm.Size } catch {}
-                            $folderSizeBytes += $sz
-
-                            if ($null -ne $rTime -and ($rTime -is [DateTime]) -and $rTime.Year -ge 1980 -and $rTime.Year -le 2100) {
-                                $y = $rTime.Year
-                                $m = $rTime.Month
-                                $yKey = "$y"
-                                $ymKey = "{0}-{1:D2}" -f $y, $m
-
-                                $fCountsByYear[$yKey] = [int]($fCountsByYear[$yKey] + 1)
-                                $fCountsByMonth[$ymKey] = [int]($fCountsByMonth[$ymKey] + 1)
-                                $fSizesByYear[$yKey] = [int64]($fSizesByYear[$yKey] + $sz)
-                                $fSizesByMonth[$ymKey] = [int64]($fSizesByMonth[$ymKey] + $sz)
-
-                                $script:globalCountsByYear[$yKey] = [int]($script:globalCountsByYear[$yKey] + 1)
-                                $script:globalCountsByMonth[$ymKey] = [int]($script:globalCountsByMonth[$ymKey] + 1)
-                                $script:globalSizesByYear[$yKey] = [int64]($script:globalSizesByYear[$yKey] + $sz)
-                                $script:globalSizesByMonth[$ymKey] = [int64]($script:globalSizesByMonth[$ymKey] + $sz)
-
-                                if (-not $script:allYearsMap.ContainsKey($y)) {
-                                    $script:allYearsMap[$y] = $true
-                                }
-                                if (-not $script:allYearMonthsMap.ContainsKey($yKey)) {
-                                    $script:allYearMonthsMap[$yKey] = @{}
-                                }
-                                $script:allYearMonthsMap[$yKey][$m] = $true
-
-                                if ($null -eq $script:minDate -or $rTime -lt $script:minDate) {
-                                    $script:minDate = $rTime
-                                }
-                                if ($null -eq $script:maxDate -or $rTime -gt $script:maxDate) {
-                                    $script:maxDate = $rTime
-                                }
-                            }
-                            $script:totalEmails++
-                        } catch {}
-                        finally {
-                            if ($null -ne $itm) {
-                                try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($itm) | Out-Null } catch {}
-                            }
+            # Si se muestreó de forma acotada, escalar proporcionalmente los conteos y tamaños
+            if ($fCount -gt $sampledCount -and $sampledCount -gt 0) {
+                $scaleFactor = [double]$fCount / [double]$sampledCount
+                foreach ($yKey in @($fCountsByYear.Keys)) {
+                    $fCountsByYear[$yKey] = [int][Math]::Round($fCountsByYear[$yKey] * $scaleFactor)
+                }
+                foreach ($ymKey in @($fCountsByMonth.Keys)) {
+                    $fCountsByMonth[$ymKey] = [int][Math]::Round($fCountsByMonth[$ymKey] * $scaleFactor)
+                }
+                if ($folderSizeBytes -gt 0) {
+                    $totalSampledSizes = [int64]0
+                    foreach ($yKey in $fSizesByYear.Keys) { $totalSampledSizes += $fSizesByYear[$yKey] }
+                    if ($totalSampledSizes -gt 0) {
+                        $sizeScale = [double]$folderSizeBytes / [double]$totalSampledSizes
+                        foreach ($yKey in @($fSizesByYear.Keys)) {
+                            $fSizesByYear[$yKey] = [int64][Math]::Round($fSizesByYear[$yKey] * $sizeScale)
+                        }
+                        foreach ($ymKey in @($fSizesByMonth.Keys)) {
+                            $fSizesByMonth[$ymKey] = [int64][Math]::Round($fSizesByMonth[$ymKey] * $sizeScale)
                         }
                     }
-                } catch {}
-                finally {
-                    if ($null -ne $items) {
-                        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($items) | Out-Null } catch {}
+                }
+            }
+
+            # Garantizar que todos los años y meses entre minDate y maxDate existan en el mapa de filtros
+            if ($fMinDate -and $fMaxDate -and $fMinDate.Year -le $fMaxDate.Year) {
+                for ($yr = $fMinDate.Year; $yr -le $fMaxDate.Year; $yr++) {
+                    $yStr = "$yr"
+                    if (-not $script:allYearsMap.ContainsKey($yr)) {
+                        $script:allYearsMap[$yr] = $true
+                    }
+                    if (-not $script:allYearMonthsMap.ContainsKey($yStr)) {
+                        $script:allYearMonthsMap[$yStr] = @{}
+                    }
+                    if (-not $fCountsByYear.ContainsKey($yStr)) {
+                        $fCountsByYear[$yStr] = 0
+                    }
+                    $startMonth = if ($yr -eq $fMinDate.Year) { $fMinDate.Month } else { 1 }
+                    $endMonth = if ($yr -eq $fMaxDate.Year) { $fMaxDate.Month } else { 12 }
+                    for ($mo = $startMonth; $mo -le $endMonth; $mo++) {
+                        $script:allYearMonthsMap[$yStr][$mo] = $true
+                        $ymStr = "{0}-{1:D2}" -f $yr, $mo
+                        if (-not $fCountsByMonth.ContainsKey($ymStr)) {
+                            $fCountsByMonth[$ymStr] = 0
+                        }
                     }
                 }
             }
@@ -316,14 +367,39 @@ try {
     $script:foldersList = New-Object 'System.Collections.Generic.List[hashtable]'
     $script:allYearsMap = @{}
     $script:allYearMonthsMap = @{}
+
+    foreach ($subF in $root.Folders) {
+        Inspect-Folder $subF ""
+        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($subF) | Out-Null } catch {}
+    }
+
+    # Consolidar conteos y tamaños globales sumando los totales escalados de las carpetas
     $script:globalCountsByYear = @{}
     $script:globalCountsByMonth = @{}
     $script:globalSizesByYear = @{}
     $script:globalSizesByMonth = @{}
 
-    foreach ($subF in $root.Folders) {
-        Inspect-Folder $subF ""
-        try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($subF) | Out-Null } catch {}
+    foreach ($f in $script:foldersList) {
+        if ($f.counts_by_year) {
+            foreach ($y in $f.counts_by_year.Keys) {
+                $script:globalCountsByYear[$y] = [int]($script:globalCountsByYear[$y] + $f.counts_by_year[$y])
+            }
+        }
+        if ($f.counts_by_month) {
+            foreach ($ym in $f.counts_by_month.Keys) {
+                $script:globalCountsByMonth[$ym] = [int]($script:globalCountsByMonth[$ym] + $f.counts_by_month[$ym])
+            }
+        }
+        if ($f.sizes_by_year_mb) {
+            foreach ($y in $f.sizes_by_year_mb.Keys) {
+                $script:globalSizesByYear[$y] = [double]($script:globalSizesByYear[$y] + $f.sizes_by_year_mb[$y])
+            }
+        }
+        if ($f.sizes_by_month_mb) {
+            foreach ($ym in $f.sizes_by_month_mb.Keys) {
+                $script:globalSizesByMonth[$ym] = [double]($script:globalSizesByMonth[$ym] + $f.sizes_by_month_mb[$ym])
+            }
+        }
     }
 
     # Ordenar años y estructurar meses
@@ -336,18 +412,18 @@ try {
 
     $globalSizesByYearRounded = @{}
     foreach ($k in $script:globalSizesByYear.Keys) {
-        $globalSizesByYearRounded[$k] = [math]::Round($script:globalSizesByYear[$k] / 1MB, 2)
+        $globalSizesByYearRounded[$k] = [math]::Round([double]$script:globalSizesByYear[$k], 2)
     }
 
     $globalSizesByMonthRounded = @{}
     foreach ($k in $script:globalSizesByMonth.Keys) {
-        $globalSizesByMonthRounded[$k] = [math]::Round($script:globalSizesByMonth[$k] / 1MB, 2)
+        $globalSizesByMonthRounded[$k] = [math]::Round([double]$script:globalSizesByMonth[$k], 2)
     }
 
     # Calcular peso total
     $totalMb = 0.0
-    foreach ($k in $globalSizesByYearRounded.Keys) {
-        $totalMb += [double]$globalSizesByYearRounded[$k]
+    foreach ($f in $script:foldersList) {
+        $totalMb += [double]$f.size_mb
     }
     $totalMb = [math]::Round($totalMb, 2)
 
@@ -358,7 +434,7 @@ try {
         total_items       = $script:totalEmails
         first_email_date  = if ($script:minDate) { $script:minDate.ToString("yyyy-MM-dd HH:mm:ss") } else { $null }
         last_email_date   = if ($script:maxDate) { $script:maxDate.ToString("yyyy-MM-dd HH:mm:ss") } else { $null }
-        folders           = @($foldersList)
+        folders           = @($script:foldersList)
         years             = $sortedYears
         year_months       = $finalYearMonths
         counts_by_year    = $script:globalCountsByYear
