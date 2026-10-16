@@ -35,29 +35,29 @@ pub enum WizardStep {
 impl WizardStep {
     pub fn title(&self) -> &'static str {
         match self {
-            WizardStep::Welcome => "Main Menu",
-            WizardStep::FileExplorer => "PST File Explorer",
-            WizardStep::PstSource => "PST Source Selection",
-            WizardStep::Mailbox => "Destination Mailbox Selection",
-            WizardStep::FoldersMode => "Folders & Transfer Mode",
-            WizardStep::Routing => "Routing & Date Organization",
-            WizardStep::Deduplication => "Deduplication & Deep Scan",
-            WizardStep::Filters => "Date Filters & Throttling",
-            WizardStep::Summary => "Pre-Flight Summary & Confirmation",
-            WizardStep::Execution => "Real-Time Processing",
-            WizardStep::Completion => "Operation Complete & Reports",
-            WizardStep::PstDetailView => "PST Analytical Details",
-            WizardStep::SplitSelect => "Split PST: Source File Selection",
-            WizardStep::SplitFilter => "Split PST: Date & Folder Filter",
-            WizardStep::SplitConfig => "Split PST: Output Configuration",
-            WizardStep::SplitSummary => "Split PST: Pre-Flight Summary",
-            WizardStep::SplitExecution => "Split PST: Processing & Splitting",
-            WizardStep::SplitCompletion => "Split PST: Operation Complete",
-            WizardStep::TransferSelect => "Mailbox Transfer: Source & Target Selection",
-            WizardStep::TransferFilter => "Mailbox Transfer: Date & Folder Filters",
-            WizardStep::TransferSummary => "Mailbox Transfer: Pre-Flight Summary",
-            WizardStep::TransferExecution => "Mailbox Transfer: Processing & Sync",
-            WizardStep::TransferCompletion => "Mailbox Transfer: Operation Complete",
+            WizardStep::Welcome => "Menú Principal",
+            WizardStep::FileExplorer => "Explorador de Archivos PST",
+            WizardStep::PstSource => "Selección de Archivos PST",
+            WizardStep::Mailbox => "Selección de Buzón Destino",
+            WizardStep::FoldersMode => "Carpetas y Modo de Transferencia",
+            WizardStep::Routing => "Enrutamiento y Organización Temporal",
+            WizardStep::Deduplication => "Deduplicación y Revisión Profunda",
+            WizardStep::Filters => "Filtros de Fecha y Throttling",
+            WizardStep::Summary => "Resumen Previo y Confirmación",
+            WizardStep::Execution => "Procesamiento en Tiempo Real",
+            WizardStep::Completion => "Operación Completada y Reportes",
+            WizardStep::PstDetailView => "Detalles Analíticos del PST",
+            WizardStep::SplitSelect => "Dividir PST: Selección de Archivo Origen",
+            WizardStep::SplitFilter => "Dividir PST: Filtros de Fecha y Carpetas",
+            WizardStep::SplitConfig => "Dividir PST: Configuración de Partición",
+            WizardStep::SplitSummary => "Dividir PST: Resumen Previo",
+            WizardStep::SplitExecution => "Dividir PST: Procesamiento y División",
+            WizardStep::SplitCompletion => "Dividir PST: Operación Completada",
+            WizardStep::TransferSelect => "Transferir Buzón: Selección de Origen y Destino",
+            WizardStep::TransferFilter => "Transferir Buzón: Filtros de Fecha y Carpetas",
+            WizardStep::TransferSummary => "Transferir Buzón: Resumen Previo",
+            WizardStep::TransferExecution => "Transferir Buzón: Procesamiento y Sincronización",
+            WizardStep::TransferCompletion => "Transferir Buzón: Operación Completada",
         }
     }
 
@@ -69,12 +69,12 @@ impl WizardStep {
             WizardStep::PstDetailView => 1,
             WizardStep::Mailbox => 2,
             WizardStep::FoldersMode => 3,
-            WizardStep::Routing => 4,
-            WizardStep::Deduplication => 5,
-            WizardStep::Filters => 6,
-            WizardStep::Summary => 7,
-            WizardStep::Execution => 7,
-            WizardStep::Completion => 7,
+            WizardStep::Routing => 3,
+            WizardStep::Deduplication => 3,
+            WizardStep::Filters => 3,
+            WizardStep::Summary => 4,
+            WizardStep::Execution => 4,
+            WizardStep::Completion => 4,
             WizardStep::SplitSelect => 1,
             WizardStep::SplitFilter => 2,
             WizardStep::SplitConfig => 3,
@@ -90,20 +90,7 @@ impl WizardStep {
     }
 
     pub fn total_steps(&self) -> usize {
-        match self {
-            WizardStep::SplitSelect
-            | WizardStep::SplitFilter
-            | WizardStep::SplitConfig
-            | WizardStep::SplitSummary
-            | WizardStep::SplitExecution
-            | WizardStep::SplitCompletion
-            | WizardStep::TransferSelect
-            | WizardStep::TransferFilter
-            | WizardStep::TransferSummary
-            | WizardStep::TransferExecution
-            | WizardStep::TransferCompletion => 4,
-            _ => 7,
-        }
+        4
     }
 }
 
@@ -1589,7 +1576,9 @@ pub struct AppState {
     pub routing_all_months: bool,
     pub active_routing_modal: RoutingModal,
     pub routing_modal_criterion_idx: usize,
+    #[allow(dead_code)]
     pub routing_modal_year_scope_idx: usize,
+    #[allow(dead_code)]
     pub routing_modal_month_scope_idx: usize,
     pub routing_modal_year_cursor: usize,
     pub routing_modal_month_cursor: usize,
@@ -2604,14 +2593,7 @@ impl AppState {
             WizardStep::FoldersMode => {
                 self.sync_legacy_folder_flags();
                 self.active_routing_modal = RoutingModal::None;
-                self.routing_modal_criterion_idx = match self.routing_granularity {
-                    RoutingGranularity::Mirror => 0,
-                    RoutingGranularity::Years => 1,
-                    RoutingGranularity::YearsAndMonths => 2,
-                };
-                self.routing_modal_year_scope_idx = 0;
-                self.routing_modal_month_scope_idx = 0;
-                WizardStep::Routing
+                WizardStep::Summary
             }
             WizardStep::Routing => {
                 self.active_routing_modal = RoutingModal::None;
@@ -2659,7 +2641,7 @@ impl AppState {
                 WizardStep::Routing
             }
             WizardStep::Filters => WizardStep::Deduplication,
-            WizardStep::Summary => WizardStep::Filters,
+            WizardStep::Summary => WizardStep::FoldersMode,
             WizardStep::Execution => WizardStep::Summary,
             WizardStep::Completion => WizardStep::Summary,
             // Pasos de Separar PSTs
@@ -3225,7 +3207,7 @@ mod tests {
         let mut state = AppState::new();
         state.step = WizardStep::FoldersMode;
         state.next_step();
-        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.step, WizardStep::Summary);
         assert_eq!(state.active_routing_modal, RoutingModal::None);
 
         // Seleccionar granularidad de Meses (Años y Meses)
@@ -3306,7 +3288,7 @@ mod tests {
 
         state.step = WizardStep::FoldersMode;
         state.next_step();
-        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.step, WizardStep::Summary);
         assert_eq!(state.active_routing_modal, RoutingModal::None);
         assert_eq!(state.routing_modal_criterion_idx, 0);
 
@@ -3364,7 +3346,7 @@ mod tests {
         let mut state = AppState::new();
         state.step = WizardStep::FoldersMode;
         state.next_step();
-        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.step, WizardStep::Summary);
         assert_eq!(state.active_routing_modal, RoutingModal::None);
 
         // Por defecto: Mirror (Estructura Original)

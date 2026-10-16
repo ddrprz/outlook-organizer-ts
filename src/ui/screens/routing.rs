@@ -527,7 +527,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     }
 }
 
-fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
+pub fn render_routing_modal(f: &mut Frame, area: Rect, state: &AppState) {
     let modal_width = 82.min(area.width.saturating_sub(4));
     let modal_height = 20.min(area.height.saturating_sub(2));
 
