@@ -25,19 +25,23 @@ pub struct AuditReport {
     pub errors: Vec<crate::app::ExecutionErrorDetail>,
 }
 
+/// Verifica si la aplicación se ejecuta en modo producción (.exe release)
+pub fn is_release_environment() -> bool {
+    if cfg!(debug_assertions) {
+        return false;
+    }
+    if let Ok(current_exe) = env::current_exe() {
+        let path_str = current_exe.to_string_lossy().to_lowercase();
+        !path_str.contains("target/debug") && !path_str.contains(r"target\debug")
+    } else {
+        true
+    }
+}
+
 /// Genera automáticamente la auditoría JSON según las directrices:
 /// IMPORTANTE: Solo se genera de forma automática si la aplicación se ejecuta como .exe de producción
 pub fn generate_audit_json(state: &AppState, status: &str) -> Result<Option<PathBuf>, std::io::Error> {
-    // 1. Verificar si estamos corriendo en producción (.exe empaquetado) o si está forzado
-    let is_release_exe = if let Ok(current_exe) = env::current_exe() {
-        let path_str = current_exe.to_string_lossy().to_lowercase();
-        // Si el ejecutable no está dentro de target\debug
-        !path_str.contains(r"target\debug")
-    } else {
-        false
-    };
-
-    if !is_release_exe {
+    if !is_release_environment() {
         // En modo cargo run / debug no se genera automáticamente para no ensuciar
         return Ok(None);
     }
@@ -130,14 +134,7 @@ pub struct TransferAuditReport {
 }
 
 pub fn generate_transfer_audit_json(state: &AppState, status: &str) -> Result<Option<PathBuf>, std::io::Error> {
-    let is_release_exe = if let Ok(current_exe) = env::current_exe() {
-        let path_str = current_exe.to_string_lossy().to_lowercase();
-        !path_str.contains(r"target\debug")
-    } else {
-        false
-    };
-
-    if !is_release_exe {
+    if !is_release_environment() {
         return Ok(None);
     }
 
@@ -298,6 +295,12 @@ mod tests {
         assert!(json_str.contains("Archivo Historico"));
         assert!(json_str.contains("2023"));
         assert!(json_str.contains("250"));
+    }
+
+    #[test]
+    fn test_is_release_environment_in_tests() {
+        // In debug/test build, debug_assertions is always enabled
+        assert!(!is_release_environment(), "Should be false in debug/test mode");
     }
 }
 

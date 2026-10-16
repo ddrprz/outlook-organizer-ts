@@ -12,13 +12,23 @@ use crate::{
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
+    let has_warning = state.summary_warning_notice.is_some();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Guía superior
-            Constraint::Min(12),   // Cuerpo (Resumen de parámetros + Previsualización de archivos)
-            Constraint::Length(4), // Botones de confirmación
-        ])
+        .constraints(if has_warning {
+            vec![
+                Constraint::Length(3), // Guía superior
+                Constraint::Min(11),   // Cuerpo (Resumen de parámetros + Previsualización de archivos)
+                Constraint::Length(3), // Banner de Advertencia de Bloqueo
+                Constraint::Length(4), // Botones de confirmación
+            ]
+        } else {
+            vec![
+                Constraint::Length(3), // Guía superior
+                Constraint::Min(12),   // Cuerpo (Resumen de parámetros + Previsualización de archivos)
+                Constraint::Length(4), // Botones de confirmación
+            ]
+        })
         .split(area);
 
     // 1. Guía superior
@@ -168,6 +178,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .title(format!(" Output Preview ({}) ", predicted_files.len()));
     f.render_widget(Paragraph::new(files_lines).block(files_block), body_chunks[1]);
 
+    let btn_idx = if has_warning {
+        if let Some(ref notice) = state.summary_warning_notice {
+            let warn_p = Paragraph::new(Line::from(vec![
+                Span::styled("▲  ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
+                Span::styled(notice.as_str(), Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
+            ]))
+            .alignment(Alignment::Center);
+            f.render_widget(warn_p, chunks[2]);
+        }
+        3
+    } else {
+        2
+    };
+
     // 3. Botones de confirmación
     let btn_lines = vec![
         Line::from(""),
@@ -177,5 +201,5 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("  [ ESC: BACK ]  ", Style::default().bg(Theme::SURFACE).fg(Theme::TEXT_MUTED)),
         ]),
     ];
-    f.render_widget(Paragraph::new(btn_lines).alignment(Alignment::Center), chunks[2]);
+    f.render_widget(Paragraph::new(btn_lines).alignment(Alignment::Center), chunks[btn_idx]);
 }

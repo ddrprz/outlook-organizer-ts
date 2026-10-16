@@ -455,9 +455,6 @@ finally {
     if ($targetStore) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($targetStore) | Out-Null } catch {}
     }
-    if ($weStartedOutlook -and $null -ne $outlook) {
-        try { $outlook.Quit() } catch {}
-    }
     if ($null -ne $namespace) {
         try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($namespace) | Out-Null } catch {}
         $namespace = $null

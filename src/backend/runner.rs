@@ -86,15 +86,34 @@ fn configure_worker_command(cmd: &mut Command) {
 fn configure_worker_command(_cmd: &mut Command) {}
 
 impl BackendRunner {
+    /// Retorna el directorio temporal aislado para la sesión actual del proceso, evitando colisiones
+    pub fn get_session_temp_dir() -> PathBuf {
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("outlook_organizer_{}", pid));
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
+
+    /// Escribe el script de PowerShell en el directorio de sesión si aún no existe (evita escrituras redundantes)
+    fn ensure_script_written(name: &str, content: &str) -> Result<PathBuf, std::io::Error> {
+        let session_dir = Self::get_session_temp_dir();
+        let script_path = session_dir.join(name);
+        if !script_path.exists() {
+            let clean_content = content.trim_start_matches('\u{feff}');
+            fs::write(&script_path, format!("\u{feff}{clean_content}"))?;
+        }
+        Ok(script_path)
+    }
+
     pub fn spawn_worker(
         config: &WorkerConfig,
         tx: UnboundedSender<BackendMessage>,
     ) -> Result<(tokio::process::Child, PathBuf, PathBuf), std::io::Error> {
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("outlook_organizer_worker.ps1");
-        let config_path = temp_dir.join("outlook_organizer_config.json");
-        let abort_path = temp_dir.join("outlook_organizer_abort.flag");
-        let pause_path = temp_dir.join("outlook_organizer_pause.flag");
+        let session_dir = Self::get_session_temp_dir();
+        let script_path = Self::ensure_script_written("outlook_organizer_worker.ps1", include_str!("worker.ps1"))?;
+        let config_path = session_dir.join("outlook_organizer_config.json");
+        let abort_path = session_dir.join("outlook_organizer_abort.flag");
+        let pause_path = session_dir.join("outlook_organizer_pause.flag");
 
         // Limpiar bandera previa de cancelación e historial previo de items
         if abort_path.exists() {
@@ -103,18 +122,14 @@ impl BackendRunner {
         if pause_path.exists() {
             let _ = fs::remove_file(&pause_path);
         }
-        let items_path = temp_dir.join("outlook_organizer_items.json");
+        let items_path = session_dir.join("outlook_organizer_items.json");
         if items_path.exists() {
             let _ = fs::remove_file(&items_path);
         }
-        let errors_path = temp_dir.join("outlook_organizer_errors.json");
+        let errors_path = session_dir.join("outlook_organizer_errors.json");
         if errors_path.exists() {
             let _ = fs::remove_file(&errors_path);
         }
-
-        // Escribir script y archivo de configuración JSON con exactamente un BOM UTF-8 para PowerShell 5.1
-        let script_content = include_str!("worker.ps1").trim_start_matches('\u{feff}');
-        fs::write(&script_path, format!("\u{feff}{script_content}"))?;
 
         let config_json = serde_json::to_string_pretty(config)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -206,11 +221,11 @@ impl BackendRunner {
         config: &SplitWorkerConfig,
         tx: UnboundedSender<BackendMessage>,
     ) -> Result<(tokio::process::Child, PathBuf, PathBuf), std::io::Error> {
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("outlook_organizer_split_worker.ps1");
-        let config_path = temp_dir.join("outlook_organizer_split_config.json");
-        let abort_path = temp_dir.join("outlook_organizer_split_abort.flag");
-        let pause_path = temp_dir.join("outlook_organizer_split_pause.flag");
+        let session_dir = Self::get_session_temp_dir();
+        let script_path = Self::ensure_script_written("outlook_organizer_split_worker.ps1", include_str!("split_worker.ps1"))?;
+        let config_path = session_dir.join("outlook_organizer_split_config.json");
+        let abort_path = session_dir.join("outlook_organizer_split_abort.flag");
+        let pause_path = session_dir.join("outlook_organizer_split_pause.flag");
 
         if abort_path.exists() {
             let _ = fs::remove_file(&abort_path);
@@ -218,9 +233,6 @@ impl BackendRunner {
         if pause_path.exists() {
             let _ = fs::remove_file(&pause_path);
         }
-
-        let script_content = include_str!("split_worker.ps1").trim_start_matches('\u{feff}');
-        fs::write(&script_path, format!("\u{feff}{script_content}"))?;
 
         let config_json = serde_json::to_string_pretty(config)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -310,11 +322,11 @@ impl BackendRunner {
         config: &TransferWorkerConfig,
         tx: UnboundedSender<BackendMessage>,
     ) -> Result<(tokio::process::Child, PathBuf, PathBuf), std::io::Error> {
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("outlook_organizer_transfer_worker.ps1");
-        let config_path = temp_dir.join("outlook_organizer_transfer_config.json");
-        let abort_path = temp_dir.join("outlook_organizer_transfer_abort.flag");
-        let pause_path = temp_dir.join("outlook_organizer_transfer_pause.flag");
+        let session_dir = Self::get_session_temp_dir();
+        let script_path = Self::ensure_script_written("outlook_organizer_transfer_worker.ps1", include_str!("transfer_worker.ps1"))?;
+        let config_path = session_dir.join("outlook_organizer_transfer_config.json");
+        let abort_path = session_dir.join("outlook_organizer_transfer_abort.flag");
+        let pause_path = session_dir.join("outlook_organizer_transfer_pause.flag");
 
         if abort_path.exists() {
             let _ = fs::remove_file(&abort_path);
@@ -322,17 +334,14 @@ impl BackendRunner {
         if pause_path.exists() {
             let _ = fs::remove_file(&pause_path);
         }
-        let items_path = temp_dir.join("outlook_organizer_transfer_items.json");
+        let items_path = session_dir.join("outlook_organizer_transfer_items.json");
         if items_path.exists() {
             let _ = fs::remove_file(&items_path);
         }
-        let errors_path = temp_dir.join("outlook_organizer_transfer_errors.json");
+        let errors_path = session_dir.join("outlook_organizer_transfer_errors.json");
         if errors_path.exists() {
             let _ = fs::remove_file(&errors_path);
         }
-
-        let script_content = include_str!("transfer_worker.ps1").trim_start_matches('\u{feff}');
-        fs::write(&script_path, format!("\u{feff}{script_content}"))?;
 
         let config_json = serde_json::to_string_pretty(config)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -420,10 +429,8 @@ impl BackendRunner {
 
     /// Obtiene de forma asíncrona la lista de buzones configurados en Outlook MAPI
     pub async fn fetch_outlook_mailboxes(profile: Option<&str>) -> Vec<crate::app::MailboxItem> {
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("outlook_organizer_discovery.ps1");
-        let script_content = include_str!("mailbox_discovery.ps1").trim_start_matches('\u{feff}');
-        let _ = fs::write(&script_path, format!("\u{feff}{script_content}"));
+        let script_path = Self::ensure_script_written("outlook_organizer_discovery.ps1", include_str!("mailbox_discovery.ps1"))
+            .unwrap_or_else(|_| Self::get_session_temp_dir().join("outlook_organizer_discovery.ps1"));
 
         let mut cmd = Command::new("powershell");
         configure_worker_command(&mut cmd);
@@ -513,10 +520,8 @@ impl BackendRunner {
         profile: Option<&str>,
         tx: Option<&UnboundedSender<BackendMessage>>,
     ) -> Result<crate::app::PstDetail, String> {
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("outlook_organizer_inspector.ps1");
-        let script_content = include_str!("pst_inspector.ps1").trim_start_matches('\u{feff}');
-        let _ = fs::write(&script_path, format!("\u{feff}{script_content}"));
+        let script_path = Self::ensure_script_written("outlook_organizer_inspector.ps1", include_str!("pst_inspector.ps1"))
+            .map_err(|e| format!("No se pudo escribir script de inspección: {}", e))?;
 
         let mut cmd = Command::new("powershell");
         configure_worker_command(&mut cmd);
@@ -625,10 +630,8 @@ impl BackendRunner {
         profile: Option<&str>,
         tx: Option<&UnboundedSender<BackendMessage>>,
     ) -> Result<crate::app::PstDetail, String> {
-        let temp_dir = std::env::temp_dir();
-        let script_path = temp_dir.join("outlook_organizer_mailbox_inspector.ps1");
-        let script_content = include_str!("mailbox_inspector.ps1").trim_start_matches('\u{feff}');
-        let _ = fs::write(&script_path, format!("\u{feff}{script_content}"));
+        let script_path = Self::ensure_script_written("outlook_organizer_mailbox_inspector.ps1", include_str!("mailbox_inspector.ps1"))
+            .map_err(|e| format!("No se pudo escribir script de inspección de buzón: {}", e))?;
 
         let mut cmd = Command::new("powershell");
         configure_worker_command(&mut cmd);
@@ -733,5 +736,25 @@ mod tests {
                 assert!(!path.to_lowercase().ends_with(".pst"));
             }
         }
+    }
+
+    #[test]
+    fn test_session_temp_dir_creation() {
+        let dir = BackendRunner::get_session_temp_dir();
+        assert!(dir.exists(), "Session temp dir should exist");
+        let pid_str = std::process::id().to_string();
+        assert!(dir.to_string_lossy().contains(&pid_str), "Session temp dir should contain process PID");
+    }
+
+    #[test]
+    fn test_ensure_script_written() {
+        let script_name = "test_script.ps1";
+        let content = "Write-Output 'Hello'";
+        let path = BackendRunner::ensure_script_written(script_name, content).expect("Writing script should succeed");
+        assert!(path.exists());
+        let read = fs::read_to_string(&path).expect("Reading script should succeed");
+        assert!(read.starts_with('\u{feff}'), "Should start with UTF-8 BOM");
+        assert!(read.contains("Write-Output 'Hello'"));
+        let _ = fs::remove_file(path);
     }
 }

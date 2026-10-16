@@ -36,6 +36,16 @@ use ui::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Hook de pánico para restaurar la terminal limpia en caso de error imprevisto
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, LeaveAlternateScreen);
+        let _ = execute!(stdout, crossterm::cursor::Show);
+        original_hook(panic_info);
+    }));
+
     // Modo Raw y Terminal Alternativa
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -245,8 +255,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Disparar inspección en segundo plano para cualquier PST seleccionado que no tenga detalles cargados
-        for pst in state.selected_uninspected_psts() {
+        // Disparar inspección en segundo plano para cualquier PST seleccionado que no tenga detalles cargados (en cola secuencial para no saturar MAPI)
+        if state.inspecting_psts.is_empty()
+            && let Some(pst) = state.selected_uninspected_psts().into_iter().next()
+        {
             state.inspecting_psts.insert(pst.path.clone());
             let profile = if state.use_default_profile {
                 None
@@ -257,7 +269,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Disparar inspección para los archivos PST marcados/seleccionados para separar si aún no están analizados
-        if state.step == WizardStep::SplitSelect || state.step == WizardStep::SplitFilter {
+        if (state.step == WizardStep::SplitSelect || state.step == WizardStep::SplitFilter)
+            && state.inspecting_psts.is_empty()
+        {
             let psts_to_inspect: Vec<crate::app::PstItem> = if !state.split.source_psts.is_empty() {
                 state.split.source_psts.clone()
             } else if let Some(ref src) = state.split.source_pst {
@@ -279,6 +293,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Some(state.custom_profile_name.clone())
                     };
                     BackendRunner::trigger_pst_inspection(pst.path, pst.name, profile, tx.clone());
+                    break; // Solo uno a la vez para evitar contención COM
                 }
             }
         }
@@ -974,6 +989,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 WizardStep::Summary => match key.code {
                     KeyCode::Enter => {
+                        // Pre-flight check: Validar bloqueos de archivos en PSTs antes de iniciar
+                        let locked = state.check_selected_pst_file_locks();
+                        if !locked.is_empty() {
+                            state.summary_warning_notice = Some(format!(
+                                "Bloqueo detectado: {} en uso por Outlook u otro proceso. Cierre la aplicación antes de iniciar.",
+                                locked.join(", ")
+                            ));
+                            state.log_event(format!(
+                                "[LOCK ERROR] No se puede iniciar la migración: {} archivo(s) bloqueado(s)",
+                                locked.len()
+                            ));
+                            continue;
+                        }
+                        state.summary_warning_notice = None;
+
                         let selected_pst_paths: Vec<String> = state
                             .discovered_psts
                             .iter()
@@ -1072,7 +1102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
-                    KeyCode::Esc | KeyCode::Backspace => state.prev_step(),
+                    KeyCode::Esc | KeyCode::Backspace => {
+                        state.summary_warning_notice = None;
+                        state.prev_step();
+                    }
                     KeyCode::Char('q') | KeyCode::Char('Q') => state.should_quit = true,
                     _ => {}
                 },
@@ -1381,6 +1414,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 WizardStep::SplitSummary => match key.code {
                     KeyCode::Enter => {
+                        let locked = state.check_split_pst_file_locks();
+                        if !locked.is_empty() {
+                            state.summary_warning_notice = Some(format!(
+                                "Bloqueo detectado: {} en uso por Outlook u otro proceso. Cierre la aplicación antes de iniciar.",
+                                locked.join(", ")
+                            ));
+                            state.log_event(format!(
+                                "[LOCK ERROR] No se puede iniciar la separación: {} archivo(s) bloqueado(s)",
+                                locked.len()
+                            ));
+                            continue;
+                        }
+                        state.summary_warning_notice = None;
                         state.progress.reset();
                         state.progress.current_pst_name = "Iniciando partición...".to_string();
                         state.log_event("[SPLIT] Iniciando partición de archivo PST...".to_string());
@@ -1429,6 +1475,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     KeyCode::Esc | KeyCode::Backspace => {
+                        state.summary_warning_notice = None;
                         state.prev_step();
                     }
                     _ => {}
@@ -1840,6 +1887,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Esperar hasta 5 segundos a que PowerShell desmonte limpiamente los PSTs
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
     }
+
+    // Limpieza de archivos temporales de la sesión actual
+    let session_dir = BackendRunner::get_session_temp_dir();
+    let _ = std::fs::remove_dir_all(&session_dir);
 
     // Restauración limpia de la terminal
     disable_raw_mode()?;

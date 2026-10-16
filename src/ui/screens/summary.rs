@@ -12,12 +12,21 @@ use crate::{
 };
 
 pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
+    let has_warning = state.summary_warning_notice.is_some();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(13),   // Tarjeta Resumen Consolidado
-            Constraint::Length(4), // Botones de Confirmación
-        ])
+        .constraints(if has_warning {
+            vec![
+                Constraint::Min(11),   // Tarjeta Resumen Consolidado
+                Constraint::Length(3), // Banner de Advertencia de Bloqueo
+                Constraint::Length(4), // Botones de Confirmación
+            ]
+        } else {
+            vec![
+                Constraint::Min(13),   // Tarjeta Resumen Consolidado
+                Constraint::Length(4), // Botones de Confirmación
+            ]
+        })
         .split(area);
 
     // 1. Resumen Consolidado
@@ -175,6 +184,20 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(Paragraph::new(summary_lines), summary_inner);
 
 
+    let button_idx = if has_warning {
+        if let Some(ref notice) = state.summary_warning_notice {
+            let warn_p = Paragraph::new(Line::from(vec![
+                Span::styled("▲  ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
+                Span::styled(notice.as_str(), Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
+            ]))
+            .alignment(Alignment::Center);
+            f.render_widget(warn_p, chunks[1]);
+        }
+        2
+    } else {
+        1
+    };
+
     // 2. Botones de Confirmación
     let confirm_lines = vec![
         Line::from(vec![
@@ -183,5 +206,5 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Span::styled("  [ ESC: GO BACK ]  ", Style::default().bg(Theme::BG_CARD).fg(Theme::TEXT_MAIN)),
         ]),
     ];
-    f.render_widget(Paragraph::new(confirm_lines).alignment(Alignment::Center), chunks[1]);
+    f.render_widget(Paragraph::new(confirm_lines).alignment(Alignment::Center), chunks[button_idx]);
 }

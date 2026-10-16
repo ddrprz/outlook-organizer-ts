@@ -1646,7 +1646,8 @@ try {
     }
 
     # Guardar reporte de elementos procesados y registro de errores en archivos temporales JSON para el informe interactivo HTML y auditoría
-    $itemsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_items.json"
+    $baseDir = if ($ConfigFile -and (Test-Path $ConfigFile)) { [System.IO.Path]::GetDirectoryName($ConfigFile) } else { [System.IO.Path]::GetTempPath() }
+    $itemsTempFile = Join-Path $baseDir "outlook_organizer_items.json"
     try {
         $itemsJson = if ($processedItemsList.Count -eq 0) {
             "[]"
@@ -1661,7 +1662,7 @@ try {
         Log-Message "Aviso al escribir historial temporal de correos: $_" "WARN"
     }
 
-    $errorsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_errors.json"
+    $errorsTempFile = Join-Path $baseDir "outlook_organizer_errors.json"
     try {
         $errorsJson = if ($errorsList.Count -eq 0) {
             "[]"

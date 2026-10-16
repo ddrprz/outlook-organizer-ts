@@ -559,13 +559,14 @@ try {
     }
 
     # Guardar bitácora temporal JSON de elementos procesados y errores
-    $itemsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_transfer_items.json"
+    $baseDir = if ($ConfigFile -and (Test-Path $ConfigFile)) { [System.IO.Path]::GetDirectoryName($ConfigFile) } else { [System.IO.Path]::GetTempPath() }
+    $itemsTempFile = Join-Path $baseDir "outlook_organizer_transfer_items.json"
     try {
         $itemsJson = if ($processedItemsList.Count -eq 0) { "[]" } else { $processedItemsList | ConvertTo-Json -Depth 4 -Compress }
         [System.IO.File]::WriteAllText($itemsTempFile, $itemsJson, [System.Text.Encoding]::UTF8)
     } catch {}
 
-    $errorsTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "outlook_organizer_transfer_errors.json"
+    $errorsTempFile = Join-Path $baseDir "outlook_organizer_transfer_errors.json"
     try {
         $errorsJson = if ($errorsList.Count -eq 0) { "[]" } else { $errorsList | ConvertTo-Json -Depth 4 -Compress }
         [System.IO.File]::WriteAllText($errorsTempFile, $errorsJson, [System.Text.Encoding]::UTF8)

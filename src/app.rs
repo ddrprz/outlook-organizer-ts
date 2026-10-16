@@ -1635,6 +1635,9 @@ pub struct AppState {
 
     // Archivo de señal de pausa reactiva
     pub pause_file: Option<PathBuf>,
+
+    // Aviso de advertencia o bloqueo en pantalla de confirmación / resumen
+    pub summary_warning_notice: Option<String>,
 }
 
 pub fn default_fallback_mailboxes() -> Vec<MailboxItem> {
@@ -1720,7 +1723,53 @@ impl AppState {
             split: SplitPstState::default(),
             transfer: TransferState::default(),
             pause_file: None,
+            summary_warning_notice: None,
         }
+    }
+
+    /// Valida si alguno de los archivos PST seleccionados para importar está bloqueado por otro proceso
+    pub fn check_selected_pst_file_locks(&self) -> Vec<String> {
+        let psts = self.selected_psts();
+        let paths: Vec<String> = psts.into_iter().map(|p| p.path.clone()).collect();
+        Self::check_file_locks(&paths, self.transfer_mode)
+    }
+
+    /// Valida si los archivos PST seleccionados para separación están bloqueados por otro proceso
+    pub fn check_split_pst_file_locks(&self) -> Vec<String> {
+        let paths: Vec<String> = if !self.split.source_psts.is_empty() {
+            self.split.source_psts.iter().map(|p| p.path.clone()).collect()
+        } else if let Some(ref p) = self.split.source_pst {
+            vec![p.path.clone()]
+        } else {
+            Vec::new()
+        };
+        let mode = match self.split.transfer_mode {
+            SplitTransferMode::Move => TransferMode::Move,
+            SplitTransferMode::Copy => TransferMode::Copy,
+        };
+        Self::check_file_locks(&paths, mode)
+    }
+
+    /// Valida el bloqueo de archivos a nivel de sistema de archivos (previene corrupción e interrupciones)
+    pub fn check_file_locks(paths: &[String], mode: TransferMode) -> Vec<String> {
+        let mut locked = Vec::new();
+        for p in paths {
+            let path = Path::new(p);
+            if !path.exists() {
+                locked.push(format!("{} (No existe)", path.display()));
+                continue;
+            }
+            let res = if mode == TransferMode::Move {
+                std::fs::OpenOptions::new().read(true).write(true).open(path)
+            } else {
+                std::fs::OpenOptions::new().read(true).open(path)
+            };
+            if let Err(e) = res {
+                let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                locked.push(format!("{} ({})", name, e));
+            }
+        }
+        locked
     }
 
     pub fn toggle_pause(&mut self) -> bool {
@@ -2230,7 +2279,14 @@ impl AppState {
     }
 
     pub fn load_processed_items_from_temp(&mut self) {
-        let temp_items = std::env::temp_dir().join("outlook_organizer_items.json");
+        let session_dir = crate::backend::runner::BackendRunner::get_session_temp_dir();
+        let temp_items = session_dir.join("outlook_organizer_items.json");
+        let temp_items = if temp_items.exists() {
+            temp_items
+        } else {
+            std::env::temp_dir().join("outlook_organizer_items.json")
+        };
+
         if temp_items.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_items)
         {
@@ -2242,7 +2298,13 @@ impl AppState {
             }
         }
 
-        let temp_errors = std::env::temp_dir().join("outlook_organizer_errors.json");
+        let temp_errors = session_dir.join("outlook_organizer_errors.json");
+        let temp_errors = if temp_errors.exists() {
+            temp_errors
+        } else {
+            std::env::temp_dir().join("outlook_organizer_errors.json")
+        };
+
         if temp_errors.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_errors)
         {
@@ -2312,7 +2374,14 @@ impl AppState {
     }
 
     pub fn load_transfer_items_from_temp(&mut self) {
-        let temp_items = std::env::temp_dir().join("outlook_organizer_transfer_items.json");
+        let session_dir = crate::backend::runner::BackendRunner::get_session_temp_dir();
+        let temp_items = session_dir.join("outlook_organizer_transfer_items.json");
+        let temp_items = if temp_items.exists() {
+            temp_items
+        } else {
+            std::env::temp_dir().join("outlook_organizer_transfer_items.json")
+        };
+
         if temp_items.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_items)
         {
@@ -2324,7 +2393,13 @@ impl AppState {
             }
         }
 
-        let temp_errors = std::env::temp_dir().join("outlook_organizer_transfer_errors.json");
+        let temp_errors = session_dir.join("outlook_organizer_transfer_errors.json");
+        let temp_errors = if temp_errors.exists() {
+            temp_errors
+        } else {
+            std::env::temp_dir().join("outlook_organizer_transfer_errors.json")
+        };
+
         if temp_errors.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_errors)
         {
@@ -2437,7 +2512,14 @@ impl AppState {
             return self.processed_items.clone();
         }
 
-        let temp_items = std::env::temp_dir().join("outlook_organizer_items.json");
+        let session_dir = crate::backend::runner::BackendRunner::get_session_temp_dir();
+        let temp_items = session_dir.join("outlook_organizer_items.json");
+        let temp_items = if temp_items.exists() {
+            temp_items
+        } else {
+            std::env::temp_dir().join("outlook_organizer_items.json")
+        };
+
         if temp_items.exists()
             && let Ok(content) = std::fs::read_to_string(&temp_items)
         {
@@ -4051,6 +4133,31 @@ mod tests {
         state.select_single_mailbox(1);
         assert!(state.is_target_online());
         assert!(!state.deep_scan_enabled);
+    }
+
+    #[test]
+    fn test_check_file_locks_accessible_and_missing() {
+        let temp_dir = std::env::temp_dir().join("test_file_locks_dir");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let valid_file = temp_dir.join("valid_test.pst");
+        let _ = std::fs::File::create(&valid_file);
+
+        let valid_path = valid_file.to_string_lossy().to_string();
+        let missing_path = temp_dir.join("non_existent.pst").to_string_lossy().to_string();
+
+        // Archivo existente y accesible: sin bloqueos
+        let locks_copy = AppState::check_file_locks(&[valid_path.clone()], TransferMode::Copy);
+        assert!(locks_copy.is_empty(), "Valid file should have no locks in Copy mode");
+
+        let locks_move = AppState::check_file_locks(&[valid_path.clone()], TransferMode::Move);
+        assert!(locks_move.is_empty(), "Valid file should have no locks in Move mode");
+
+        // Archivo faltante: debe reportar que no existe
+        let locks_missing = AppState::check_file_locks(&[missing_path], TransferMode::Copy);
+        assert_eq!(locks_missing.len(), 1);
+        assert!(locks_missing[0].contains("No existe"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 
