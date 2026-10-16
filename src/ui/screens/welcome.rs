@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{app::AppState, ui::theme::Theme};
 
-pub const MENU_ITEMS: [(&str, &str, &str); 6] = [
+pub const MENU_ITEMS: [(&str, &str, &str); 5] = [
     (
         "Importar PST ➜ Buzón Outlook",
         "Asistente guiado paso a paso para importar correos desde archivos .pst hacia buzones principales o compartidos de Outlook / Exchange / Microsoft 365.",
@@ -18,11 +18,6 @@ pub const MENU_ITEMS: [(&str, &str, &str); 6] = [
         "Transferir Buzón ➜ Buzón",
         "Transferir o sincronizar correos directamente entre buzones principales y buzones compartidos de Outlook / Exchange.",
         "Selección de origen y destino, filtrado por años y meses, con deduplicación y sin archivos intermedios.",
-    ),
-    (
-        "Explorar e Inspeccionar PSTs",
-        "Explorar archivos .pst detectados en C:\\Correo o cualquier unidad de disco local.",
-        "Inspección de carpetas internas, conteo de correos, tamaño y verificación de candados de archivo.",
     ),
     (
         "Dividir PST por Fechas (Split)",
@@ -194,7 +189,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(detail_block, body_chunks[1]);
 
     let current_menu = MENU_ITEMS[state.welcome_menu_idx.min(MENU_ITEMS.len() - 1)];
-    let detail_lines = if state.welcome_menu_idx == 4 {
+    let detail_lines = if state.welcome_menu_idx == 3 {
         let current_profile_desc = if state.use_default_profile {
             "• Modo activo: Predeterminado de Windows"
         } else if state.custom_profile_name.trim().is_empty() {
@@ -246,7 +241,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
                 Span::styled("Presione ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(" para iniciar o ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled("[1-6]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("[1-5]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(" para acceso directo.", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ]
