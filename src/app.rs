@@ -69,12 +69,12 @@ impl WizardStep {
             WizardStep::PstDetailView => 1,
             WizardStep::Mailbox => 2,
             WizardStep::FoldersMode => 3,
-            WizardStep::Routing => 4,
-            WizardStep::Deduplication => 5,
-            WizardStep::Filters => 6,
-            WizardStep::Summary => 7,
-            WizardStep::Execution => 7,
-            WizardStep::Completion => 7,
+            WizardStep::Routing => 3,
+            WizardStep::Deduplication => 3,
+            WizardStep::Filters => 3,
+            WizardStep::Summary => 4,
+            WizardStep::Execution => 4,
+            WizardStep::Completion => 4,
             WizardStep::SplitSelect => 1,
             WizardStep::SplitFilter => 2,
             WizardStep::SplitConfig => 3,
@@ -90,20 +90,7 @@ impl WizardStep {
     }
 
     pub fn total_steps(&self) -> usize {
-        match self {
-            WizardStep::SplitSelect
-            | WizardStep::SplitFilter
-            | WizardStep::SplitConfig
-            | WizardStep::SplitSummary
-            | WizardStep::SplitExecution
-            | WizardStep::SplitCompletion
-            | WizardStep::TransferSelect
-            | WizardStep::TransferFilter
-            | WizardStep::TransferSummary
-            | WizardStep::TransferExecution
-            | WizardStep::TransferCompletion => 4,
-            _ => 7,
-        }
+        4
     }
 }
 
@@ -1589,7 +1576,9 @@ pub struct AppState {
     pub routing_all_months: bool,
     pub active_routing_modal: RoutingModal,
     pub routing_modal_criterion_idx: usize,
+    #[allow(dead_code)]
     pub routing_modal_year_scope_idx: usize,
+    #[allow(dead_code)]
     pub routing_modal_month_scope_idx: usize,
     pub routing_modal_year_cursor: usize,
     pub routing_modal_month_cursor: usize,
@@ -2604,14 +2593,7 @@ impl AppState {
             WizardStep::FoldersMode => {
                 self.sync_legacy_folder_flags();
                 self.active_routing_modal = RoutingModal::None;
-                self.routing_modal_criterion_idx = match self.routing_granularity {
-                    RoutingGranularity::Mirror => 0,
-                    RoutingGranularity::Years => 1,
-                    RoutingGranularity::YearsAndMonths => 2,
-                };
-                self.routing_modal_year_scope_idx = 0;
-                self.routing_modal_month_scope_idx = 0;
-                WizardStep::Routing
+                WizardStep::Summary
             }
             WizardStep::Routing => {
                 self.active_routing_modal = RoutingModal::None;
@@ -2659,7 +2641,7 @@ impl AppState {
                 WizardStep::Routing
             }
             WizardStep::Filters => WizardStep::Deduplication,
-            WizardStep::Summary => WizardStep::Filters,
+            WizardStep::Summary => WizardStep::FoldersMode,
             WizardStep::Execution => WizardStep::Summary,
             WizardStep::Completion => WizardStep::Summary,
             // Pasos de Separar PSTs
@@ -3225,7 +3207,7 @@ mod tests {
         let mut state = AppState::new();
         state.step = WizardStep::FoldersMode;
         state.next_step();
-        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.step, WizardStep::Summary);
         assert_eq!(state.active_routing_modal, RoutingModal::None);
 
         // Seleccionar granularidad de Meses (Años y Meses)
@@ -3306,7 +3288,7 @@ mod tests {
 
         state.step = WizardStep::FoldersMode;
         state.next_step();
-        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.step, WizardStep::Summary);
         assert_eq!(state.active_routing_modal, RoutingModal::None);
         assert_eq!(state.routing_modal_criterion_idx, 0);
 
@@ -3364,7 +3346,7 @@ mod tests {
         let mut state = AppState::new();
         state.step = WizardStep::FoldersMode;
         state.next_step();
-        assert_eq!(state.step, WizardStep::Routing);
+        assert_eq!(state.step, WizardStep::Summary);
         assert_eq!(state.active_routing_modal, RoutingModal::None);
 
         // Por defecto: Mirror (Estructura Original)
