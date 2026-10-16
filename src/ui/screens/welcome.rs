@@ -10,34 +10,34 @@ use crate::{app::AppState, ui::theme::Theme};
 
 pub const MENU_ITEMS: [(&str, &str, &str); 6] = [
     (
-        "Import",
-        "Launch the migration wizard to import PST emails into Outlook / M365 mailboxes.",
-        "Step-by-step guided wizard with deduplication and temporal routing.",
+        "Importar PST ➜ Buzón Outlook",
+        "Asistente guiado paso a paso para importar correos desde archivos .pst hacia buzones principales o compartidos de Outlook / Exchange / Microsoft 365.",
+        "Organización por año/mes, detección y omisión de duplicados y protección adaptativa anti-throttling.",
     ),
     (
-        "Transfer",
-        "Transfer emails directly between Outlook / Exchange shared or primary mailboxes.",
-        "Select source and target mailboxes, filter by years and months, with deduplication.",
+        "Transferir Buzón ➜ Buzón",
+        "Transferir o sincronizar correos directamente entre buzones principales y buzones compartidos de Outlook / Exchange.",
+        "Selección de origen y destino, filtrado por años y meses, con deduplicación y sin archivos intermedios.",
     ),
     (
-        "Scan",
-        "Explore and inspect .pst files detected in C:\\Correo or local drives.",
-        "File discovery, size calculation, and lock verification.",
+        "Explorar e Inspeccionar PSTs",
+        "Explorar archivos .pst detectados en C:\\Correo o cualquier unidad de disco local.",
+        "Inspección de carpetas internas, conteo de correos, tamaño y verificación de candados de archivo.",
     ),
     (
-        "Split",
-        "Split a PST file by filtering years and months into one or multiple PST archives.",
-        "Generate new PST archives partitioned by year or month while preserving the original.",
+        "Dividir PST por Fechas (Split)",
+        "Particionar un archivo PST grande filtrando por años y meses en uno o varios archivos PST independientes.",
+        "Genera nuevos archivos .pst por año o mes manteniendo el archivo original 100% intacto.",
     ),
     (
-        "Profile",
-        "Configure Outlook MAPI profile (Windows system default or custom).",
-        "Select the active system profile or specify a custom profile name.",
+        "Configurar Perfil Outlook MAPI",
+        "Seleccionar el perfil de Outlook MAPI activo (perfil predeterminado de Windows o nombre personalizado).",
+        "Permite conectar a perfiles específicos de Outlook con buzones corporativos configurados.",
     ),
     (
-        "Quit",
-        "Safely and cleanly close the application.",
-        "Restores terminal state and terminates the process.",
+        "Salir de la Aplicación",
+        "Cerrar la aplicación de manera limpia y segura.",
+        "Restaura el estado de la terminal y libera punteros y almacenes MAPI en segundo plano.",
     ),
 ];
 
@@ -92,7 +92,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Line::from(vec![
                 Span::styled("◈ OUTLOOK ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled("ORGANIZER TS", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled(" — Enterprise Migration & PST Management Tool", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(" — Herramienta Profesional de Migración y Gestión de PST", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ];
         f.render_widget(Paragraph::new(compact_banner).alignment(Alignment::Center), banner_area);
@@ -100,19 +100,19 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
 
     // 2. TAGLINE & STATUS BADGES
     let (profile_badge_text, profile_badge_style) = if state.use_default_profile {
-        ("[ Profile: Default ]".to_string(), Style::default().fg(Theme::TEXT_MUTED))
+        ("[ Perfil: Predeterminado ]".to_string(), Style::default().fg(Theme::TEXT_MUTED))
     } else if state.custom_profile_name.trim().is_empty() {
-        ("[ Profile: Manual (Unset) ]".to_string(), Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))
+        ("[ Perfil: Manual (Sin asignar) ]".to_string(), Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD))
     } else {
-        (format!("[ Profile: {} ]", state.custom_profile_name), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))
+        (format!("[ Perfil: {} ]", state.custom_profile_name), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))
     };
 
     let badges_line = Line::from(vec![
-        Span::styled("[ ● MAPI Connected ]", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
+        Span::styled("[ ● Conexión MAPI Activa ]", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
         Span::styled("  ", Style::default()),
-        Span::styled("[ ◈ Zero Corruption Risk ]", Style::default().fg(Theme::BRAND_PRIMARY)),
+        Span::styled("[ ◈ Cero Riesgo de Corrupción ]", Style::default().fg(Theme::BRAND_PRIMARY)),
         Span::styled("  ", Style::default()),
-        Span::styled("[ ◈ M365 Throttling ]", Style::default().fg(Theme::WARNING)),
+        Span::styled("[ ◈ Throttling Adaptativo M365 ]", Style::default().fg(Theme::WARNING)),
         Span::styled("  ", Style::default()),
         Span::styled(profile_badge_text, profile_badge_style),
     ]);
@@ -123,9 +123,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(4),
-                Constraint::Percentage(92),
-                Constraint::Percentage(4),
+                Constraint::Percentage(2),
+                Constraint::Percentage(96),
+                Constraint::Percentage(2),
             ])
             .split(menu_area);
         h_chunks[1]
@@ -136,8 +136,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
     let body_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50), // Interactive menu
-            Constraint::Percentage(50), // Detail card
+            Constraint::Percentage(52), // Interactive menu
+            Constraint::Percentage(48), // Detail card
         ])
         .split(body_area);
 
@@ -146,7 +146,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_PRIMARY))
-        .title(" Main Menu ");
+        .title(" Menú Principal ");
     let menu_inner = menu_block.inner(body_chunks[0]);
     f.render_widget(menu_block, body_chunks[0]);
 
@@ -160,9 +160,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         if is_selected {
             menu_lines.push(Line::from(vec![
                 Span::styled(" ▸ ", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("{}   ", num_str), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{} ", num_str), Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
                 Span::styled(
-                    format!(" {:<14} ", title),
+                    format!(" {} ", title),
                     Style::default()
                         .bg(Theme::ACCENT_PRIMARY)
                         .fg(Theme::BG_DARK)
@@ -172,9 +172,9 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         } else {
             menu_lines.push(Line::from(vec![
                 Span::styled("   ", Style::default()),
-                Span::styled(format!("{}   ", num_str), Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(format!("{} ", num_str), Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(
-                    format!(" {:<14} ", title),
+                    format!(" {} ", title),
                     Style::default().fg(Theme::TEXT_MAIN),
                 ),
             ]));
@@ -189,51 +189,51 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Theme::ACCENT_SECONDARY))
-        .title(" Action Information ");
+        .title(" Información de la Opción ");
     let detail_inner = detail_block.inner(body_chunks[1]);
     f.render_widget(detail_block, body_chunks[1]);
 
     let current_menu = MENU_ITEMS[state.welcome_menu_idx.min(MENU_ITEMS.len() - 1)];
-    let detail_lines = if state.welcome_menu_idx == 3 {
+    let detail_lines = if state.welcome_menu_idx == 4 {
         let current_profile_desc = if state.use_default_profile {
-            "• Active mode: Windows Default"
+            "• Modo activo: Predeterminado de Windows"
         } else if state.custom_profile_name.trim().is_empty() {
-            "• Active mode: Manual (Name not assigned yet)"
+            "• Modo activo: Manual (Nombre aún no asignado)"
         } else {
-            "• Active mode: Custom manual profile"
+            "• Modo activo: Perfil manual personalizado"
         };
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("Action: ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled("MAPI Profile", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Acción: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Perfil Outlook MAPI", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
             Line::from(Span::styled(current_profile_desc, Style::default().fg(Theme::TEXT_MAIN))),
             Line::from(""),
             Line::from(Span::styled(
                 if !state.use_default_profile && !state.custom_profile_name.trim().is_empty() {
-                    format!("• Assigned name: \"{}\"", state.custom_profile_name)
+                    format!("• Nombre asignado: \"{}\"", state.custom_profile_name)
                 } else {
-                    "• Automatic connection to active system profile".to_string()
+                    "• Conexión automática al perfil activo del sistema".to_string()
                 },
                 Style::default().fg(Theme::BRAND_PRIMARY),
             )),
             Line::from(""),
             Line::from(vec![
-                Span::styled("※ Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-                Span::styled("Press ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("※ Consejo: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("Presione ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled(" or ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(" o ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled("[P]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled(" to open the profile configuration dialog.", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(" para abrir el cuadro de configuración de perfil.", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ]
     } else {
         vec![
             Line::from(""),
             Line::from(vec![
-                Span::styled("Action: ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("Acción: ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled(current_menu.0, Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
@@ -242,12 +242,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Line::from(Span::styled(current_menu.2, Style::default().fg(Theme::TEXT_MUTED))),
             Line::from(""),
             Line::from(vec![
-                Span::styled("※ Tip: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
-                Span::styled("Press ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("※ Consejo: ", Style::default().fg(Theme::WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("Presione ", Style::default().fg(Theme::TEXT_MUTED)),
                 Span::styled("[Enter]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled(" to execute or ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled("[1-5]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-                Span::styled(" for quick access.", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled(" para iniciar o ", Style::default().fg(Theme::TEXT_MUTED)),
+                Span::styled("[1-6]", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(" para acceso directo.", Style::default().fg(Theme::TEXT_MUTED)),
             ]),
         ]
     };
@@ -274,7 +274,7 @@ fn render_profile_modal(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(Style::default().fg(Theme::BRAND_PRIMARY))
-        .title(" ◈ Configure Outlook MAPI Profile ");
+        .title(" ◈ Configurar Perfil de Outlook MAPI ");
     let inner = modal_block.inner(modal_rect);
     f.render_widget(modal_block, modal_rect);
 
@@ -290,21 +290,21 @@ fn render_profile_modal(f: &mut Frame, area: Rect, state: &AppState) {
 
     // 1. Subtitle
     let sub = Paragraph::new(Line::from(Span::styled(
-        "Select the MAPI profile containing the target mailboxes:",
+        "Seleccione el perfil MAPI que contiene los buzones destino:",
         Style::default().fg(Theme::TEXT_MUTED),
     )));
     f.render_widget(sub, chunks[0]);
 
     // 2. Radio options
     let radio_1 = if state.use_default_profile {
-        Span::styled("  [●] Windows Default Profile (Recommended)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
+        Span::styled("  [●] Perfil Predeterminado de Windows (Recomendado)", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled("  [○] Windows Default Profile", Style::default().fg(Theme::TEXT_MUTED))
+        Span::styled("  [○] Perfil Predeterminado de Windows", Style::default().fg(Theme::TEXT_MUTED))
     };
     let radio_2 = if !state.use_default_profile {
-        Span::styled("  [●] Specify MAPI profile name manually:", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))
+        Span::styled("  [●] Especificar nombre de perfil MAPI manualmente:", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled("  [○] Specify MAPI profile name manually", Style::default().fg(Theme::TEXT_MUTED))
+        Span::styled("  [○] Especificar nombre de perfil MAPI manualmente", Style::default().fg(Theme::TEXT_MUTED))
     };
 
     let radio_p = Paragraph::new(vec![
@@ -324,17 +324,17 @@ fn render_profile_modal(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(input_border_color))
-        .title(" MAPI Profile Name ");
+        .title(" Nombre del Perfil MAPI ");
 
     let input_inner = input_block.inner(chunks[2]);
     f.render_widget(input_block, chunks[2]);
 
     let input_line = if state.use_default_profile {
-        Line::from(Span::styled("  (Inactive — using Windows default profile)", Style::default().fg(Theme::TEXT_MUTED)))
+        Line::from(Span::styled("  (Inactivo — usando perfil predeterminado de Windows)", Style::default().fg(Theme::TEXT_MUTED)))
     } else if state.custom_profile_name.is_empty() {
         Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled("Type profile name...", Style::default().fg(Theme::WARNING)),
+            Span::styled("Escriba el nombre del perfil...", Style::default().fg(Theme::WARNING)),
             Span::styled("█", Style::default().fg(Theme::BRAND_PRIMARY)),
         ])
     } else {
@@ -349,13 +349,13 @@ fn render_profile_modal(f: &mut Frame, area: Rect, state: &AppState) {
     // 4. Modal shortcuts
     let help_line = Line::from(vec![
         Span::styled("[Tab / ↑↓] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Mode   ", Style::default().fg(Theme::TEXT_MUTED)),
-        Span::styled("[Type] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Name   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Modo   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("[Escribir] ", Style::default().fg(Theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled("Nombre   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[Enter] ", Style::default().fg(Theme::SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled("Save   ", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Guardar   ", Style::default().fg(Theme::TEXT_MUTED)),
         Span::styled("[Esc] ", Style::default().fg(Theme::DANGER).add_modifier(Modifier::BOLD)),
-        Span::styled("Close", Style::default().fg(Theme::TEXT_MUTED)),
+        Span::styled("Cerrar", Style::default().fg(Theme::TEXT_MUTED)),
     ]);
     f.render_widget(Paragraph::new(help_line).alignment(Alignment::Center), chunks[3]);
 }

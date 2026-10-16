@@ -2021,187 +2021,190 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
     // 3. Footer con Marca de Agua Timeless Support
     let shortcuts = match state.step {
         WizardStep::Welcome => vec![
-            ("↑/↓", "Navigate"),
-            ("Enter", "Select"),
-            ("1-5", "Quick Access"),
-            ("P", "Profile"),
-            ("Q", "Quit"),
+            ("↑/↓", "Navegar"),
+            ("Enter", "Seleccionar"),
+            ("1-6", "Acceso Rápido"),
+            ("P", "Perfil"),
+            ("Q", "Salir"),
         ],
         WizardStep::FileExplorer => vec![
-            ("↑/↓", "Navigate"),
-            ("Enter", "Open"),
-            ("Backspace", "Up"),
-            ("Space", "Toggle"),
-            ("C", "Confirm"),
-            ("Esc", "Back"),
+            ("↑/↓", "Navegar"),
+            ("Enter", "Abrir"),
+            ("Backspace", "Subir"),
+            ("Space", "Marcar"),
+            ("C", "Confirmar"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::PstSource => vec![
-            ("↑/↓", "Navigate"),
-            ("Space", "Toggle"),
-            ("E", "Explore"),
-            ("A/N", "All/None"),
-            ("Enter", "Next"),
+            ("↑/↓", "Navegar"),
+            ("Space", "Marcar"),
+            ("I", "Detalles"),
+            ("E", "Explorador"),
+            ("A/N", "Todos/Ninguno"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Menú"),
         ],
         WizardStep::Mailbox => vec![
-            ("↑/↓", "Navigate"),
-            ("Space", "Toggle"),
-            ("A/N", "All/None"),
-            ("R", "Reload"),
-            ("Enter", "Next"),
-            ("Esc", "Back"),
+            ("↑/↓", "Navegar"),
+            ("Space", "Seleccionar"),
+            ("A/N", "Todos/Ninguno"),
+            ("R", "Recargar"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::FoldersMode => vec![
-            ("↑/↓", "Navigate"),
-            ("E", "Expand"),
-            ("Space", "Toggle"),
-            ("A/N", "All/None"),
-            ("M", "Copy/Move"),
-            ("Enter", "Next"),
-            ("Esc", "Back"),
+            ("↑/↓", "Navegar"),
+            ("E", "Expandir"),
+            ("Space", "Marcar"),
+            ("A/N", "Todos/Ninguno"),
+            ("M", "Copiar/Mover"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::Routing => {
             if state.active_routing_modal != RoutingModal::None {
                 vec![
-                    ("↑/↓", "Move"),
-                    ("Enter", "Confirm"),
-                    ("Esc/Q", "Cancel"),
+                    ("↑/↓", "Mover"),
+                    ("Enter", "Confirmar"),
+                    ("Esc/Q", "Cancelar"),
                 ]
             } else {
                 vec![
-                    ("1/2/3", "Criterion"),
-                    ("←/→", "Move Card"),
-                    ("C", "Criterion Menu"),
-                    ("F", "Date Filter"),
-                    ("Enter", "Next"),
-                    ("Esc", "Back"),
+                    ("1/2/3", "Criterio"),
+                    ("←/→", "Mover Tarjeta"),
+                    ("C", "Menú Criterios"),
+                    ("F", "Filtro Fechas"),
+                    ("Enter", "Siguiente"),
+                    ("Esc", "Atrás"),
                 ]
             }
         }
         WizardStep::Deduplication => vec![
-            ("D", "Duplicates On/Off"),
-            ("P", "Deep Scan"),
-            ("Enter", "Next"),
+            ("D", "Duplicados On/Off"),
+            ("P", "Revisión Profunda"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::Filters => vec![
             ("T", "Throttling"),
-            ("Enter", "Next"),
-            ("Esc", "Back"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::Summary => vec![
-            ("Enter", "Start Operation"),
-            ("Esc", "Back"),
-            ("q", "Quit"),
+            ("Enter", "Iniciar Operación"),
+            ("Esc", "Atrás"),
+            ("Q", "Salir"),
         ],
         WizardStep::Execution => {
             if state.show_cancel_modal {
                 vec![
-                    ("←/→/Tab", "Choose"),
-                    ("Enter", "Confirm"),
-                    ("Y", "Yes"),
+                    ("←/→/Tab", "Elegir"),
+                    ("Enter", "Confirmar"),
+                    ("S", "Sí"),
                     ("N/Esc", "No"),
                 ]
             } else if state.progress.graceful_cancelling {
-                vec![("Wait...", "Safely dismounting PST")]
+                vec![("Espere...", "Desmontando PST de forma segura")]
             } else {
-                let p_label = if state.progress.is_paused { "Resume" } else { "Pause" };
-                vec![("P", p_label), ("Esc/Q", "Safe Stop")]
+                let p_label = if state.progress.is_paused { "Reanudar" } else { "Pausar" };
+                vec![("P", p_label), ("Esc/Q", "Parada Segura")]
             }
         }
         WizardStep::Completion => {
             if state.html_report_path.is_some() {
-                vec![("O", "Open HTML"), ("H", "Regenerate HTML"), ("Enter/q", "Quit")]
+                vec![("O", "Abrir HTML"), ("H", "Regenerar HTML"), ("Enter/Q", "Salir")]
             } else {
-                vec![("H", "HTML Report"), ("Enter/q", "Quit")]
+                vec![("H", "Informe HTML"), ("Enter/Q", "Salir")]
             }
         }
         WizardStep::PstDetailView => vec![
-            ("↑/↓", "Navigate"),
-            ("Enter/E/→", "Expand"),
-            ("←/Backspace", "Collapse"),
-            ("Space", "Isolate Metrics"),
-            ("Esc/Q", "Back"),
+            ("↑/↓", "Navegar"),
+            ("Enter/E/→", "Expandir"),
+            ("←/Backspace", "Contraer"),
+            ("Space", "Aislar Métricas"),
+            ("Esc/Q", "Volver"),
         ],
         WizardStep::SplitSelect => vec![
-            ("↑/↓", "Navigate"),
-            ("Space", "Toggle"),
-            ("A/D", "All/None"),
-            ("Enter", "Continue"),
-            ("E", "Explorer"),
-            ("Esc", "Menu"),
+            ("↑/↓", "Navegar"),
+            ("Space", "Marcar"),
+            ("A/D", "Todos/Ninguno"),
+            ("Enter", "Continuar"),
+            ("E", "Explorador"),
+            ("Esc", "Menú"),
         ],
         WizardStep::SplitFilter => vec![
-            ("Tab", "Years/Months"),
-            ("↑/↓", "Navigate"),
-            ("Space", "Toggle"),
-            ("A/N", "All/None"),
-            ("1/2/T", "Semesters/All"),
-            ("Enter", "Next"),
-            ("Esc", "Back"),
+            ("Tab", "Años/Meses"),
+            ("↑/↓", "Navegar"),
+            ("Space", "Marcar"),
+            ("A/N", "Todos/Ninguno"),
+            ("1/2/T", "Semestres/Todos"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::SplitConfig => vec![
-            ("1/2/3", "Partition"),
-            ("M", "Copy/Move"),
-            ("O", "Output Folder"),
-            ("Enter", "Next"),
-            ("Esc", "Back"),
+            ("1/2/3", "Partición"),
+            ("M", "Copiar/Mover"),
+            ("O", "Carpeta Destino"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::SplitSummary => vec![
-            ("Enter", "Start Split"),
-            ("Esc", "Back"),
-            ("Q", "Quit"),
+            ("Enter", "Iniciar División"),
+            ("Esc", "Atrás"),
+            ("Q", "Salir"),
         ],
         WizardStep::SplitExecution => {
             if state.progress.graceful_cancelling {
-                vec![("Wait...", "Safely dismounting PST")]
+                vec![("Espere...", "Desmontando PST de forma segura")]
             } else {
-                let p_label = if state.progress.is_paused { "Resume" } else { "Pause" };
-                vec![("P", p_label), ("Esc/Q", "Safe Stop")]
+                let p_label = if state.progress.is_paused { "Reanudar" } else { "Pausar" };
+                vec![("P", p_label), ("Esc/Q", "Parada Segura")]
             }
         }
         WizardStep::SplitCompletion => vec![
-            ("O", "Open Folder"),
-            ("Enter/Q", "Main Menu"),
+            ("O", "Abrir Carpeta"),
+            ("Enter/Q", "Menú Principal"),
         ],
         WizardStep::TransferSelect => vec![
-            ("↑/↓", "Navigate"),
-            ("S", "Source"),
-            ("T", "Target"),
-            ("D", "Details"),
-            ("R", "Refresh"),
-            ("Enter", "Continue"),
-            ("Esc", "Menu"),
+            ("↑/↓", "Navegar"),
+            ("S", "Origen"),
+            ("T", "Destino"),
+            ("D", "Detalles"),
+            ("R", "Recargar"),
+            ("Enter", "Continuar"),
+            ("Esc", "Menú"),
         ],
         WizardStep::TransferFilter => vec![
-            ("Tab", "Section"),
-            ("↑/↓", "Navigate"),
-            ("Space", "Toggle"),
-            ("A", "All"),
-            ("Enter", "Next"),
-            ("Esc", "Back"),
+            ("Tab", "Sección"),
+            ("↑/↓", "Navegar"),
+            ("Space", "Marcar"),
+            ("A", "Todos"),
+            ("Enter", "Siguiente"),
+            ("Esc", "Atrás"),
         ],
         WizardStep::TransferSummary => vec![
-            ("Enter", "Start Transfer"),
-            ("Esc", "Back"),
-            ("Q", "Menu"),
+            ("Enter", "Iniciar Transferencia"),
+            ("Esc", "Atrás"),
+            ("Q", "Menú"),
         ],
         WizardStep::TransferExecution => {
             if state.show_cancel_modal {
                 vec![
-                    ("←/→/Tab", "Choose"),
-                    ("Enter", "Confirm"),
-                    ("Y", "Yes"),
+                    ("←/→/Tab", "Elegir"),
+                    ("Enter", "Confirmar"),
+                    ("S", "Sí"),
                     ("N/Esc", "No"),
                 ]
             } else if state.progress.graceful_cancelling {
-                vec![("Wait...", "Releasing COM")]
+                vec![("Espere...", "Liberando MAPI/COM de forma segura")]
             } else {
-                let p_label = if state.progress.is_paused { "Resume" } else { "Pause" };
-                vec![("P", p_label), ("Esc/Q", "Safe Stop")]
+                let p_label = if state.progress.is_paused { "Reanudar" } else { "Pausar" };
+                vec![("P", p_label), ("Esc/Q", "Parada Segura")]
             }
         }
         WizardStep::TransferCompletion => vec![
-            ("O", "Open Logs"),
-            ("Enter/Esc/Q", "Main Menu"),
+            ("O", "Abrir Reporte"),
+            ("Enter/Esc/Q", "Menú Principal"),
         ],
     };
 
