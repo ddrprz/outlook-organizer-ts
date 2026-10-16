@@ -10,29 +10,29 @@ use crate::{app::AppState, ui::theme::Theme};
 
 pub const MENU_ITEMS: [(&str, &str, &str); 5] = [
     (
-        "Importar PST ➜ Buzón Outlook",
-        "Asistente guiado paso a paso para importar correos desde archivos .pst hacia buzones principales o compartidos de Outlook / Exchange / Microsoft 365.",
-        "Organización por año/mes, detección y omisión de duplicados y protección adaptativa anti-throttling.",
+        "Importar a Buzón (PST ➜ Outlook)",
+        "Asistente paso a paso para importar correos desde archivos .pst a tu buzón de Outlook.",
+        "Organización por fechas, deduplicación automática y control anti-throttling.",
     ),
     (
-        "Transferir Buzón ➜ Buzón",
-        "Transferir o sincronizar correos directamente entre buzones principales y buzones compartidos de Outlook / Exchange.",
-        "Selección de origen y destino, filtrado por años y meses, con deduplicación y sin archivos intermedios.",
+        "Migrar entre Buzones",
+        "Transferir o sincronizar correos directamente entre buzones principales y compartidos.",
+        "Filtros por año y mes, omisión de duplicados y sin necesidad de archivos intermedios.",
     ),
     (
-        "Dividir PST por Fechas (Split)",
-        "Particionar un archivo PST grande filtrando por años y meses en uno o varios archivos PST independientes.",
-        "Genera nuevos archivos .pst por año o mes manteniendo el archivo original 100% intacto.",
+        "Dividir archivo PST (Split)",
+        "Particionar un archivo PST voluminoso por años o meses en archivos más pequeños.",
+        "Crea nuevos archivos .pst organizados manteniendo el original 100% intacto.",
     ),
     (
-        "Configurar Perfil Outlook MAPI",
-        "Seleccionar el perfil de Outlook MAPI activo (perfil predeterminado de Windows o nombre personalizado).",
-        "Permite conectar a perfiles específicos de Outlook con buzones corporativos configurados.",
+        "Cambiar Perfil Outlook",
+        "Seleccionar el perfil de Outlook activo (predeterminado de Windows o personalizado).",
+        "Conecta la aplicación al buzón o perfil corporativo correspondiente.",
     ),
     (
-        "Salir de la Aplicación",
-        "Cerrar la aplicación de manera limpia y segura.",
-        "Restaura el estado de la terminal y libera punteros y almacenes MAPI en segundo plano.",
+        "Salir",
+        "Cerrar la aplicación de manera ordenada y segura.",
+        "Restaura la terminal y asegura la liberación completa de conexiones MAPI.",
     ),
 ];
 
@@ -201,7 +201,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &AppState) {
             Line::from(""),
             Line::from(vec![
                 Span::styled("Acción: ", Style::default().fg(Theme::TEXT_MUTED)),
-                Span::styled("Perfil Outlook MAPI", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Cambiar Perfil Outlook", Style::default().fg(Theme::BRAND_PRIMARY).add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
             Line::from(Span::styled(current_profile_desc, Style::default().fg(Theme::TEXT_MAIN))),
