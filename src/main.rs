@@ -392,7 +392,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
-                                if state.welcome_menu_idx + 1 < 6 {
+                                if state.welcome_menu_idx + 1 < 5 {
                                     state.welcome_menu_idx += 1;
                                 }
                             }
@@ -406,26 +406,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             KeyCode::Char('3') => {
                                 state.welcome_menu_idx = 2;
-                                open_file_explorer(&mut state);
-                            }
-                            KeyCode::Char('4') => {
-                                state.welcome_menu_idx = 3;
                                 start_split_pst(&mut state);
                             }
-                            KeyCode::Char('5') | KeyCode::Char('p') | KeyCode::Char('P') => {
-                                state.welcome_menu_idx = 4;
+                            KeyCode::Char('4') | KeyCode::Char('p') | KeyCode::Char('P') => {
+                                state.welcome_menu_idx = 3;
                                 state.is_editing_profile = true;
                             }
-                            KeyCode::Char('6') => {
+                            KeyCode::Char('5') => {
                                 state.should_quit = true;
                             }
                             KeyCode::Enter => match state.welcome_menu_idx {
                                 0 => start_import_or_explore(&mut state),
                                 1 => start_transfer(&mut state, tx.clone()),
-                                2 => open_file_explorer(&mut state),
-                                3 => start_split_pst(&mut state),
-                                4 => state.is_editing_profile = true,
-                                5 => state.should_quit = true,
+                                2 => start_split_pst(&mut state),
+                                3 => state.is_editing_profile = true,
+                                4 => state.should_quit = true,
                                 _ => {}
                             },
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -1861,7 +1856,7 @@ fn draw_ui(f: &mut Frame, state: &AppState) {
         WizardStep::Welcome => vec![
             ("↑/↓", "Navegar"),
             ("Enter", "Seleccionar"),
-            ("1-6", "Acceso Rápido"),
+            ("1-5", "Acceso Rápido"),
             ("P", "Perfil"),
             ("Q", "Salir"),
         ],
